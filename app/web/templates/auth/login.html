@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>LabZenIsoSoftware | Ingreso</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <style>
+        :root {
+            --lz-bg-1: #08111f;
+            --lz-bg-2: #0f2740;
+            --lz-bg-3: #1b6c77;
+            --lz-accent: #27c2b7;
+            --lz-accent-2: #4fd7d0;
+            --lz-text: #eaf4f8;
+            --lz-muted: #b8c7d1;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            margin: 0;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(79, 215, 208, 0.16), transparent 28%),
+                radial-gradient(circle at bottom right, rgba(39, 194, 183, 0.16), transparent 25%),
+                linear-gradient(135deg, var(--lz-bg-1) 0%, var(--lz-bg-2) 48%, var(--lz-bg-3) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            overflow: hidden;
+        }
+
+        .login-shell {
+            width: 100%;
+            max-width: 1120px;
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 28px;
+            overflow: hidden;
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.30);
+            backdrop-filter: blur(10px);
+        }
+
+        .login-brand-panel {
+            position: relative;
+            padding: 56px 48px;
+            color: var(--lz-text);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+        }
+
+        .login-brand-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            width: fit-content;
+            padding: 8px 14px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.10);
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #dff8f7;
+            margin-bottom: 22px;
+        }
+
+        .login-brand-title {
+            font-size: 3rem;
+            line-height: 1.05;
+            font-weight: 800;
+            margin: 0 0 16px;
+            letter-spacing: -0.03em;
+        }
+
+        .login-brand-text {
+            max-width: 520px;
+            font-size: 1.1rem;
+            line-height: 1.8;
+            color: var(--lz-muted);
+            margin-bottom: 28px;
+        }
+
+        .login-brand-points {
+            display: grid;
+            gap: 14px;
+            margin-top: 8px;
+        }
+
+        .login-brand-point {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #eaf4f8;
+            font-weight: 500;
+        }
+
+        .point-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--lz-accent), var(--lz-accent-2));
+            box-shadow: 0 0 16px rgba(79, 215, 208, 0.45);
+            flex-shrink: 0;
+        }
+
+        .login-form-panel {
+            background: rgba(255,255,255,0.92);
+            padding: 48px 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .login-card {
+            width: 100%;
+            max-width: 420px;
+        }
+
+        .logo-box {
+            width: 92px;
+            height: 92px;
+            border-radius: 24px;
+            background: linear-gradient(180deg, #f8fbfc 0%, #eef5f8 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow:
+                0 16px 35px rgba(18, 50, 74, 0.15),
+                inset 0 1px 0 rgba(255,255,255,0.8);
+            margin-bottom: 22px;
+            position: relative;
+            overflow: visible;
+            animation: logoFadeIn 0.8s ease-out forwards;
+        }
+
+        .logo-box::before {
+            content: "";
+            position: absolute;
+            inset: -10px;
+            border-radius: 28px;
+            background: radial-gradient(
+                circle,
+                rgba(79, 215, 208, 0.22) 0%,
+                rgba(79, 215, 208, 0.10) 35%,
+                rgba(79, 215, 208, 0.00) 70%
+            );
+            z-index: 0;
+            animation: logoGlowPulse 3.2s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        .labzen-logo-svg {
+            width: 58px;
+            height: 58px;
+            display: block;
+            position: relative;
+            z-index: 1;
+            animation: logoFloat 4s ease-in-out infinite;
+            filter: drop-shadow(0 6px 14px rgba(18, 145, 158, 0.18));
+        }
+
+        .login-title {
+            font-size: 2rem;
+            font-weight: 800;
+            color: #142133;
+            margin-bottom: 8px;
+            letter-spacing: -0.02em;
+        }
+
+        .login-subtitle {
+            color: #5f7187;
+            margin-bottom: 28px;
+            line-height: 1.6;
+        }
+
+        .form-label {
+            font-weight: 700;
+            color: #243447;
+            margin-bottom: 8px;
+        }
+
+        .form-control {
+            min-height: 52px;
+            border-radius: 14px;
+            border: 1px solid #d9e3ea;
+            padding-left: 14px;
+            font-size: 1rem;
+            box-shadow: none;
+        }
+
+        .form-control:focus {
+            border-color: #64d5cd;
+            box-shadow: 0 0 0 0.2rem rgba(39, 194, 183, 0.14);
+        }
+
+        .btn-login {
+            min-height: 54px;
+            border: 0;
+            border-radius: 14px;
+            background: linear-gradient(135deg, #1f77ff 0%, #246df2 100%);
+            color: #fff;
+            font-weight: 700;
+            font-size: 1rem;
+            box-shadow: 0 10px 24px rgba(36, 109, 242, 0.22);
+        }
+
+        .btn-login:hover {
+            background: linear-gradient(135deg, #1b6ee8 0%, #1f63dd 100%);
+            color: #fff;
+        }
+
+        .login-footer-text {
+            font-size: 0.9rem;
+            color: #6e7d8e;
+            text-align: center;
+            margin-top: 18px;
+        }
+
+        .alert {
+            border-radius: 14px;
+            font-size: 0.95rem;
+        }
+
+        .flask-shape {
+            transform-origin: center;
+            animation: flaskBreath 4s ease-in-out infinite;
+        }
+
+        .liquid-shape {
+            transform-origin: center;
+            animation: liquidBreath 4s ease-in-out infinite;
+        }
+
+        .bubble {
+            opacity: 0;
+            animation: bubbleRise 3.2s ease-in-out infinite;
+        }
+
+        .bubble-1 {
+            animation-delay: 0.3s;
+        }
+
+        .bubble-2 {
+            animation-delay: 0.9s;
+        }
+
+        .bubble-3 {
+            animation-delay: 1.5s;
+        }
+
+        .check-path {
+            stroke-dasharray: 120;
+            stroke-dashoffset: 120;
+            animation: drawCheck 1s ease-out 0.55s forwards, checkGlow 2.8s ease-in-out 1.6s infinite;
+        }
+
+        .check-shadow {
+            opacity: 0.12;
+        }
+
+        @keyframes logoFadeIn {
+            0% {
+                opacity: 0;
+                transform: translateY(20px) scale(0.92);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        @keyframes logoFloat {
+            0% {
+                transform: translateY(0px);
+            }
+            50% {
+                transform: translateY(-4px);
+            }
+            100% {
+                transform: translateY(0px);
+            }
+        }
+
+        @keyframes logoGlowPulse {
+            0% {
+                opacity: 0.65;
+                transform: scale(0.96);
+            }
+            50% {
+                opacity: 1;
+                transform: scale(1.04);
+            }
+            100% {
+                opacity: 0.65;
+                transform: scale(0.96);
+            }
+        }
+
+        @keyframes drawCheck {
+            0% {
+                stroke-dashoffset: 120;
+                opacity: 0.5;
+            }
+            100% {
+                stroke-dashoffset: 0;
+                opacity: 1;
+            }
+        }
+
+        @keyframes checkGlow {
+            0% {
+                filter: drop-shadow(0 0 0 rgba(255,255,255,0.0));
+            }
+            50% {
+                filter: drop-shadow(0 0 6px rgba(255,255,255,0.35));
+            }
+            100% {
+                filter: drop-shadow(0 0 0 rgba(255,255,255,0.0));
+            }
+        }
+
+        @keyframes bubbleRise {
+            0% {
+                transform: translateY(6px) scale(0.9);
+                opacity: 0;
+            }
+            25% {
+                opacity: 0.95;
+            }
+            100% {
+                transform: translateY(-14px) scale(1.03);
+                opacity: 0;
+            }
+        }
+
+        @keyframes flaskBreath {
+            0% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.015);
+            }
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        @keyframes liquidBreath {
+            0% {
+                transform: translateY(0px);
+            }
+            50% {
+                transform: translateY(-1.5px);
+            }
+            100% {
+                transform: translateY(0px);
+            }
+        }
+
+        @media (max-width: 991.98px) {
+            .login-shell {
+                grid-template-columns: 1fr;
+            }
+
+            .login-brand-panel {
+                padding: 36px 28px 24px;
+            }
+
+            .login-brand-title {
+                font-size: 2.2rem;
+            }
+
+            .login-form-panel {
+                padding: 32px 24px 36px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-shell">
+        <section class="login-brand-panel">
+            <div class="login-brand-badge">LabZenIsoSoftware · Plataforma confiable</div>
+
+            <h1 class="login-brand-title">
+                Gestión inteligente para laboratorios y calidad ISO 17025
+            </h1>
+
+            <p class="login-brand-text">
+                Centraliza solicitudes, muestras, ensayos, documentación, riesgos y trazabilidad
+                en una sola plataforma profesional, moderna y confiable.
+            </p>
+
+            <div class="login-brand-points">
+                <div class="login-brand-point">
+                    <span class="point-dot"></span>
+                    <span>Trazabilidad operativa y documental</span>
+                </div>
+                <div class="login-brand-point">
+                    <span class="point-dot"></span>
+                    <span>Control de calidad alineado a ISO 17025</span>
+                </div>
+                <div class="login-brand-point">
+                    <span class="point-dot"></span>
+                    <span>Experiencia clara, segura y profesional</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="login-form-panel">
+            <div class="login-card">
+
+                <div class="logo-box">
+                    <svg class="labzen-logo-svg" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg" aria-label="LabZenIsoSoftware">
+                        <defs>
+                            <linearGradient id="lzFlaskGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stop-color="#19d3b0"/>
+                                <stop offset="55%" stop-color="#12b7c0"/>
+                                <stop offset="100%" stop-color="#0c5f9e"/>
+                            </linearGradient>
+
+                            <linearGradient id="lzLiquidGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stop-color="#20d8b8"/>
+                                <stop offset="100%" stop-color="#0d77b7"/>
+                            </linearGradient>
+
+                            <filter id="lzSoftGlow" x="-50%" y="-50%" width="200%" height="200%">
+                                <feGaussianBlur stdDeviation="4" result="blur"/>
+                                <feMerge>
+                                    <feMergeNode in="blur"/>
+                                    <feMergeNode in="SourceGraphic"/>
+                                </feMerge>
+                            </filter>
+                        </defs>
+
+                        <circle class="bubble bubble-1" cx="120" cy="42" r="8" fill="#1bcfb7"/>
+                        <circle class="bubble bubble-2" cx="146" cy="28" r="11" fill="#2caef0"/>
+                        <circle class="bubble bubble-3" cx="136" cy="58" r="6" fill="#1faee0"/>
+
+                        <path
+                            class="flask-shape"
+                            d="M92 55
+                               C96 76, 93 96, 80 114
+                               L54 150
+                               C39 170, 47 196, 82 202
+                               C107 206, 141 206, 164 198
+                               C191 189, 199 167, 186 148
+                               L158 108
+                               C146 92, 143 74, 147 55
+                               Z"
+                            fill="url(#lzFlaskGradient)"
+                            opacity="0.96"
+                        />
+
+                        <path
+                            d="M100 64
+                               C103 82, 101 95, 90 111
+                               L65 146
+                               C54 162, 58 184, 86 189"
+                            fill="none"
+                            stroke="rgba(255,255,255,0.7)"
+                            stroke-width="8"
+                            stroke-linecap="round"
+                            opacity="0.55"
+                        />
+
+                        <path
+                            class="liquid-shape"
+                            d="M73 152
+                               C91 142, 123 137, 150 144
+                               C166 148, 174 154, 179 159
+                               C179 181, 157 194, 120 196
+                               C86 198, 62 188, 56 169
+                               C58 162, 63 157, 73 152 Z"
+                            fill="url(#lzLiquidGradient)"
+                            opacity="0.95"
+                        />
+
+                        <path
+                            class="check-shadow"
+                            d="M86 136 L107 160 L167 108"
+                            fill="none"
+                            stroke="rgba(0,0,0,0.18)"
+                            stroke-width="16"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                        />
+
+                        <path
+                            class="check-path"
+                            d="M82 132 L104 156 L164 104"
+                            fill="none"
+                            stroke="#ffffff"
+                            stroke-width="14"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            filter="url(#lzSoftGlow)"
+                        />
+                    </svg>
+                </div>
+
+                <h2 class="login-title">Bienvenido</h2>
+                <p class="login-subtitle">
+                    Ingresa a tu entorno de gestión para continuar trabajando con seguridad y confianza.
+                </p>
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} mb-3">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                <form method="post">
+                    <div class="mb-3">
+                        <label class="form-label">Usuario</label>
+                        <input type="text" class="form-control" name="username" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Contraseña</label>
+                        <input type="password" class="form-control" name="password" required>
+                    </div>
+
+                    <div class="d-grid mt-4">
+                        <button type="submit" class="btn btn-login">
+                            Ingresar
+                        </button>
+                    </div>
+                </form>
+
+                <div class="login-footer-text">
+                    LIMS + SGC ISO 17025 · LabZenIsoSoftware
+                </div>
+            </div>
+        </section>
+    </div>
+</body>
+</html>

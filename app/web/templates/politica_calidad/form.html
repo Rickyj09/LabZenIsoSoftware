@@ -1,0 +1,78 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Política de Calidad{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h3 class="mb-4">
+        {% if modo == 'nuevo' %}
+            Crear Política de Calidad
+        {% else %}
+            Nueva versión de Política de Calidad
+        {% endif %}
+    </h3>
+
+    <div class="card">
+        <div class="card-body">
+            <form method="post">
+                {% if modo == 'nuevo' %}
+                <div class="mb-3">
+                    <label class="form-label">Título</label>
+                    <input
+                        type="text"
+                        name="titulo"
+                        class="form-control"
+                        value="Política de Calidad"
+                        required
+                    >
+                </div>
+                {% else %}
+                <div class="mb-3">
+                    <label class="form-label">Título</label>
+                    <input
+                        type="text"
+                        class="form-control"
+                        value="{{ documento.titulo }}"
+                        readonly
+                    >
+                </div>
+                {% endif %}
+
+                <div class="mb-3">
+                    <label class="form-label">Versión</label>
+                    <input
+                        type="text"
+                        name="version"
+                        class="form-control"
+                        placeholder="Ej: 1.0"
+                        required
+                    >
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Cambios de la versión</label>
+                    <textarea
+                        name="cambios"
+                        class="form-control"
+                        rows="3"
+                        placeholder="Describe qué cambia en esta versión"
+                    ></textarea>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Contenido</label>
+                    <textarea
+                        name="contenido"
+                        class="form-control"
+                        rows="12"
+                        required
+                    ></textarea>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Guardar</button>
+                <a href="{{ url_for('politica_calidad.index') }}" class="btn btn-secondary">Cancelar</a>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

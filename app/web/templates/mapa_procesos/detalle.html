@@ -1,0 +1,113 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Detalle del proceso{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">{{ item.nombre }}</h2>
+        <div class="text-muted">
+            {{ item.codigo or 'Sin código' }} · {{ item.tipo|capitalize }}
+        </div>
+    </div>
+
+    <div>
+    <a href="{{ url_for('mapa_procesos.visual') }}" class="btn btn-outline-secondary me-2">
+        Volver al mapa
+    </a>
+    <a href="{{ url_for('riesgos_oportunidades.index', proceso_id=item.id) }}" class="btn btn-outline-danger me-2">
+        Riesgos y oportunidades
+    </a>
+    <a href="{{ url_for('mapa_procesos.editar', item_id=item.id) }}" class="btn btn-primary">
+        Editar
+    </a>
+</div>
+</div>
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="page-card text-center">
+            <div class="text-muted mb-2">Riesgos</div>
+            <div class="fs-2 fw-bold text-danger">{{ total_riesgos }}</div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="page-card text-center">
+            <div class="text-muted mb-2">Oportunidades</div>
+            <div class="fs-2 fw-bold text-success">{{ total_oportunidades }}</div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="page-card text-center">
+            <div class="text-muted mb-2">Registros abiertos</div>
+            <div class="fs-2 fw-bold text-warning">{{ total_abiertos }}</div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="page-card text-center">
+            <div class="text-muted mb-2">Nivel máximo</div>
+            <div class="fs-2 fw-bold text-primary">{{ nivel_maximo }}</div>
+        </div>
+    </div>
+</div>
+<div class="row g-4">
+    <div class="col-md-6">
+        <div class="page-card h-100">
+            <h5 class="mb-3">Información general</h5>
+
+            <p><strong>Código:</strong> {{ item.codigo or '' }}</p>
+            <p><strong>Nombre:</strong> {{ item.nombre }}</p>
+            <p><strong>Tipo:</strong> {{ item.tipo|capitalize }}</p>
+            <p><strong>Estado:</strong> {{ item.estado|capitalize }}</p>
+            <p>
+                <strong>Responsable:</strong>
+                {% if item.responsable %}
+                    {{ item.responsable.nombre }} {{ item.responsable.apellido }}
+                {% else %}
+                    No asignado
+                {% endif %}
+            </p>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="page-card h-100">
+            <h5 class="mb-3">Trazabilidad</h5>
+
+            <p><strong>Creado:</strong> {{ item.created_at }}</p>
+            <p><strong>Actualizado:</strong> {{ item.updated_at }}</p>
+            <p><strong>Empresa ID:</strong> {{ item.empresa_id }}</p>
+        </div>
+    </div>
+
+    <div class="col-12">
+        <div class="page-card">
+            <h5 class="mb-3">Objetivo del proceso</h5>
+            <div style="white-space: pre-wrap;">{{ item.objetivo or 'No definido.' }}</div>
+        </div>
+    </div>
+
+    <div class="col-12">
+        <div class="page-card">
+            <h5 class="mb-3">Alcance</h5>
+            <div style="white-space: pre-wrap;">{{ item.alcance or 'No definido.' }}</div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="page-card h-100">
+            <h5 class="mb-3">Entradas</h5>
+            <div style="white-space: pre-wrap;">{{ item.entradas or 'No definidas.' }}</div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="page-card h-100">
+            <h5 class="mb-3">Salidas</h5>
+            <div style="white-space: pre-wrap;">{{ item.salidas or 'No definidas.' }}</div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,117 @@
+{% extends "base_admin.html" %}
+{% block title %}{% if item %}Editar muestra{% else %}Nueva muestra{% endif %}{% endblock %}
+
+{% block content %}
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="mb-1">{% if item %}Editar muestra{% else %}Nueva muestra{% endif %}</h1>
+            <p class="text-muted mb-0">
+                {% if item %}
+                    Actualizar información de la muestra
+                {% else %}
+                    Registrar una nueva muestra en el sistema
+                {% endif %}
+            </p>
+        </div>
+        <div>
+            <a href="{{ url_for('muestras.index') }}" class="btn btn-outline-secondary">
+                Volver
+            </a>
+        </div>
+    </div>
+
+    <form method="post">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">Solicitud</label>
+                <select name="solicitud_id" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for s in solicitudes %}
+                        <option value="{{ s.id }}"
+                            {% if item and item.solicitud_id == s.id %}selected{% endif %}>
+                            {{ s.codigo }} - {{ s.cliente.nombre_razon_social }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Código interno</label>
+                <input type="text" name="codigo_interno" class="form-control"
+                       value="{{ item.codigo_interno if item else '' }}" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Código cliente</label>
+                <input type="text" name="codigo_cliente" class="form-control"
+                       value="{{ item.codigo_cliente if item else '' }}">
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Tipo de muestra</label>
+                <input type="text" name="tipo_muestra" class="form-control"
+                       value="{{ item.tipo_muestra if item else '' }}"
+                       placeholder="Agua, suelo, alimento...">
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Fecha recepción</label>
+                <input type="date" name="fecha_recepcion" class="form-control"
+                       value="{{ item.fecha_recepcion if item else '' }}">
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Fecha muestreo</label>
+                <input type="date" name="fecha_muestreo" class="form-control"
+                       value="{{ item.fecha_muestreo if item else '' }}">
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Condición de recepción</label>
+                <input type="text" name="condicion_recepcion" class="form-control"
+                       value="{{ item.condicion_recepcion if item else '' }}"
+                       placeholder="Adecuada, refrigerada, sellada...">
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Ubicación de almacenamiento</label>
+                <input type="text" name="ubicacion_almacenamiento" class="form-control"
+                       value="{{ item.ubicacion_almacenamiento if item else '' }}"
+                       placeholder="Refrigerador 1, estante A...">
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select">
+                    <option value="recibida" {% if not item or item.estado == 'recibida' %}selected{% endif %}>Recibida</option>
+                    <option value="en_analisis" {% if item and item.estado == 'en_analisis' %}selected{% endif %}>En análisis</option>
+                    <option value="procesada" {% if item and item.estado == 'procesada' %}selected{% endif %}>Procesada</option>
+                    <option value="rechazada" {% if item and item.estado == 'rechazada' %}selected{% endif %}>Rechazada</option>
+                </select>
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Descripción</label>
+                <textarea name="descripcion" class="form-control" rows="3">{{ item.descripcion if item else '' }}</textarea>
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Observaciones</label>
+                <textarea name="observaciones" class="form-control" rows="3">{{ item.observaciones if item else '' }}</textarea>
+            </div>
+        </div>
+
+        <hr class="my-4">
+
+        <div class="d-flex justify-content-end gap-2">
+            <a href="{{ url_for('muestras.index') }}" class="btn btn-outline-secondary">
+                Cancelar
+            </a>
+            <button type="submit" class="btn btn-primary">
+                {% if item %}Actualizar muestra{% else %}Guardar muestra{% endif %}
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base_admin.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-card">
+    <h1 class="mb-4">Dashboard</h1>
+
+    <div class="row g-3">
+        <div class="col-md-4">
+            <div class="border rounded-3 p-3 bg-light">
+                <div class="text-muted small">Usuario actual</div>
+                <div class="fw-bold">{{ current_user.nombre }} {{ current_user.apellido }}</div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="border rounded-3 p-3 bg-light">
+                <div class="text-muted small">Email</div>
+                <div class="fw-bold">{{ current_user.email }}</div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="border rounded-3 p-3 bg-light">
+                <div class="text-muted small">Username</div>
+                <div class="fw-bold">{{ current_user.username }}</div>
+            </div>
+        </div>
+    </div>
+
+    <hr class="my-4">
+
+    <p class="mb-0">
+        Bienvenido al panel base de LabZenIsoSoftware. Desde aquí construiremos los módulos del sistema.
+    </p>
+</div>
+{% endblock %}

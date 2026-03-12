@@ -1,0 +1,50 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Nueva versión{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <h2>Nueva versión</h2>
+    <div class="text-muted">{{ item.codigo }} · {{ item.titulo }}</div>
+</div>
+
+<div class="page-card">
+    <form method="post">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">Versión</label>
+                <input type="text" name="version" class="form-control" placeholder="Ej: 1.1 o 2.0" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select">
+                    {% for e in estados_documento %}
+                    <option value="{{ e }}" {% if e == 'vigente' %}selected{% endif %}>{{ e }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Ruta / URL del archivo</label>
+                <input type="text" name="archivo_url" class="form-control">
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Cambios</label>
+                <textarea name="cambios" class="form-control" rows="3"></textarea>
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Contenido</label>
+                <textarea name="contenido" class="form-control" rows="12"></textarea>
+            </div>
+
+            <div class="col-12">
+                <button type="submit" class="btn btn-primary">Guardar versión</button>
+                <a href="{{ url_for('documentacion.detalle', item_id=item.id) }}" class="btn btn-secondary">Cancelar</a>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}

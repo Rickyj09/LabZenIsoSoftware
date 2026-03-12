@@ -1,0 +1,97 @@
+{% extends "base_admin.html" %}
+{% block title %}{% if item %}Editar solicitud{% else %}Nueva solicitud{% endif %}{% endblock %}
+
+{% block content %}
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="mb-1">{% if item %}Editar solicitud{% else %}Nueva solicitud{% endif %}</h1>
+            <p class="text-muted mb-0">
+                {% if item %}
+                    Actualizar información de la solicitud
+                {% else %}
+                    Registrar una nueva solicitud en el sistema
+                {% endif %}
+            </p>
+        </div>
+        <div>
+            <a href="{{ url_for('solicitudes.index') }}" class="btn btn-outline-secondary">
+                Volver
+            </a>
+        </div>
+    </div>
+
+    <form method="post">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">Cliente</label>
+                <select name="cliente_id" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for c in clientes %}
+                        <option value="{{ c.id }}"
+                            {% if item and item.cliente_id == c.id %}selected{% endif %}>
+                            {{ c.nombre_razon_social }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Código</label>
+                <input type="text" name="codigo" class="form-control"
+                       value="{{ item.codigo if item else '' }}" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Tipo de servicio</label>
+                <input type="text" name="tipo_servicio" class="form-control"
+                       value="{{ item.tipo_servicio if item else '' }}"
+                       placeholder="Ensayo, calibración, muestreo...">
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Fecha solicitud</label>
+                <input type="date" name="fecha_solicitud" class="form-control"
+                       value="{{ item.fecha_solicitud if item else '' }}" required>
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Fecha recepción</label>
+                <input type="date" name="fecha_recepcion" class="form-control"
+                       value="{{ item.fecha_recepcion if item else '' }}">
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select">
+                    <option value="recibida" {% if not item or item.estado == 'recibida' %}selected{% endif %}>Recibida</option>
+                    <option value="en_proceso" {% if item and item.estado == 'en_proceso' %}selected{% endif %}>En proceso</option>
+                    <option value="finalizada" {% if item and item.estado == 'finalizada' %}selected{% endif %}>Finalizada</option>
+                    <option value="cancelada" {% if item and item.estado == 'cancelada' %}selected{% endif %}>Cancelada</option>
+                </select>
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Descripción</label>
+                <textarea name="descripcion" class="form-control" rows="3">{{ item.descripcion if item else '' }}</textarea>
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Observaciones</label>
+                <textarea name="observaciones" class="form-control" rows="3">{{ item.observaciones if item else '' }}</textarea>
+            </div>
+        </div>
+
+        <hr class="my-4">
+
+        <div class="d-flex justify-content-end gap-2">
+            <a href="{{ url_for('solicitudes.index') }}" class="btn btn-outline-secondary">
+                Cancelar
+            </a>
+            <button type="submit" class="btn btn-primary">
+                {% if item %}Actualizar solicitud{% else %}Guardar solicitud{% endif %}
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

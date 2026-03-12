@@ -1,0 +1,82 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Resultados{% endblock %}
+
+{% block content %}
+
+<div class="page-card">
+
+<h1>Resultados</h1>
+
+<a class="btn btn-primary mb-3"
+href="{{ url_for('resultados.nuevo', muestra_ensayo_id=muestra_ensayo.id) }}">
+Nuevo resultado
+</a>
+
+<table class="table table-striped">
+
+<thead>
+<tr>
+<th>Parámetro</th>
+<th>Valor</th>
+<th>Unidad</th>
+<th>Límite</th>
+<th>Conforme</th>
+<th>Acciones</th>
+</tr>
+</thead>
+
+<tbody>
+
+{% for r in resultados %}
+
+<tr>
+
+<td>{{ r.parametro }}</td>
+
+<td>{{ r.valor }}</td>
+
+<td>{{ r.unidad }}</td>
+
+<td>{{ r.limite_min }} - {{ r.limite_max }}</td>
+
+<td>
+
+{% if r.conforme %}
+<span class="badge bg-success">Sí</span>
+{% else %}
+<span class="badge bg-danger">No</span>
+{% endif %}
+
+</td>
+
+<td>
+
+<a class="btn btn-sm btn-outline-primary"
+href="{{ url_for('resultados.editar', resultado_id=r.id) }}">
+Editar
+</a>
+
+<form method="POST"
+action="{{ url_for('resultados.eliminar', resultado_id=r.id) }}"
+style="display:inline">
+
+<button class="btn btn-sm btn-outline-danger">
+Eliminar
+</button>
+
+</form>
+
+</td>
+
+</tr>
+
+{% endfor %}
+
+</tbody>
+
+</table>
+
+</div>
+
+{% endblock %}

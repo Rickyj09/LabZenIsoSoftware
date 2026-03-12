@@ -1,0 +1,106 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Objetivos de Calidad{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <h2>{% if item %}Editar objetivo de calidad{% else %}Nuevo objetivo de calidad{% endif %}</h2>
+</div>
+
+<div class="page-card">
+    <form method="post">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label">Nombre del objetivo</label>
+                <input type="text" name="nombre" class="form-control"
+                       value="{{ item.nombre if item else '' }}" required>
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Indicador</label>
+                <input type="text" name="indicador" class="form-control"
+                       value="{{ item.indicador if item else '' }}" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Meta</label>
+                <input type="text" name="meta" class="form-control"
+                       value="{{ item.meta if item else '' }}" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Unidad</label>
+                <input type="text" name="unidad" class="form-control"
+                       value="{{ item.unidad if item else '' }}">
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Frecuencia</label>
+                <select name="frecuencia" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    <option value="mensual" {% if item and item.frecuencia == 'mensual' %}selected{% endif %}>Mensual</option>
+                    <option value="trimestral" {% if item and item.frecuencia == 'trimestral' %}selected{% endif %}>Trimestral</option>
+                    <option value="semestral" {% if item and item.frecuencia == 'semestral' %}selected{% endif %}>Semestral</option>
+                    <option value="anual" {% if item and item.frecuencia == 'anual' %}selected{% endif %}>Anual</option>
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Responsable</label>
+                <select name="responsable_id" class="form-select">
+                    <option value="">Seleccione</option>
+                    {% for u in usuarios %}
+                    <option value="{{ u.id }}"
+                        {% if item and item.responsable_id == u.id %}selected{% endif %}>
+                        {{ u.nombre }} {{ u.apellido }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Fecha inicio</label>
+                <input type="date" name="fecha_inicio" class="form-control"
+                       value="{{ item.fecha_inicio.strftime('%Y-%m-%d') if item and item.fecha_inicio else '' }}" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Fecha fin</label>
+                <input type="date" name="fecha_fin" class="form-control"
+                       value="{{ item.fecha_fin.strftime('%Y-%m-%d') if item and item.fecha_fin else '' }}">
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select">
+                    <option value="activo" {% if not item or item.estado == 'activo' %}selected{% endif %}>Activo</option>
+                    <option value="cumplido" {% if item and item.estado == 'cumplido' %}selected{% endif %}>Cumplido</option>
+                    <option value="vencido" {% if item and item.estado == 'vencido' %}selected{% endif %}>Vencido</option>
+                    <option value="suspendido" {% if item and item.estado == 'suspendido' %}selected{% endif %}>Suspendido</option>
+                </select>
+            </div>
+
+            <div class="col-md-8">
+                <label class="form-label">Resultado actual</label>
+                <input type="text" name="resultado_actual" class="form-control"
+                       value="{{ item.resultado_actual if item else '' }}">
+            </div>
+
+            <div class="col-12">
+                <label class="form-label">Descripción</label>
+                <textarea name="descripcion" class="form-control" rows="3">{{ item.descripcion if item else '' }}</textarea>
+            </div>
+
+            <div class="col-12">
+                <label class="form-label">Observaciones</label>
+                <textarea name="observaciones" class="form-control" rows="3">{{ item.observaciones if item else '' }}</textarea>
+            </div>
+
+            <div class="col-12">
+                <button type="submit" class="btn btn-primary">Guardar</button>
+                <a href="{{ url_for('objetivos_calidad.index') }}" class="btn btn-secondary">Cancelar</a>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}

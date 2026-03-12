@@ -1,0 +1,95 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Detalle del documento{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">{{ item.titulo }}</h2>
+        <div class="text-muted">{{ item.codigo }} · {{ item.tipo_documento }}</div>
+    </div>
+    <div>
+        <a href="{{ url_for('documentacion.nueva_version', item_id=item.id) }}" class="btn btn-outline-success me-2">
+            Nueva versión
+        </a>
+        <a href="{{ url_for('documentacion.editar', item_id=item.id) }}" class="btn btn-primary">
+            Editar
+        </a>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="page-card text-center">
+            <div class="text-muted mb-2">Estado</div>
+            <div class="fs-5 fw-bold">{{ item.estado }}</div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="page-card text-center">
+            <div class="text-muted mb-2">Versión actual</div>
+            <div class="fs-5 fw-bold">{{ item.version_actual or '' }}</div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="page-card text-center">
+            <div class="text-muted mb-2">Proceso</div>
+            <div class="fs-5 fw-bold">{{ item.proceso or '-' }}</div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="page-card text-center">
+            <div class="text-muted mb-2">Tipo</div>
+            <div class="fs-5 fw-bold">{{ item.tipo_documento }}</div>
+        </div>
+    </div>
+</div>
+
+{% if version_actual %}
+<div class="page-card mb-4">
+    <h5 class="mb-3">Versión vigente / actual</h5>
+    <p><strong>Versión:</strong> {{ version_actual.version }}</p>
+    <p><strong>Fecha:</strong> {{ version_actual.fecha_version }}</p>
+    <p><strong>Estado:</strong> {{ version_actual.estado }}</p>
+    <p><strong>Archivo:</strong> {{ version_actual.archivo_url or 'No definido' }}</p>
+    <p><strong>Cambios:</strong> {{ version_actual.cambios or 'No definidos' }}</p>
+    <hr>
+    <div style="white-space: pre-wrap;">{{ version_actual.contenido or 'Sin contenido registrado.' }}</div>
+</div>
+{% endif %}
+
+<div class="page-card">
+    <h5 class="mb-3">Historial de versiones</h5>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Versión</th>
+                    <th>Fecha</th>
+                    <th>Estado</th>
+                    <th>Archivo</th>
+                    <th>Cambios</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for v in versiones %}
+                <tr>
+                    <td>{{ v.version }}</td>
+                    <td>{{ v.fecha_version }}</td>
+                    <td>{{ v.estado }}</td>
+                    <td>{{ v.archivo_url or '' }}</td>
+                    <td>{{ v.cambios or '' }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" class="text-center text-muted">No existen versiones registradas.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

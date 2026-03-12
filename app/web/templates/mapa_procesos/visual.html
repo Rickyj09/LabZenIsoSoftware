@@ -1,0 +1,260 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Mapa de Procesos Visual{% endblock %}
+
+{% block extra_css %}
+<style>
+    .mapa-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+    }
+
+    .mapa-header,
+    .mapa-footer {
+        background: #ffffff;
+        border-radius: 18px;
+        box-shadow: 0 .125rem .5rem rgba(0,0,0,.08);
+        padding: 18px 24px;
+        text-align: center;
+    }
+
+    .mapa-header h5,
+    .mapa-footer h5 {
+        margin: 0;
+        font-weight: 700;
+        color: #1f2937;
+    }
+
+    .mapa-header p,
+    .mapa-footer p {
+        margin: 6px 0 0;
+        color: #6b7280;
+    }
+
+    .arrow-down {
+        text-align: center;
+        font-size: 2rem;
+        color: #6b7280;
+        line-height: 1;
+    }
+
+    .bloque-procesos {
+        background: #ffffff;
+        border-radius: 18px;
+        box-shadow: 0 .125rem .5rem rgba(0,0,0,.08);
+        padding: 24px;
+    }
+
+    .bloque-header {
+        font-size: 1.1rem;
+        font-weight: 800;
+        margin-bottom: 18px;
+        text-transform: uppercase;
+        letter-spacing: .5px;
+    }
+
+    .header-estrategico { color: #0d6efd; }
+    .header-misional { color: #198754; }
+    .header-apoyo { color: #fd7e14; }
+
+    .procesos-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        justify-content: center;
+    }
+
+    .proceso-card {
+        width: 250px;
+        background: #f8fafc;
+        border-radius: 16px;
+        border: 1px solid #e5e7eb;
+        padding: 16px;
+        position: relative;
+        min-height: 130px;
+    }
+
+    .proceso-card .codigo {
+        font-size: .85rem;
+        color: #6b7280;
+        margin-bottom: 6px;
+    }
+
+    .proceso-card .titulo {
+        font-weight: 700;
+        color: #111827;
+        margin-bottom: 8px;
+    }
+
+    .proceso-card .responsable {
+        font-size: .9rem;
+        color: #374151;
+    }
+
+    .proceso-card .tipo-badge {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        font-size: .72rem;
+        padding: .2rem .45rem;
+        border-radius: 999px;
+        font-weight: 700;
+    }
+
+    .estrategico {
+        border-left: 7px solid #0d6efd;
+    }
+
+    .estrategico .tipo-badge {
+        background: rgba(13, 110, 253, .12);
+        color: #0d6efd;
+    }
+
+    .misional {
+        border-left: 7px solid #198754;
+    }
+
+    .misional .tipo-badge {
+        background: rgba(25, 135, 84, .12);
+        color: #198754;
+    }
+
+    .apoyo {
+        border-left: 7px solid #fd7e14;
+    }
+
+    .apoyo .tipo-badge {
+        background: rgba(253, 126, 20, .12);
+        color: #fd7e14;
+    }
+
+    .mapa-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 18px;
+    }
+
+    .mapa-toolbar h2 {
+        margin: 0;
+    }
+
+    @media (max-width: 768px) {
+        .mapa-toolbar {
+            flex-direction: column;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .proceso-card {
+            width: 100%;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mapa-toolbar">
+    <h2>Mapa de Procesos</h2>
+    <div>
+        <a href="{{ url_for('mapa_procesos.index') }}" class="btn btn-outline-secondary">
+            Ver listado
+        </a>
+    </div>
+</div>
+
+<div class="mapa-wrapper">
+
+    <div class="mapa-header">
+        <h5>Entradas del sistema</h5>
+        <p>Requisitos del cliente · Requisitos normativos · Necesidades del laboratorio · Información técnica</p>
+    </div>
+
+    <div class="arrow-down">↓</div>
+
+    <div class="bloque-procesos">
+        <div class="bloque-header header-estrategico">Procesos Estratégicos</div>
+        <div class="procesos-grid">
+            {% for item in estrategicos %}
+           <a href="{{ url_for('mapa_procesos.detalle', item_id=item.id) }}"
+   class="proceso-link text-decoration-none">
+    <div class="proceso-card estrategico">
+        <span class="tipo-badge">EST</span>
+        <div class="codigo">{{ item.codigo or '' }}</div>
+        <div class="titulo">{{ item.nombre }}</div>
+        <div class="responsable">
+            {% if item.responsable %}
+                Responsable: {{ item.responsable.nombre }} {{ item.responsable.apellido }}
+            {% else %}
+                Responsable no asignado
+            {% endif %}
+        </div>
+    </div>
+</a>
+            {% else %}
+            <div class="text-muted">No hay procesos estratégicos registrados.</div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="arrow-down">↓</div>
+
+    <div class="bloque-procesos">
+        <div class="bloque-header header-misional">Procesos Misionales</div>
+        <div class="procesos-grid">
+            {% for item in misionales %}
+            <div class="proceso-card misional">
+                <span class="tipo-badge">MIS</span>
+                <div class="codigo">{{ item.codigo or '' }}</div>
+                <div class="titulo">{{ item.nombre }}</div>
+                <div class="responsable">
+                    {% if item.responsable %}
+                        Responsable: {{ item.responsable.nombre }} {{ item.responsable.apellido }}
+                    {% else %}
+                        Responsable no asignado
+                    {% endif %}
+                </div>
+            </div>
+            {% else %}
+            <div class="text-muted">No hay procesos misionales registrados.</div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="arrow-down">↓</div>
+
+    <div class="bloque-procesos">
+        <div class="bloque-header header-apoyo">Procesos de Apoyo</div>
+        <div class="procesos-grid">
+            {% for item in apoyo %}
+        <a href="{{ url_for('mapa_procesos.detalle', item_id=item.id) }}"
+   class="proceso-link text-decoration-none">
+    <div class="proceso-card apoyo">
+        <span class="tipo-badge">APO</span>
+        <div class="codigo">{{ item.codigo or '' }}</div>
+        <div class="titulo">{{ item.nombre }}</div>
+        <div class="responsable">
+            {% if item.responsable %}
+                Responsable: {{ item.responsable.nombre }} {{ item.responsable.apellido }}
+            {% else %}
+                Responsable no asignado
+            {% endif %}
+        </div>
+    </div>
+</a>    
+            {% else %}
+            <div class="text-muted">No hay procesos de apoyo registrados.</div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="arrow-down">↓</div>
+
+    <div class="mapa-footer">
+        <h5>Salidas del sistema</h5>
+        <p>Resultados confiables · Informes emitidos · Cumplimiento normativo · Satisfacción del cliente · Mejora continua</p>
+    </div>
+
+</div>
+{% endblock %}

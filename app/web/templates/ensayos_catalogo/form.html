@@ -1,0 +1,67 @@
+{% extends "base_admin.html" %}
+{% block title %}{% if item %}Editar ensayo{% else %}Nuevo ensayo{% endif %}{% endblock %}
+
+{% block content %}
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="mb-1">{% if item %}Editar ensayo{% else %}Nuevo ensayo{% endif %}</h1>
+            <p class="text-muted mb-0">Administración del catálogo de ensayos</p>
+        </div>
+        <div>
+            <a href="{{ url_for('ensayos_catalogo.index') }}" class="btn btn-outline-secondary">
+                Volver
+            </a>
+        </div>
+    </div>
+
+    <form method="post">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">Código</label>
+                <input type="text" name="codigo" class="form-control"
+                       value="{{ item.codigo if item else '' }}" required>
+            </div>
+
+            <div class="col-md-5">
+                <label class="form-label">Nombre</label>
+                <input type="text" name="nombre" class="form-control"
+                       value="{{ item.nombre if item else '' }}" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Área</label>
+                <input type="text" name="area" class="form-control"
+                       value="{{ item.area if item else '' }}"
+                       placeholder="Fisicoquímica, microbiología...">
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Descripción</label>
+                <textarea name="descripcion" class="form-control" rows="4">{{ item.descripcion if item else '' }}</textarea>
+            </div>
+
+            <div class="col-md-3">
+                <div class="form-check mt-2">
+                    <input class="form-check-input" type="checkbox" name="activo" id="activo"
+                           {% if not item or item.activo %}checked{% endif %}>
+                    <label class="form-check-label" for="activo">
+                        Activo
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <hr class="my-4">
+
+        <div class="d-flex justify-content-end gap-2">
+            <a href="{{ url_for('ensayos_catalogo.index') }}" class="btn btn-outline-secondary">
+                Cancelar
+            </a>
+            <button type="submit" class="btn btn-primary">
+                {% if item %}Actualizar ensayo{% else %}Guardar ensayo{% endif %}
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

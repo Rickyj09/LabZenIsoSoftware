@@ -1,0 +1,59 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Mapa de Procesos{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Mapa de Procesos</h2>
+    <div>
+        <a href="{{ url_for('mapa_procesos.visual') }}" class="btn btn-outline-secondary me-2">
+            Ver mapa visual
+        </a>
+        <a href="{{ url_for('mapa_procesos.nuevo') }}" class="btn btn-primary">
+            Nuevo proceso
+        </a>
+    </div>
+</div>
+
+<div class="page-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Código</th>
+                    <th>Nombre</th>
+                    <th>Tipo</th>
+                    <th>Responsable</th>
+                    <th>Estado</th>
+                    <th style="width: 140px;">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in procesos %}
+                <tr>
+                    <td>{{ item.codigo or '' }}</td>
+                    <td>{{ item.nombre }}</td>
+                    <td>{{ item.tipo }}</td>
+                    <td>
+                        {% if item.responsable %}
+                            {{ item.responsable.nombre }} {{ item.responsable.apellido }}
+                        {% endif %}
+                    </td>
+                    <td>{{ item.estado }}</td>
+                    <td>
+                        <a href="{{ url_for('mapa_procesos.editar', item_id=item.id) }}"
+                           class="btn btn-sm btn-outline-primary">
+                            Editar
+                        </a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" class="text-center text-muted">No existen procesos registrados.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,98 @@
+{% extends "base_admin.html" %}
+{% block title %}{% if item %}Editar cliente{% else %}Nuevo cliente{% endif %}{% endblock %}
+
+{% block content %}
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="mb-1">{% if item %}Editar cliente{% else %}Nuevo cliente{% endif %}</h1>
+            <p class="text-muted mb-0">
+                {% if item %}
+                    Actualizar información del cliente
+                {% else %}
+                    Registrar un nuevo cliente en el sistema
+                {% endif %}
+            </p>
+        </div>
+        <div>
+            <a href="{{ url_for('clientes.index') }}" class="btn btn-outline-secondary">
+                Volver
+            </a>
+        </div>
+    </div>
+
+    <form method="post">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">Tipo de cliente</label>
+                <select name="tipo_cliente" class="form-select">
+                    <option value="">Seleccione</option>
+                    <option value="natural" {% if item and item.tipo_cliente == 'natural' %}selected{% endif %}>Natural</option>
+                    <option value="juridico" {% if item and item.tipo_cliente == 'juridico' %}selected{% endif %}>Jurídico</option>
+                </select>
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Identificación</label>
+                <input type="text" name="identificacion" class="form-control"
+                       value="{{ item.identificacion if item else '' }}">
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Nombre / Razón social</label>
+                <input type="text" name="nombre_razon_social" class="form-control"
+                       value="{{ item.nombre_razon_social if item else '' }}" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Nombre de contacto</label>
+                <input type="text" name="contacto_nombre" class="form-control"
+                       value="{{ item.contacto_nombre if item else '' }}">
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Email de contacto</label>
+                <input type="email" name="contacto_email" class="form-control"
+                       value="{{ item.contacto_email if item else '' }}">
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Teléfono de contacto</label>
+                <input type="text" name="contacto_telefono" class="form-control"
+                       value="{{ item.contacto_telefono if item else '' }}">
+            </div>
+
+            <div class="col-md-8">
+                <label class="form-label">Dirección</label>
+                <input type="text" name="direccion" class="form-control"
+                       value="{{ item.direccion if item else '' }}">
+            </div>
+
+            <div class="col-md-2">
+                <label class="form-label">Ciudad</label>
+                <input type="text" name="ciudad" class="form-control"
+                       value="{{ item.ciudad if item else '' }}">
+            </div>
+
+            <div class="col-md-2">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select">
+                    <option value="activo" {% if not item or item.estado == 'activo' %}selected{% endif %}>Activo</option>
+                    <option value="inactivo" {% if item and item.estado == 'inactivo' %}selected{% endif %}>Inactivo</option>
+                </select>
+            </div>
+        </div>
+
+        <hr class="my-4">
+
+        <div class="d-flex justify-content-end gap-2">
+            <a href="{{ url_for('clientes.index') }}" class="btn btn-outline-secondary">
+                Cancelar
+            </a>
+            <button type="submit" class="btn btn-primary">
+                {% if item %}Actualizar cliente{% else %}Guardar cliente{% endif %}
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends "base_admin.html" %}
+{% block title %}Ensayos por Muestra{% endblock %}
+
+{% block content %}
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="mb-1">Ensayos por Muestra</h1>
+            <p class="text-muted mb-0">Asignación de ensayos a muestras</p>
+        </div>
+        <div>
+            <a href="{{ url_for('muestra_ensayos.nuevo') }}" class="btn btn-primary">
+                Nueva asignación
+            </a>
+        </div>
+    </div>
+
+    {% if items %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Muestra</th>
+                        <th>Solicitud</th>
+                        <th>Ensayo</th>
+                        <th>Método</th>
+                        <th>Analista</th>
+                        <th>Estado</th>
+                        <th style="width:120px;">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for x in items %}
+                    <tr>
+                        <td>{{ x.id }}</td>
+                        <td>{{ x.muestra.codigo_interno }}</td>
+                        <td>{{ x.muestra.solicitud.codigo }}</td>
+                        <td>{{ x.ensayo.nombre }}</td>
+                        <td>{{ x.metodo.nombre }}</td>
+                        <td>
+                            {% if x.analista %}
+                                {{ x.analista.nombre }} {{ x.analista.apellido }}
+                            {% endif %}
+                        </td>
+                        <td><span class="badge text-bg-secondary">{{ x.estado }}</span></td>
+                        <td>
+                            <a href="{{ url_for('muestra_ensayos.editar', item_id=x.id) }}"
+                               class="btn btn-sm btn-outline-primary">
+                                Editar
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="alert alert-info mb-0">
+            No hay ensayos asignados todavía.
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

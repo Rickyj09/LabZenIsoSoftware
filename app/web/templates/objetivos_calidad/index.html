@@ -1,0 +1,56 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Objetivos de Calidad{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Objetivos de Calidad</h2>
+    <a href="{{ url_for('objetivos_calidad.nuevo') }}" class="btn btn-primary">Nuevo objetivo</a>
+</div>
+
+<div class="page-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Nombre</th>
+                    <th>Indicador</th>
+                    <th>Meta</th>
+                    <th>Frecuencia</th>
+                    <th>Responsable</th>
+                    <th>Estado</th>
+                    <th>Resultado actual</th>
+                    <th style="width: 140px;">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in objetivos %}
+                <tr>
+                    <td>{{ item.nombre }}</td>
+                    <td>{{ item.indicador }}</td>
+                    <td>{{ item.meta }}{% if item.unidad %} {{ item.unidad }}{% endif %}</td>
+                    <td>{{ item.frecuencia }}</td>
+                    <td>
+                        {% if item.responsable %}
+                            {{ item.responsable.nombre }} {{ item.responsable.apellido }}
+                        {% endif %}
+                    </td>
+                    <td>{{ item.estado }}</td>
+                    <td>{{ item.resultado_actual or '' }}</td>
+                    <td>
+                        <a href="{{ url_for('objetivos_calidad.editar', item_id=item.id) }}"
+                           class="btn btn-sm btn-outline-primary">
+                            Editar
+                        </a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" class="text-center text-muted">No existen objetivos registrados.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

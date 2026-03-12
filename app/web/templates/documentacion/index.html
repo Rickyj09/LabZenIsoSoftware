@@ -1,0 +1,101 @@
+{% extends "base_admin.html" %}
+
+{% block title %}{{ titulo_modulo }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">{{ titulo_modulo }}</h2>
+        <div class="text-muted">
+            {% if vista == 'documentos' %}
+                Documentos controlados del sistema de gestión.
+            {% elif vista == 'registros' %}
+                Registros y evidencias del sistema.
+            {% else %}
+                Documentos históricos, obsoletos y archivados.
+            {% endif %}
+        </div>
+    </div>
+    <a href="{{ url_for('documentacion.nuevo') }}" class="btn btn-primary">Nuevo documento</a>
+</div>
+
+<div class="page-card mb-4">
+    <form method="get" class="row g-3">
+        {% if vista == 'documentos' %}
+        <div class="col-md-3">
+            <label class="form-label">Tipo</label>
+            <select name="tipo" class="form-select">
+                <option value="">Todos</option>
+                {% for t in tipos_documento %}
+                <option value="{{ t }}" {% if tipo == t %}selected{% endif %}>{{ t }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+
+        {% if vista != 'archivo' %}
+        <div class="col-md-3">
+            <label class="form-label">Estado</label>
+            <select name="estado" class="form-select">
+                <option value="">Todos</option>
+                <option value="borrador" {% if estado == 'borrador' %}selected{% endif %}>Borrador</option>
+                <option value="vigente" {% if estado == 'vigente' %}selected{% endif %}>Vigente</option>
+                <option value="obsoleto" {% if estado == 'obsoleto' %}selected{% endif %}>Obsoleto</option>
+                <option value="archivado" {% if estado == 'archivado' %}selected{% endif %}>Archivado</option>
+            </select>
+        </div>
+        {% endif %}
+
+        <div class="col-md-4">
+            <label class="form-label">Buscar</label>
+            <input type="text" name="q" class="form-control" value="{{ q or '' }}" placeholder="Código, título o proceso">
+        </div>
+
+        <div class="col-md-2 d-flex align-items-end">
+            <button type="submit" class="btn btn-outline-primary w-100">Filtrar</button>
+        </div>
+    </form>
+</div>
+
+<div class="page-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Código</th>
+                    <th>Título</th>
+                    <th>Tipo</th>
+                    <th>Proceso</th>
+                    <th>Estado</th>
+                    <th>Versión actual</th>
+                    <th style="width: 180px;">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in documentos %}
+                <tr>
+                    <td>{{ item.codigo }}</td>
+                    <td>{{ item.titulo }}</td>
+                    <td>{{ item.tipo_documento }}</td>
+                    <td>{{ item.proceso or '' }}</td>
+                    <td>{{ item.estado }}</td>
+                    <td>{{ item.version_actual or '' }}</td>
+                    <td>
+                        <a href="{{ url_for('documentacion.detalle', item_id=item.id) }}" class="btn btn-sm btn-outline-secondary">
+                            Ver
+                        </a>
+                        <a href="{{ url_for('documentacion.editar', item_id=item.id) }}" class="btn btn-sm btn-outline-primary">
+                            Editar
+                        </a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="text-center text-muted">No existen documentos en esta vista.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

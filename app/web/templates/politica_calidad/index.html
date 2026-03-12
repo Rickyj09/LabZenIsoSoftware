@@ -1,0 +1,82 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Política de Calidad{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3>Política de Calidad</h3>
+        <div>
+            {% if not documento %}
+                <a href="{{ url_for('politica_calidad.nuevo') }}" class="btn btn-primary">
+                    Crear política
+                </a>
+            {% else %}
+                <a href="{{ url_for('politica_calidad.nueva_version') }}" class="btn btn-success">
+                    Nueva versión
+                </a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if documento %}
+    <div class="card mb-4">
+        <div class="card-body">
+            <p><strong>Código:</strong> {{ documento.codigo }}</p>
+            <p><strong>Título:</strong> {{ documento.titulo }}</p>
+            <p><strong>Tipo:</strong> {{ documento.tipo_documento }}</p>
+            <p><strong>Proceso:</strong> {{ documento.proceso }}</p>
+            <p><strong>Estado:</strong> {{ documento.estado }}</p>
+            <p><strong>Versión actual:</strong> {{ documento.version_actual }}</p>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if version_vigente %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <strong>Contenido vigente</strong>
+        </div>
+        <div class="card-body">
+            <p><strong>Versión:</strong> {{ version_vigente.version }}</p>
+            <p><strong>Fecha:</strong> {{ version_vigente.fecha_version }}</p>
+            <p><strong>Estado:</strong> {{ version_vigente.estado }}</p>
+            <hr>
+            <div style="white-space: pre-wrap;">{{ version_vigente.contenido or '' }}</div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if versiones %}
+    <div class="card">
+        <div class="card-header">
+            <strong>Historial de versiones</strong>
+        </div>
+        <div class="card-body">
+            <table class="table table-bordered table-striped">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Versión</th>
+                        <th>Fecha</th>
+                        <th>Estado</th>
+                        <th>Cambios</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for v in versiones %}
+                    <tr>
+                        <td>{{ v.id }}</td>
+                        <td>{{ v.version }}</td>
+                        <td>{{ v.fecha_version }}</td>
+                        <td>{{ v.estado }}</td>
+                        <td>{{ v.cambios or '' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

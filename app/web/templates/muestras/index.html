@@ -1,0 +1,66 @@
+{% extends "base_admin.html" %}
+{% block title %}Muestras{% endblock %}
+
+{% block content %}
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="mb-1">Muestras</h1>
+            <p class="text-muted mb-0">Listado de muestras registradas</p>
+        </div>
+        <div>
+            <a href="{{ url_for('muestras.nuevo') }}" class="btn btn-primary">
+                Nueva muestra
+            </a>
+        </div>
+    </div>
+
+    {% if muestras %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Código interno</th>
+                        <th>Código cliente</th>
+                        <th>Solicitud</th>
+                        <th>Cliente</th>
+                        <th>Tipo muestra</th>
+                        <th>Fecha recepción</th>
+                        <th>Estado</th>
+                        <th style="width: 120px;">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in muestras %}
+                    <tr>
+                        <td>{{ m.id }}</td>
+                        <td>{{ m.codigo_interno }}</td>
+                        <td>{{ m.codigo_cliente or '' }}</td>
+                        <td>{{ m.solicitud.codigo }}</td>
+                        <td>{{ m.solicitud.cliente.nombre_razon_social }}</td>
+                        <td>{{ m.tipo_muestra or '' }}</td>
+                        <td>{{ m.fecha_recepcion or '' }}</td>
+                        <td>
+                            <span class="badge {% if m.estado == 'recibida' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
+                                {{ m.estado }}
+                            </span>
+                        </td>
+                        <td>
+                            <a href="{{ url_for('muestras.editar', muestra_id=m.id) }}"
+                               class="btn btn-sm btn-outline-primary">
+                                Editar
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="alert alert-info mb-0">
+            No hay muestras registradas todavía.
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

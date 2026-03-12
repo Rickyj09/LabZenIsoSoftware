@@ -1,0 +1,83 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Mapa de Procesos{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <h2>{% if item %}Editar proceso{% else %}Nuevo proceso{% endif %}</h2>
+</div>
+
+<div class="page-card">
+    <form method="post">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label">Nombre del proceso</label>
+                <input type="text" name="nombre" class="form-control"
+                       value="{{ item.nombre if item else '' }}" required>
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Código</label>
+                <input type="text" name="codigo" class="form-control"
+                       value="{{ item.codigo if item else '' }}">
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Tipo</label>
+                <select name="tipo" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    <option value="estrategico" {% if item and item.tipo == 'estrategico' %}selected{% endif %}>Estratégico</option>
+                    <option value="misional" {% if item and item.tipo == 'misional' %}selected{% endif %}>Misional</option>
+                    <option value="apoyo" {% if item and item.tipo == 'apoyo' %}selected{% endif %}>Apoyo</option>
+                </select>
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Responsable</label>
+                <select name="responsable_id" class="form-select">
+                    <option value="">Seleccione</option>
+                    {% for u in usuarios %}
+                    <option value="{{ u.id }}"
+                        {% if item and item.responsable_id == u.id %}selected{% endif %}>
+                        {{ u.nombre }} {{ u.apellido }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select">
+                    <option value="activo" {% if not item or item.estado == 'activo' %}selected{% endif %}>Activo</option>
+                    <option value="inactivo" {% if item and item.estado == 'inactivo' %}selected{% endif %}>Inactivo</option>
+                </select>
+            </div>
+
+            <div class="col-12">
+                <label class="form-label">Objetivo del proceso</label>
+                <textarea name="objetivo" class="form-control" rows="3">{{ item.objetivo if item else '' }}</textarea>
+            </div>
+
+            <div class="col-12">
+                <label class="form-label">Alcance</label>
+                <textarea name="alcance" class="form-control" rows="3">{{ item.alcance if item else '' }}</textarea>
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Entradas</label>
+                <textarea name="entradas" class="form-control" rows="4">{{ item.entradas if item else '' }}</textarea>
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Salidas</label>
+                <textarea name="salidas" class="form-control" rows="4">{{ item.salidas if item else '' }}</textarea>
+            </div>
+
+            <div class="col-12">
+                <button type="submit" class="btn btn-primary">Guardar</button>
+                <a href="{{ url_for('mapa_procesos.index') }}" class="btn btn-secondary">Cancelar</a>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}

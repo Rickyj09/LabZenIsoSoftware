@@ -1,0 +1,97 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Riesgos y Oportunidades{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <h2>{% if item %}Editar{% else %}Nuevo{% endif %} riesgo / oportunidad</h2>
+    <div class="text-muted">Proceso: {{ proceso.nombre }}</div>
+</div>
+
+<div class="page-card">
+    <form method="post">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">Tipo</label>
+                <select name="tipo" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    <option value="riesgo" {% if item and item.tipo == 'riesgo' %}selected{% endif %}>Riesgo</option>
+                    <option value="oportunidad" {% if item and item.tipo == 'oportunidad' %}selected{% endif %}>Oportunidad</option>
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Probabilidad</label>
+                <select name="probabilidad" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for n in range(1, 6) %}
+                    <option value="{{ n }}" {% if item and item.probabilidad == n %}selected{% endif %}>{{ n }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Impacto</label>
+                <select name="impacto" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for n in range(1, 6) %}
+                    <option value="{{ n }}" {% if item and item.impacto == n %}selected{% endif %}>{{ n }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-12">
+                <label class="form-label">Descripción</label>
+                <textarea name="descripcion" class="form-control" rows="3" required>{{ item.descripcion if item else '' }}</textarea>
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Causa</label>
+                <textarea name="causa" class="form-control" rows="3">{{ item.causa if item else '' }}</textarea>
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Efecto / beneficio esperado</label>
+                <textarea name="efecto" class="form-control" rows="3">{{ item.efecto if item else '' }}</textarea>
+            </div>
+
+            <div class="col-12">
+                <label class="form-label">Acción</label>
+                <textarea name="accion" class="form-control" rows="3">{{ item.accion if item else '' }}</textarea>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Responsable</label>
+                <select name="responsable_id" class="form-select">
+                    <option value="">Seleccione</option>
+                    {% for u in usuarios %}
+                    <option value="{{ u.id }}" {% if item and item.responsable_id == u.id %}selected{% endif %}>
+                        {{ u.nombre }} {{ u.apellido }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Fecha compromiso</label>
+                <input type="date" name="fecha_compromiso" class="form-control"
+                       value="{{ item.fecha_compromiso.strftime('%Y-%m-%d') if item and item.fecha_compromiso else '' }}">
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select">
+                    <option value="abierto" {% if not item or item.estado == 'abierto' %}selected{% endif %}>Abierto</option>
+                    <option value="en_tratamiento" {% if item and item.estado == 'en_tratamiento' %}selected{% endif %}>En tratamiento</option>
+                    <option value="cerrado" {% if item and item.estado == 'cerrado' %}selected{% endif %}>Cerrado</option>
+                </select>
+            </div>
+
+            <div class="col-12">
+                <button type="submit" class="btn btn-primary">Guardar</button>
+                <a href="{{ url_for('riesgos_oportunidades.index', proceso_id=proceso.id) }}" class="btn btn-secondary">Cancelar</a>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}

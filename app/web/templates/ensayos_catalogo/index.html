@@ -1,0 +1,81 @@
+{% extends "base_admin.html" %}
+{% block title %}Catálogo de Ensayos{% endblock %}
+
+{% block content %}
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="mb-1">Catálogo de Ensayos</h1>
+            <p class="text-muted mb-0">Listado de ensayos disponibles</p>
+        </div>
+        <div>
+            <a href="{{ url_for('ensayos_catalogo.nuevo') }}" class="btn btn-primary">
+                Nuevo ensayo
+            </a>
+        </div>
+    </div>
+
+    {% if items %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Código</th>
+                        <th>Nombre</th>
+                        <th>Área</th>
+                        <th>Activo</th>
+                        <th style="width: 260px;">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for x in items %}
+                    <tr>
+                        <td>{{ x.id }}</td>
+                        <td>{{ x.codigo }}</td>
+                        <td>{{ x.nombre }}</td>
+                        <td>{{ x.area or '' }}</td>
+                        <td>
+                            {% if x.activo %}
+                                <span class="badge text-bg-success">Sí</span>
+                            {% else %}
+                                <span class="badge text-bg-secondary">No</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <div class="d-flex gap-2">
+                                <a href="{{ url_for('ensayos_catalogo.editar', item_id=x.id) }}"
+                                   class="btn btn-sm btn-outline-primary">
+                                    Editar
+                                </a>
+
+                                {% if x.activo %}
+                                <form method="post"
+                                      action="{{ url_for('ensayos_catalogo.desactivar', item_id=x.id) }}"
+                                      onsubmit="return confirm('¿Seguro que deseas desactivar este ensayo?');">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                                        Desactivar
+                                    </button>
+                                </form>
+                                {% else %}
+                                <form method="post"
+                                      action="{{ url_for('ensayos_catalogo.activar', item_id=x.id) }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-success">
+                                        Activar
+                                    </button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="alert alert-info mb-0">
+            No hay ensayos registrados todavía.
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

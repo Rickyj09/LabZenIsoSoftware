@@ -1,0 +1,81 @@
+{% extends "base_admin.html" %}
+
+{% block title %}{% if item %}Editar documento{% else %}Nuevo documento{% endif %}{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <h2>{% if item %}Editar documento{% else %}Nuevo documento{% endif %}</h2>
+</div>
+
+<div class="page-card">
+    <form method="post">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">Código</label>
+                <input type="text" name="codigo" class="form-control"
+                       value="{{ item.codigo if item else '' }}" required>
+            </div>
+
+            <div class="col-md-5">
+                <label class="form-label">Título</label>
+                <input type="text" name="titulo" class="form-control"
+                       value="{{ item.titulo if item else '' }}" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Tipo de documento</label>
+                <select name="tipo_documento" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for t in tipos_documento %}
+                    <option value="{{ t }}" {% if item and item.tipo_documento == t %}selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Proceso</label>
+                <input type="text" name="proceso" class="form-control"
+                       value="{{ item.proceso if item else '' }}">
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select" required>
+                    {% for e in estados_documento %}
+                    <option value="{{ e }}" {% if item and item.estado == e %}selected{% elif not item and e == 'borrador' %}selected{% endif %}>
+                        {{ e }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            {% if not item %}
+            <div class="col-md-4">
+                <label class="form-label">Versión inicial</label>
+                <input type="text" name="version" class="form-control" value="1.0" required>
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Ruta / URL del archivo</label>
+                <input type="text" name="archivo_url" class="form-control">
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Cambios / observaciones de la versión</label>
+                <textarea name="cambios" class="form-control" rows="3"></textarea>
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Contenido</label>
+                <textarea name="contenido" class="form-control" rows="12"></textarea>
+            </div>
+            {% endif %}
+
+            <div class="col-12">
+                <button type="submit" class="btn btn-primary">Guardar</button>
+                <a href="{{ url_for('documentacion.index') }}" class="btn btn-secondary">Cancelar</a>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}

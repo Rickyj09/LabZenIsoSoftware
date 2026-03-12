@@ -1,0 +1,114 @@
+{% extends "base_admin.html" %}
+{% block title %}{% if item %}Editar asignación{% else %}Nueva asignación{% endif %}{% endblock %}
+
+{% block content %}
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h1 class="mb-1">{% if item %}Editar asignación{% else %}Nueva asignación{% endif %}</h1>
+            <p class="text-muted mb-0">Asignar ensayo a una muestra</p>
+        </div>
+        <div>
+            <a href="{{ url_for('muestra_ensayos.index') }}" class="btn btn-outline-secondary">
+                Volver
+            </a>
+        </div>
+    </div>
+
+    <form method="post">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">Muestra</label>
+                <select name="muestra_id" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for m in muestras %}
+                    <option value="{{ m.id }}" {% if item and item.muestra_id == m.id %}selected{% endif %}>
+                        {{ m.codigo_interno }} - {{ m.solicitud.codigo }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Ensayo</label>
+                <select name="ensayo_id" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for e in ensayos %}
+                    <option value="{{ e.id }}" {% if item and item.ensayo_id == e.id %}selected{% endif %}>
+                        {{ e.nombre }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Método</label>
+                <select name="metodo_id" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for m in metodos %}
+                    <option value="{{ m.id }}" {% if item and item.metodo_id == m.id %}selected{% endif %}>
+                        {{ m.nombre }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Analista</label>
+                <select name="analista_id" class="form-select">
+                    <option value="">Seleccione</option>
+                    {% for a in analistas %}
+                    <option value="{{ a.id }}" {% if item and item.analista_id == a.id %}selected{% endif %}>
+                        {{ a.nombre }} {{ a.apellido }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Fecha programada</label>
+                <input type="date" name="fecha_programada" class="form-control"
+                       value="{{ item.fecha_programada if item else '' }}">
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Fecha inicio</label>
+                <input type="date" name="fecha_inicio" class="form-control"
+                       value="{{ item.fecha_inicio if item else '' }}">
+            </div>
+
+            <div class="col-md-2">
+                <label class="form-label">Fecha fin</label>
+                <input type="date" name="fecha_fin" class="form-control"
+                       value="{{ item.fecha_fin if item else '' }}">
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select">
+                    <option value="pendiente" {% if not item or item.estado == 'pendiente' %}selected{% endif %}>Pendiente</option>
+                    <option value="asignado" {% if item and item.estado == 'asignado' %}selected{% endif %}>Asignado</option>
+                    <option value="en_proceso" {% if item and item.estado == 'en_proceso' %}selected{% endif %}>En proceso</option>
+                    <option value="revisado" {% if item and item.estado == 'revisado' %}selected{% endif %}>Revisado</option>
+                    <option value="aprobado" {% if item and item.estado == 'aprobado' %}selected{% endif %}>Aprobado</option>
+                    <option value="reportado" {% if item and item.estado == 'reportado' %}selected{% endif %}>Reportado</option>
+                </select>
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Observaciones</label>
+                <textarea name="observaciones" class="form-control" rows="3">{{ item.observaciones if item else '' }}</textarea>
+            </div>
+        </div>
+
+        <hr class="my-4">
+
+        <div class="d-flex justify-content-end gap-2">
+            <a href="{{ url_for('muestra_ensayos.index') }}" class="btn btn-outline-secondary">Cancelar</a>
+            <button type="submit" class="btn btn-primary">
+                {% if item %}Actualizar asignación{% else %}Guardar asignación{% endif %}
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

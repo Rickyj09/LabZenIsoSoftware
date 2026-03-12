@@ -1,0 +1,74 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Riesgos y Oportunidades{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h2 class="mb-1">Riesgos y Oportunidades</h2>
+        <div class="text-muted">Proceso: {{ proceso.nombre }}</div>
+    </div>
+    <div>
+        <a href="{{ url_for('mapa_procesos.detalle', item_id=proceso.id) }}" class="btn btn-outline-secondary me-2">
+            Volver al proceso
+        </a>
+        <a href="{{ url_for('riesgos_oportunidades.nuevo', proceso_id=proceso.id) }}" class="btn btn-primary">
+            Nuevo registro
+        </a>
+    </div>
+</div>
+
+<div class="page-card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Tipo</th>
+                    <th>Descripción</th>
+                    <th>Prob.</th>
+                    <th>Impacto</th>
+                    <th>Nivel</th>
+                    <th>Estado</th>
+                    <th>Responsable</th>
+                    <th style="width: 120px;">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td>
+                        {% if item.tipo == 'riesgo' %}
+                            <span class="badge bg-danger">Riesgo</span>
+                        {% else %}
+                            <span class="badge bg-success">Oportunidad</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ item.descripcion }}</td>
+                    <td>{{ item.probabilidad }}</td>
+                    <td>{{ item.impacto }}</td>
+                    <td><strong>{{ item.nivel }}</strong></td>
+                    <td>{{ item.estado }}</td>
+                    <td>
+                        {% if item.responsable %}
+                            {{ item.responsable.nombre }} {{ item.responsable.apellido }}
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{{ url_for('riesgos_oportunidades.editar', item_id=item.id) }}"
+                           class="btn btn-sm btn-outline-primary">
+                            Editar
+                        </a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" class="text-center text-muted">
+                        No existen riesgos u oportunidades registrados para este proceso.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
