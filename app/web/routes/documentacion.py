@@ -1,5 +1,4 @@
 import os
-from datetime import datetime, timezone
 
 from flask import (
     abort,
@@ -23,13 +22,21 @@ from app.models.documentos import (
 )
 from app.services.document_versioning_service import (
     DocumentVersioningError,
-    approve_version as approve_document_version,
     can_edit_document,
     create_draft_version,
     create_initial_version,
     get_current_version,
     get_preparation_version,
-    send_to_review,
+)
+from app.services.document_workflow_service import (
+    DocumentWorkflowError,
+    approve_version as approve_workflow_version,
+    get_latest_rejected_version,
+    obsolete_document,
+    record_document_event,
+    reject_version as reject_workflow_version,
+    return_to_draft,
+    send_for_review,
 )
 from app.services.storage_service import (
     apply_stored_file_metadata,
@@ -54,6 +61,13 @@ TIPOS_DOCUMENTO = [
 ]
 
 PREVIEWABLE_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
+
+
+def workflow_request_metadata():
+    return {
+        "ip": request.headers.get("X-Forwarded-For", request.remote_addr),
+        "user_agent": request.headers.get("User-Agent"),
+    }
 
 
 def ruta_archivo_legacy(version_doc):
@@ -273,6 +287,17 @@ def nuevo():
                 user_id=current_user.id,
             )
             apply_stored_file_metadata(version_doc, stored_file)
+            db.session.flush()
+            record_document_event(
+                documento=documento,
+                version_doc=version_doc,
+                usuario=current_user,
+                accion="CREAR_VERSION",
+                estado_anterior=None,
+                estado_nuevo="BORRADOR",
+                comentario=cambios,
+                **workflow_request_metadata(),
+            )
 
             db.session.commit()
         except (DocumentStorageError, DocumentVersioningError) as exc:
@@ -328,6 +353,7 @@ def detalle(item_id):
 
     version_vigente = get_current_version(item)
     version_preparacion = get_preparation_version(item)
+    version_rechazada = get_latest_rejected_version(item)
     version_mostrada = version_vigente or version_preparacion or (versiones[0] if versiones else None)
 
     preview_url = None
@@ -348,6 +374,13 @@ def detalle(item_id):
         version_trazabilidad=version_mostrada,
         version_vigente=version_vigente,
         version_preparacion=version_preparacion,
+        version_rechazada=version_rechazada,
+        eventos=(
+            DocumentoAprobacion.query
+            .filter_by(documento_id=item.id, empresa_id=current_user.empresa_id)
+            .order_by(DocumentoAprobacion.fecha_accion.desc(), DocumentoAprobacion.id.desc())
+            .all()
+        ),
         preview_url=preview_url,
         preview_tipo=preview_tipo,
     )
@@ -508,6 +541,17 @@ def nueva_version(item_id):
                 user_id=current_user.id,
             )
             apply_stored_file_metadata(nueva, stored_file)
+            db.session.flush()
+            record_document_event(
+                documento=item,
+                version_doc=nueva,
+                usuario=current_user,
+                accion="CREAR_VERSION",
+                estado_anterior=None,
+                estado_nuevo="BORRADOR",
+                comentario=cambios,
+                **workflow_request_metadata(),
+            )
 
             db.session.commit()
         except (DocumentStorageError, DocumentVersioningError) as exc:
@@ -555,25 +599,18 @@ def aprobar_version(item_id, version_id):
     ).first_or_404()
 
     try:
-        approve_document_version(
+        approve_workflow_version(
             documento=item,
             version_doc=version,
-            user_id=current_user.id,
+            usuario=current_user,
+            comentario=request.form.get("comentario", ""),
+            **workflow_request_metadata(),
         )
-    except DocumentVersioningError as exc:
+        db.session.commit()
+    except DocumentWorkflowError as exc:
+        db.session.rollback()
         flash(str(exc), "warning")
         return redirect(url_for("documentacion.detalle", item_id=item.id))
-
-    aprobacion = DocumentoAprobacion(
-        empresa_id=current_user.empresa_id,
-        documento_version_id=version.id,
-        usuario_id=current_user.id,
-        accion="APROBADO",
-        fecha_accion=datetime.now(timezone.utc),
-        comentario="Documento aprobado desde el flujo documental",
-    )
-    db.session.add(aprobacion)
-    db.session.commit()
 
     flash("Versión aprobada correctamente.", "success")
     return redirect(url_for("documentacion.detalle", item_id=item.id))
@@ -594,27 +631,82 @@ def enviar_revision(item_id):
         return redirect(url_for("documentacion.detalle", item_id=item.id))
 
     try:
-        send_to_review(
+        send_for_review(
             documento=item,
             version_doc=version_actual,
-            user_id=current_user.id,
+            usuario=current_user,
+            comentario=request.form.get("comentario", ""),
+            **workflow_request_metadata(),
         )
-    except DocumentVersioningError as exc:
+        db.session.commit()
+    except DocumentWorkflowError as exc:
+        db.session.rollback()
         flash(str(exc), "warning")
         return redirect(url_for("documentacion.detalle", item_id=item.id))
 
-    movimiento = DocumentoAprobacion(
-        empresa_id=current_user.empresa_id,
-        documento_version_id=version_actual.id,
-        usuario_id=current_user.id,
-        accion="EN_REVISION",
-        fecha_accion=datetime.now(timezone.utc),
-        comentario="Documento enviado a revisión",
-    )
-    db.session.add(movimiento)
-    db.session.commit()
-
     flash("Documento enviado a revisión correctamente.", "success")
+    return redirect(url_for("documentacion.detalle", item_id=item.id))
+
+
+@bp.route("/<int:item_id>/rechazar-version/<int:version_id>", methods=["POST"])
+@login_required
+def rechazar_version(item_id, version_id):
+    item = Documento.query.filter_by(
+        id=item_id,
+        empresa_id=current_user.empresa_id,
+    ).first_or_404()
+    version = DocumentoVersion.query.filter_by(
+        id=version_id,
+        documento_id=item.id,
+        empresa_id=current_user.empresa_id,
+    ).first_or_404()
+
+    try:
+        reject_workflow_version(
+            documento=item,
+            version_doc=version,
+            usuario=current_user,
+            comentario=request.form.get("comentario", ""),
+            **workflow_request_metadata(),
+        )
+        db.session.commit()
+    except DocumentWorkflowError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+        return redirect(url_for("documentacion.detalle", item_id=item.id))
+
+    flash("Versión rechazada. Debe devolverse a borrador para su corrección.", "warning")
+    return redirect(url_for("documentacion.detalle", item_id=item.id))
+
+
+@bp.route("/<int:item_id>/devolver-borrador/<int:version_id>", methods=["POST"])
+@login_required
+def devolver_borrador(item_id, version_id):
+    item = Documento.query.filter_by(
+        id=item_id,
+        empresa_id=current_user.empresa_id,
+    ).first_or_404()
+    version = DocumentoVersion.query.filter_by(
+        id=version_id,
+        documento_id=item.id,
+        empresa_id=current_user.empresa_id,
+    ).first_or_404()
+
+    try:
+        return_to_draft(
+            documento=item,
+            version_doc=version,
+            usuario=current_user,
+            comentario=request.form.get("comentario", ""),
+            **workflow_request_metadata(),
+        )
+        db.session.commit()
+    except DocumentWorkflowError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+        return redirect(url_for("documentacion.detalle", item_id=item.id))
+
+    flash("Versión devuelta a borrador para corrección.", "success")
     return redirect(url_for("documentacion.detalle", item_id=item.id))
 
 
@@ -626,32 +718,18 @@ def obsoletar(item_id):
         empresa_id=current_user.empresa_id
     ).first_or_404()
 
-    item.estado = "OBSOLETO"
-
-    version_actual = get_current_version(item)
-    version_preparacion = get_preparation_version(item)
-
-    if version_actual:
-        version_actual.estado = "OBSOLETO"
-        version_actual.fecha_obsolescencia = datetime.now(timezone.utc)
-
-        movimiento = DocumentoAprobacion(
-            empresa_id=current_user.empresa_id,
-            documento_version_id=version_actual.id,
-            usuario_id=current_user.id,
-            accion="OBSOLETO",
-            fecha_accion=datetime.now(timezone.utc),
-            comentario="Documento marcado como obsoleto",
+    try:
+        obsolete_document(
+            documento=item,
+            usuario=current_user,
+            motivo=request.form.get("motivo", ""),
+            **workflow_request_metadata(),
         )
-        db.session.add(movimiento)
+        db.session.commit()
+    except DocumentWorkflowError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+        return redirect(url_for("documentacion.detalle", item_id=item.id))
 
-    if version_preparacion:
-        version_preparacion.estado = "OBSOLETO"
-        version_preparacion.fecha_obsolescencia = datetime.now(timezone.utc)
-
-    item.version_vigente_id = None
-    item.version_vigente = None
-
-    db.session.commit()
     flash("Documento marcado como obsoleto.", "warning")
     return redirect(url_for("documentacion.detalle", item_id=item.id))

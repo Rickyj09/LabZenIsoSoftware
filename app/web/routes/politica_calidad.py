@@ -10,6 +10,7 @@ from app.services.document_versioning_service import (
     get_current_version,
     get_preparation_version,
 )
+from app.services.document_workflow_service import record_document_event
 
 bp = Blueprint("politica_calidad", __name__, url_prefix="/politica-calidad")
 
@@ -85,12 +86,24 @@ def nuevo():
         db.session.flush()
 
         try:
-            create_initial_version(
+            version_doc = create_initial_version(
                 documento=documento,
                 version=version,
                 contenido=contenido,
                 cambios=cambios,
                 user_id=current_user.id,
+            )
+            db.session.flush()
+            record_document_event(
+                documento=documento,
+                version_doc=version_doc,
+                usuario=current_user,
+                accion="CREAR_VERSION",
+                estado_anterior=None,
+                estado_nuevo="BORRADOR",
+                comentario=cambios,
+                ip=request.headers.get("X-Forwarded-For", request.remote_addr),
+                user_agent=request.headers.get("User-Agent"),
             )
             db.session.commit()
         except DocumentVersioningError as exc:
@@ -127,12 +140,24 @@ def nueva_version():
             return render_template("politica_calidad/form.html", modo="version", documento=documento, version=None)
 
         try:
-            create_draft_version(
+            version_doc = create_draft_version(
                 documento=documento,
                 version=version,
                 contenido=contenido,
                 cambios=cambios,
                 user_id=current_user.id,
+            )
+            db.session.flush()
+            record_document_event(
+                documento=documento,
+                version_doc=version_doc,
+                usuario=current_user,
+                accion="CREAR_VERSION",
+                estado_anterior=None,
+                estado_nuevo="BORRADOR",
+                comentario=cambios,
+                ip=request.headers.get("X-Forwarded-For", request.remote_addr),
+                user_agent=request.headers.get("User-Agent"),
             )
             db.session.commit()
         except DocumentVersioningError as exc:

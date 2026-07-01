@@ -19,6 +19,16 @@ ESTADOS_VERSION_DOCUMENTO = (
     "SUSTITUIDO",
 )
 
+ACCIONES_EVENTO_DOCUMENTO = (
+    "CREAR_VERSION",
+    "ENVIAR_REVISION",
+    "APROBAR",
+    "RECHAZAR",
+    "DEVOLVER_BORRADOR",
+    "OBSOLETAR",
+    "SUSTITUIR_VERSION",
+)
+
 
 class Documento(TenantMixin, BaseModel):
     __tablename__ = "documentos"
@@ -59,6 +69,12 @@ class Documento(TenantMixin, BaseModel):
         foreign_keys=[version_vigente_id],
         post_update=True,
     )
+    eventos = db.relationship(
+        "DocumentoAprobacion",
+        foreign_keys="DocumentoAprobacion.documento_id",
+        back_populates="documento",
+        lazy=True,
+    )
 
 
 class DocumentoVersion(TenantMixin, BaseModel):
@@ -97,11 +113,17 @@ class DocumentoVersion(TenantMixin, BaseModel):
     elaborado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
     revisado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
     aprobado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    rechazado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    obsoletado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
 
     fecha_aprobacion = db.Column(db.DateTime(timezone=True), nullable=True)
     fecha_envio_revision = db.Column(db.DateTime(timezone=True), nullable=True)
     fecha_rechazo = db.Column(db.DateTime(timezone=True), nullable=True)
     fecha_obsolescencia = db.Column(db.DateTime(timezone=True), nullable=True)
+    comentario_revision = db.Column(db.Text)
+    comentario_aprobacion = db.Column(db.Text)
+    comentario_rechazo = db.Column(db.Text)
+    motivo_obsolescencia = db.Column(db.Text)
     estado = db.Column(db.String(30), default="BORRADOR", nullable=False)
 
     empresa = db.relationship("Empresa")
@@ -114,6 +136,8 @@ class DocumentoVersion(TenantMixin, BaseModel):
     elaborado_por = db.relationship("Usuario", foreign_keys=[elaborado_por_id])
     revisado_por = db.relationship("Usuario", foreign_keys=[revisado_por_id])
     aprobado_por = db.relationship("Usuario", foreign_keys=[aprobado_por_id])
+    rechazado_por = db.relationship("Usuario", foreign_keys=[rechazado_por_id])
+    obsoletado_por = db.relationship("Usuario", foreign_keys=[obsoletado_por_id])
 
     aprobaciones = db.relationship(
         "DocumentoAprobacion",
@@ -125,14 +149,32 @@ class DocumentoVersion(TenantMixin, BaseModel):
 
 class DocumentoAprobacion(TenantMixin, BaseModel):
     __tablename__ = "documento_aprobaciones"
+    __table_args__ = (
+        db.CheckConstraint(
+            "accion IN ('CREAR_VERSION', 'ENVIAR_REVISION', 'APROBAR', 'RECHAZAR', 'DEVOLVER_BORRADOR', 'OBSOLETAR', 'SUSTITUIR_VERSION')",
+            name="ck_documento_eventos_accion_valida",
+        ),
+        db.Index("ix_documento_eventos_documento_id", "documento_id"),
+        db.Index("ix_documento_eventos_accion", "accion"),
+    )
 
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
     documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
     usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
 
     accion = db.Column(db.String(30), nullable=False)
     fecha_accion = db.Column(db.DateTime(timezone=True), nullable=False)
+    estado_anterior = db.Column(db.String(30))
+    estado_nuevo = db.Column(db.String(30), nullable=False)
     comentario = db.Column(db.Text)
+    ip = db.Column(db.String(50))
+    user_agent = db.Column(db.Text)
 
     empresa = db.relationship("Empresa")
     usuario = db.relationship("Usuario", foreign_keys=[usuario_id])
+    documento = db.relationship(
+        "Documento",
+        foreign_keys=[documento_id],
+        back_populates="eventos",
+    )
     documento_version = db.relationship("DocumentoVersion", back_populates="aprobaciones")

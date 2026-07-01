@@ -10,7 +10,7 @@
     </div>
 
     <div class="d-flex gap-2 flex-wrap align-items-center">
-        {% if item.estado != 'OBSOLETO' and not version_preparacion %}
+        {% if item.estado != 'OBSOLETO' and not version_preparacion and not version_rechazada %}
         <a href="{{ url_for('documentacion.nueva_version', item_id=item.id) }}" class="btn btn-outline-success">
             Nueva versión
         </a>
@@ -23,41 +23,54 @@
             </a>
             {% endif %}
 
-            <form method="post" action="{{ url_for('documentacion.enviar_revision', item_id=item.id) }}" class="d-inline">
+            <form method="post" action="{{ url_for('documentacion.enviar_revision', item_id=item.id) }}" class="d-flex gap-2">
+                <input type="text" name="comentario" class="form-control form-control-sm"
+                       placeholder="Comentario de revisión (opcional)">
                 <button type="submit" class="btn btn-warning">
                     Enviar a revisión
-                </button>
-            </form>
-
-            <form method="post" action="{{ url_for('documentacion.obsoletar', item_id=item.id) }}" class="d-inline">
-                <button type="submit" class="btn btn-outline-danger"
-                        onclick="return confirm('¿Deseas marcar este documento como obsoleto?')">
-                    Marcar obsoleto
                 </button>
             </form>
 
         {% elif version_preparacion and version_preparacion.estado == 'EN_REVISION' %}
             <form method="post"
                   action="{{ url_for('documentacion.aprobar_version', item_id=item.id, version_id=version_preparacion.id) }}"
-                  class="d-inline">
+                  class="d-flex gap-2">
+                <input type="text" name="comentario" class="form-control form-control-sm"
+                       placeholder="Comentario de aprobación (opcional)">
                 <button type="submit" class="btn btn-success">
                     Aprobar
                 </button>
             </form>
 
-            <form method="post" action="{{ url_for('documentacion.obsoletar', item_id=item.id) }}" class="d-inline">
-                <button type="submit" class="btn btn-outline-danger"
-                        onclick="return confirm('¿Deseas marcar este documento como obsoleto?')">
-                    Marcar obsoleto
+            <form method="post"
+                  action="{{ url_for('documentacion.rechazar_version', item_id=item.id, version_id=version_preparacion.id) }}"
+                  class="d-flex gap-2">
+                <input type="text" name="comentario" class="form-control form-control-sm"
+                       placeholder="Motivo de rechazo" required>
+                <button type="submit" class="btn btn-outline-danger">
+                    Rechazar
                 </button>
             </form>
 
-        {% elif item.estado == 'APROBADO' %}
+        {% elif version_rechazada %}
+            <form method="post"
+                  action="{{ url_for('documentacion.devolver_borrador', item_id=item.id, version_id=version_rechazada.id) }}"
+                  class="d-flex gap-2">
+                <input type="text" name="comentario" class="form-control form-control-sm"
+                       placeholder="Comentario de devolución" required>
+                <button type="submit" class="btn btn-outline-warning">
+                    Devolver a borrador
+                </button>
+            </form>
+
+        {% elif item.estado == 'APROBADO' and version_vigente %}
             <span class="btn btn-outline-secondary disabled">
                 Documento bloqueado por aprobación
             </span>
 
-            <form method="post" action="{{ url_for('documentacion.obsoletar', item_id=item.id) }}" class="d-inline">
+            <form method="post" action="{{ url_for('documentacion.obsoletar', item_id=item.id) }}" class="d-flex gap-2">
+                <input type="text" name="motivo" class="form-control form-control-sm"
+                       placeholder="Motivo de obsolescencia" required>
                 <button type="submit" class="btn btn-outline-danger"
                         onclick="return confirm('¿Deseas marcar este documento como obsoleto?')">
                     Marcar obsoleto
@@ -262,7 +275,18 @@
     <h5>Versión en preparación</h5>
     <p class="mb-1"><strong>Versión:</strong> {{ version_preparacion.version }}</p>
     <p class="mb-1"><strong>Estado:</strong> {{ version_preparacion.estado }}</p>
-    <p class="mb-0"><strong>Cambios:</strong> {{ version_preparacion.cambios }}</p>
+    <p class="mb-1"><strong>Enviada a revisión:</strong> {{ version_preparacion.fecha_envio_revision or '-' }}</p>
+    <p class="mb-1"><strong>Comentario de revisión:</strong> {{ version_preparacion.comentario_revision or '-' }}</p>
+    <p class="mb-0"><strong>Cambios:</strong> {{ version_preparacion.cambios or '-' }}</p>
+</div>
+{% endif %}
+
+{% if version_rechazada %}
+<div class="page-card mb-4 border border-danger">
+    <h5>Versión rechazada pendiente de corrección</h5>
+    <p class="mb-1"><strong>Versión:</strong> {{ version_rechazada.version }}</p>
+    <p class="mb-1"><strong>Fecha de rechazo:</strong> {{ version_rechazada.fecha_rechazo or '-' }}</p>
+    <p class="mb-0"><strong>Motivo:</strong> {{ version_rechazada.comentario_rechazo or '-' }}</p>
 </div>
 {% endif %}
 
@@ -355,16 +379,7 @@
                         {% endif %}
                     </td>
                     <td>
-                            {% if v.estado == 'EN_REVISION' and version_preparacion and v.id == version_preparacion.id and item.estado != 'OBSOLETO' %}
-                        <form method="post"
-                              action="{{ url_for('documentacion.aprobar_version', item_id=item.id, version_id=v.id) }}">
-                            <button type="submit" class="btn btn-sm btn-outline-success">
-                                Aprobar
-                            </button>
-                        </form>
-                        {% else %}
-                            <span class="text-muted">-</span>
-                        {% endif %}
+                        <span class="text-muted">Gestionar arriba</span>
                     </td>
                 </tr>
                 {% else %}
@@ -380,21 +395,25 @@
 <div class="page-card">
     <h5 class="mb-3">Trazabilidad de aprobaciones y acciones</h5>
 
-    {% if version_trazabilidad and version_trazabilidad.aprobaciones %}
+    {% if eventos %}
     <div class="table-responsive">
         <table class="table table-hover align-middle">
             <thead>
                 <tr>
                     <th>Fecha</th>
+                    <th>Versión</th>
                     <th>Usuario</th>
                     <th>Acción</th>
+                    <th>Transición</th>
                     <th>Comentario</th>
+                    <th>IP</th>
                 </tr>
             </thead>
             <tbody>
-                {% for a in version_trazabilidad.aprobaciones %}
+                {% for a in eventos %}
                 <tr>
                     <td>{{ a.fecha_accion }}</td>
+                    <td>{{ a.documento_version.version if a.documento_version else '-' }}</td>
                     <td>
                         {% if a.usuario %}
                             {{ a.usuario.nombre }} {{ a.usuario.apellido or '' }}
@@ -403,7 +422,9 @@
                         {% endif %}
                     </td>
                     <td>{{ a.accion }}</td>
+                    <td>{{ a.estado_anterior or 'INICIO' }} → {{ a.estado_nuevo }}</td>
                     <td>{{ a.comentario or '' }}</td>
+                    <td>{{ a.ip or '-' }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -411,7 +432,7 @@
     </div>
     {% else %}
     <div class="text-muted">
-        No existen acciones registradas para la versión mostrada.
+        No existen acciones registradas para este documento.
     </div>
     {% endif %}
 </div>
