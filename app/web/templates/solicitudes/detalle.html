@@ -1,0 +1,98 @@
+{% extends "base_admin.html" %}
+{% block title %}Detalle de solicitud{% endblock %}
+
+{% block content %}
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div>
+            <h1 class="mb-1">Solicitud {{ item.codigo }}</h1>
+            <p class="text-muted mb-0">Detalle de la solicitud registrada</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('solicitudes.editar', solicitud_id=item.id) }}" class="btn btn-primary">
+                Editar
+            </a>
+            <a href="{{ url_for('solicitudes.index') }}" class="btn btn-outline-secondary">
+                Volver
+            </a>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <div class="border rounded p-3 h-100">
+                <h5 class="mb-3">Información general</h5>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <strong>ID</strong>
+                        <div>{{ item.id }}</div>
+                    </div>
+                    <div class="col-md-4">
+                        <strong>Código</strong>
+                        <div>{{ item.codigo }}</div>
+                    </div>
+                    <div class="col-md-4">
+                        <strong>Estado</strong>
+                        <div>
+                            <span class="badge rounded-pill
+                                {% if item.estado == 'recibida' %}text-bg-secondary
+                                {% elif item.estado == 'en_proceso' %}text-bg-primary
+                                {% elif item.estado == 'finalizada' %}text-bg-success
+                                {% elif item.estado == 'cancelada' %}text-bg-danger
+                                {% else %}text-bg-secondary{% endif %}">
+                                {{ item.estado }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <strong>Cliente</strong>
+                        <div>{{ item.cliente.nombre_razon_social if item.cliente else '-' }}</div>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Identificación del cliente</strong>
+                        <div>{{ item.cliente.identificacion if item.cliente else '-' }}</div>
+                    </div>
+
+                    <div class="col-md-4">
+                        <strong>Fecha solicitud</strong>
+                        <div>{{ item.fecha_solicitud or '-' }}</div>
+                    </div>
+                    <div class="col-md-4">
+                        <strong>Fecha recepción</strong>
+                        <div>{{ item.fecha_recepcion or '-' }}</div>
+                    </div>
+                    <div class="col-md-4">
+                        <strong>Tipo de servicio</strong>
+                        <div>{{ item.tipo_servicio or '-' }}</div>
+                    </div>
+
+                    <div class="col-md-12">
+                        <strong>Descripción</strong>
+                        <div>{{ item.descripcion or '-' }}</div>
+                    </div>
+
+                    <div class="col-md-12">
+                        <strong>Observaciones</strong>
+                        <div>{{ item.observaciones or '-' }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="border rounded p-3">
+                <h5 class="mb-3">Cliente relacionado</h5>
+                {% if item.cliente %}
+                    <p class="mb-2"><strong>Nombre:</strong><br>{{ item.cliente.nombre_razon_social }}</p>
+                    <p class="mb-2"><strong>Contacto:</strong><br>{{ item.cliente.contacto_nombre or '-' }}</p>
+                    <p class="mb-2"><strong>Email:</strong><br>{{ item.cliente.contacto_email or '-' }}</p>
+                    <p class="mb-0"><strong>Teléfono:</strong><br>{{ item.cliente.contacto_telefono or '-' }}</p>
+                {% else %}
+                    <p class="text-muted mb-0">No hay cliente asociado.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

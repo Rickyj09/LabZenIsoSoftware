@@ -1,0 +1,140 @@
+{% extends "base_admin.html" %}
+{% block title %}{% if item %}Editar oferta{% else %}Nueva oferta{% endif %}{% endblock %}
+
+{% block content %}
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div>
+            <h1 class="mb-1">{% if item %}Editar oferta{% else %}Nueva oferta{% endif %}</h1>
+            <p class="text-muted mb-0">
+                {% if item %}
+                    Actualizar información de la oferta
+                {% else %}
+                    Registrar una nueva oferta / cotización
+                {% endif %}
+            </p>
+        </div>
+        <div>
+            <a href="{{ url_for('ofertas.index') }}" class="btn btn-outline-secondary">
+                Volver
+            </a>
+        </div>
+    </div>
+
+    <form method="post">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">Solicitud</label>
+                <select name="solicitud_id" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for s in solicitudes %}
+                        <option value="{{ s.id }}"
+                            {% if item and item.solicitud_id == s.id %}selected{% endif %}>
+                            {{ s.codigo }} - {{ s.cliente.nombre_razon_social if s.cliente else '' }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Código</label>
+                <input type="text" name="codigo" class="form-control"
+                       value="{{ item.codigo if item else '' }}" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select">
+                    <option value="borrador" {% if not item or item.estado == 'borrador' %}selected{% endif %}>Borrador</option>
+                    <option value="enviada" {% if item and item.estado == 'enviada' %}selected{% endif %}>Enviada</option>
+                    <option value="aprobada" {% if item and item.estado == 'aprobada' %}selected{% endif %}>Aprobada</option>
+                    <option value="rechazada" {% if item and item.estado == 'rechazada' %}selected{% endif %}>Rechazada</option>
+                    <option value="vencida" {% if item and item.estado == 'vencida' %}selected{% endif %}>Vencida</option>
+                </select>
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Fecha emisión</label>
+                <input type="date" name="fecha_emision" class="form-control"
+                       value="{{ item.fecha_emision if item else '' }}" required>
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Fecha vencimiento</label>
+                <input type="date" name="fecha_vencimiento" class="form-control"
+                       value="{{ item.fecha_vencimiento if item and item.fecha_vencimiento else '' }}">
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Objeto</label>
+                <input type="text" name="objeto" class="form-control"
+                       value="{{ item.objeto if item else '' }}">
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Alcance</label>
+                <textarea name="alcance" class="form-control" rows="3">{{ item.alcance if item else '' }}</textarea>
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Condiciones</label>
+                <textarea name="condiciones" class="form-control" rows="3">{{ item.condiciones if item else '' }}</textarea>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Subtotal</label>
+                <input type="number" step="0.01" min="0" name="subtotal" class="form-control"
+                       value="{{ item.subtotal if item else '0.00' }}">
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Impuestos</label>
+                <input type="number" step="0.01" min="0" name="impuestos" class="form-control"
+                       value="{{ item.impuestos if item else '0.00' }}">
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Total</label>
+                <input type="number" step="0.01" min="0" name="total" class="form-control"
+                       value="{{ item.total if item else '0.00' }}">
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Observaciones</label>
+                <textarea name="observaciones" class="form-control" rows="3">{{ item.observaciones if item else '' }}</textarea>
+            </div>
+        </div>
+
+        <hr class="my-4">
+
+        <div class="d-flex justify-content-end gap-2">
+            <a href="{{ url_for('ofertas.index') }}" class="btn btn-outline-secondary">
+                Cancelar
+            </a>
+            <button type="submit" class="btn btn-primary">
+                {% if item %}Actualizar oferta{% else %}Guardar oferta{% endif %}
+            </button>
+        </div>
+    </form>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const subtotalInput = document.querySelector('input[name="subtotal"]');
+    const impuestosInput = document.querySelector('input[name="impuestos"]');
+    const totalInput = document.querySelector('input[name="total"]');
+
+    function calcularTotal() {
+        const subtotal = parseFloat(subtotalInput.value || 0);
+        const impuestos = parseFloat(impuestosInput.value || 0);
+        totalInput.value = (subtotal + impuestos).toFixed(2);
+    }
+
+    if (subtotalInput && impuestosInput && totalInput) {
+        subtotalInput.addEventListener("input", calcularTotal);
+        impuestosInput.addEventListener("input", calcularTotal);
+    }
+});
+</script>
+
+{% endblock %}

@@ -3,7 +3,7 @@
 
 {% block content %}
 <div class="page-card">
-    <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
         <div>
             <h1 class="mb-1">Clientes</h1>
             <p class="text-muted mb-0">Listado de clientes registrados</p>
@@ -15,6 +15,34 @@
         </div>
     </div>
 
+    <form method="get" class="row g-3 mb-4">
+        <div class="col-md-7">
+            <label class="form-label">Buscar</label>
+            <input
+                type="text"
+                name="q"
+                class="form-control"
+                value="{{ q or '' }}"
+                placeholder="Identificación, nombre, contacto, correo, teléfono o ciudad"
+            >
+        </div>
+
+        <div class="col-md-3">
+            <label class="form-label">Estado</label>
+            <select name="estado" class="form-select">
+                <option value="activos" {% if estado == 'activos' %}selected{% endif %}>Activos</option>
+                <option value="inactivos" {% if estado == 'inactivos' %}selected{% endif %}>Inactivos</option>
+                <option value="todos" {% if estado == 'todos' %}selected{% endif %}>Todos</option>
+            </select>
+        </div>
+
+        <div class="col-md-2 d-flex align-items-end">
+            <div class="d-grid w-100">
+                <button type="submit" class="btn btn-outline-primary">Filtrar</button>
+            </div>
+        </div>
+    </form>
+
     {% if clientes %}
         <div class="table-responsive">
             <table class="table table-hover align-middle">
@@ -25,11 +53,9 @@
                         <th>Identificación</th>
                         <th>Nombre / Razón social</th>
                         <th>Contacto</th>
-                        <th>Email</th>
-                        <th>Teléfono</th>
                         <th>Ciudad</th>
                         <th>Estado</th>
-                        <th style="width: 220px;">Acciones</th>
+                        <th style="width: 260px;">Acciones</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -39,9 +65,11 @@
                         <td>{{ c.tipo_cliente or '' }}</td>
                         <td>{{ c.identificacion or '' }}</td>
                         <td>{{ c.nombre_razon_social }}</td>
-                        <td>{{ c.contacto_nombre or '' }}</td>
-                        <td>{{ c.contacto_email or '' }}</td>
-                        <td>{{ c.contacto_telefono or '' }}</td>
+                        <td>
+                            <div>{{ c.contacto_nombre or '' }}</div>
+                            <div class="text-muted small">{{ c.contacto_email or '' }}</div>
+                            <div class="text-muted small">{{ c.contacto_telefono or '' }}</div>
+                        </td>
                         <td>{{ c.ciudad or '' }}</td>
                         <td>
                             <span class="badge {% if c.estado == 'activo' %}text-bg-success{% else %}text-bg-secondary{% endif %}">
@@ -49,7 +77,12 @@
                             </span>
                         </td>
                         <td>
-                            <div class="d-flex gap-2">
+                            <div class="d-flex gap-2 flex-wrap">
+                                <a href="{{ url_for('clientes.detalle', cliente_id=c.id) }}"
+                                   class="btn btn-sm btn-outline-dark">
+                                    Ver
+                                </a>
+
                                 <a href="{{ url_for('clientes.editar', cliente_id=c.id) }}"
                                    class="btn btn-sm btn-outline-primary">
                                     Editar
@@ -63,6 +96,14 @@
                                         Desactivar
                                     </button>
                                 </form>
+                                {% else %}
+                                <form method="post"
+                                      action="{{ url_for('clientes.activar', cliente_id=c.id) }}"
+                                      onsubmit="return confirm('¿Seguro que deseas activar este cliente?');">
+                                    <button type="submit" class="btn btn-sm btn-outline-success">
+                                        Activar
+                                    </button>
+                                </form>
                                 {% endif %}
                             </div>
                         </td>
@@ -73,7 +114,7 @@
         </div>
     {% else %}
         <div class="alert alert-info mb-0">
-            No hay clientes registrados todavía.
+            No hay clientes registrados con los filtros seleccionados.
         </div>
     {% endif %}
 </div>

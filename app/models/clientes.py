@@ -4,8 +4,11 @@ from app.models.base import BaseModel, TenantMixin
 
 class Cliente(TenantMixin, BaseModel):
     __tablename__ = "clientes"
+    __table_args__ = (
+        db.UniqueConstraint("empresa_id", "identificacion", name="uq_clientes_empresa_identificacion"),
+    )
 
-    tipo_cliente = db.Column(db.String(30))
+    tipo_cliente = db.Column(db.String(30), nullable=False, default="empresa")
     identificacion = db.Column(db.String(30))
     nombre_razon_social = db.Column(db.String(200), nullable=False)
     contacto_nombre = db.Column(db.String(150))
@@ -13,7 +16,7 @@ class Cliente(TenantMixin, BaseModel):
     contacto_telefono = db.Column(db.String(50))
     direccion = db.Column(db.Text)
     ciudad = db.Column(db.String(100))
-    estado = db.Column(db.String(30), default="activo")
+    estado = db.Column(db.String(30), nullable=False, default="activo")
 
     empresa = db.relationship("Empresa", back_populates="clientes")
     solicitudes = db.relationship(
@@ -23,6 +26,20 @@ class Cliente(TenantMixin, BaseModel):
         cascade="all, delete-orphan"
     )
 
+    ofertas = db.relationship(
+    "Oferta",
+    back_populates="cliente",
+    lazy=True,
+    cascade="all, delete-orphan"
+    )
+
+
+    contratos = db.relationship(
+    "Contrato",
+    back_populates="cliente",
+    lazy=True,
+    cascade="all, delete-orphan"
+    )
 
 class Solicitud(TenantMixin, BaseModel):
     __tablename__ = "solicitudes"
@@ -30,13 +47,18 @@ class Solicitud(TenantMixin, BaseModel):
         db.UniqueConstraint("empresa_id", "codigo", name="uq_solicitudes_empresa_codigo"),
     )
 
-    cliente_id = db.Column(db.BigInteger, db.ForeignKey("clientes.id"), nullable=False)
+    cliente_id = db.Column(
+        db.BigInteger,
+        db.ForeignKey("clientes.id"),
+        nullable=False,
+        index=True
+    )
     codigo = db.Column(db.String(50), nullable=False)
     fecha_solicitud = db.Column(db.Date, nullable=False)
     fecha_recepcion = db.Column(db.Date)
     tipo_servicio = db.Column(db.String(100))
     descripcion = db.Column(db.Text)
-    estado = db.Column(db.String(30), default="recibida")
+    estado = db.Column(db.String(30), nullable=False, default="recibida")
     observaciones = db.Column(db.Text)
     creado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
 
@@ -52,4 +74,19 @@ class Solicitud(TenantMixin, BaseModel):
         back_populates="solicitud",
         lazy=True,
         cascade="all, delete-orphan"
+    )
+
+    ofertas = db.relationship(
+    "Oferta",
+    back_populates="solicitud",
+    lazy=True,
+    cascade="all, delete-orphan"
+    )
+
+    
+    contratos = db.relationship(
+    "Contrato",
+    back_populates="solicitud",
+    lazy=True,
+    cascade="all, delete-orphan"
     )

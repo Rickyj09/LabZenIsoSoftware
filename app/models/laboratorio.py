@@ -7,7 +7,13 @@ class Muestra(TenantMixin, BaseModel):
     __table_args__ = (
         db.UniqueConstraint("empresa_id", "codigo_interno", name="uq_muestras_empresa_codigo_interno"),
     )
-
+    
+    contrato_id = db.Column(
+    db.BigInteger,
+    db.ForeignKey("contratos.id"),
+    nullable=False,
+    index=True
+    )
     solicitud_id = db.Column(db.BigInteger, db.ForeignKey("solicitudes.id"), nullable=False)
     codigo_interno = db.Column(db.String(50), nullable=False)
     codigo_cliente = db.Column(db.String(50))
@@ -22,6 +28,7 @@ class Muestra(TenantMixin, BaseModel):
     observaciones = db.Column(db.Text)
 
     empresa = db.relationship("Empresa", back_populates="muestras")
+    contrato = db.relationship("Contrato", back_populates="muestras")
     solicitud = db.relationship("Solicitud", back_populates="muestras")
     recibido_por = db.relationship(
         "Usuario",
@@ -40,6 +47,8 @@ class Muestra(TenantMixin, BaseModel):
         lazy=True,
         cascade="all, delete-orphan"
     )
+
+
 
 
 class EnsayoCatalogo(TenantMixin, BaseModel):

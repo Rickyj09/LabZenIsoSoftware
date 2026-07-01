@@ -1,0 +1,72 @@
+{% extends "base_admin.html" %}
+{% block title %}Detalle de oferta{% endblock %}
+
+{% block content %}
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div>
+            <h1 class="mb-1">Oferta {{ item.codigo }}</h1>
+            <p class="text-muted mb-0">Detalle de la oferta / cotización</p>
+        </div>
+        <div class="d-flex gap-2">
+            <a href="{{ url_for('ofertas.editar', oferta_id=item.id) }}" class="btn btn-primary">
+                Editar
+            </a>
+            <a href="{{ url_for('ofertas.index') }}" class="btn btn-outline-secondary">
+                Volver
+            </a>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <div class="border rounded p-3 h-100">
+                <h5 class="mb-3">Información general</h5>
+                <div class="row g-3">
+                    <div class="col-md-4"><strong>ID</strong><div>{{ item.id }}</div></div>
+                    <div class="col-md-4"><strong>Código</strong><div>{{ item.codigo }}</div></div>
+                    <div class="col-md-4">
+                        <strong>Estado</strong>
+                        <div>
+                            <span class="badge rounded-pill
+                                {% if item.estado == 'borrador' %}text-bg-secondary
+                                {% elif item.estado == 'enviada' %}text-bg-primary
+                                {% elif item.estado == 'aprobada' %}text-bg-success
+                                {% elif item.estado == 'rechazada' %}text-bg-danger
+                                {% elif item.estado == 'vencida' %}text-bg-warning
+                                {% else %}text-bg-secondary{% endif %}">
+                                {{ item.estado }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6"><strong>Cliente</strong><div>{{ item.cliente.nombre_razon_social if item.cliente else '-' }}</div></div>
+                    <div class="col-md-6"><strong>Solicitud</strong><div>{{ item.solicitud.codigo if item.solicitud else '-' }}</div></div>
+
+                    <div class="col-md-4"><strong>Fecha emisión</strong><div>{{ item.fecha_emision or '-' }}</div></div>
+                    <div class="col-md-4"><strong>Fecha vencimiento</strong><div>{{ item.fecha_vencimiento or '-' }}</div></div>
+                    <div class="col-md-4"><strong>Objeto</strong><div>{{ item.objeto or '-' }}</div></div>
+
+                    <div class="col-md-12"><strong>Alcance</strong><div>{{ item.alcance or '-' }}</div></div>
+                    <div class="col-md-12"><strong>Condiciones</strong><div>{{ item.condiciones or '-' }}</div></div>
+
+                    <div class="col-md-4"><strong>Subtotal</strong><div>${{ "%.2f"|format(item.subtotal or 0) }}</div></div>
+                    <div class="col-md-4"><strong>Impuestos</strong><div>${{ "%.2f"|format(item.impuestos or 0) }}</div></div>
+                    <div class="col-md-4"><strong>Total</strong><div>${{ "%.2f"|format(item.total or 0) }}</div></div>
+
+                    <div class="col-md-12"><strong>Observaciones</strong><div>{{ item.observaciones or '-' }}</div></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="border rounded p-3">
+                <h5 class="mb-3">Relación comercial</h5>
+                <p class="mb-2"><strong>Cliente:</strong><br>{{ item.cliente.nombre_razon_social if item.cliente else '-' }}</p>
+                <p class="mb-2"><strong>Solicitud:</strong><br>{{ item.solicitud.codigo if item.solicitud else '-' }}</p>
+                <p class="mb-0"><strong>Creado por:</strong><br>{{ item.creado_por.nombre if item.creado_por else '-' }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

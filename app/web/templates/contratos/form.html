@@ -1,0 +1,96 @@
+{% extends "base_admin.html" %}
+{% block title %}{% if item %}Editar contrato{% else %}Nuevo contrato{% endif %}{% endblock %}
+
+{% block content %}
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div>
+            <h1 class="mb-1">{% if item %}Editar contrato{% else %}Nuevo contrato{% endif %}</h1>
+            <p class="text-muted mb-0">
+                {% if item %}
+                    Actualizar información del contrato
+                {% else %}
+                    Registrar un nuevo contrato
+                {% endif %}
+            </p>
+        </div>
+        <div>
+            <a href="{{ url_for('contratos.index') }}" class="btn btn-outline-secondary">
+                Volver
+            </a>
+        </div>
+    </div>
+
+    <form method="post">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">Oferta</label>
+                <select name="oferta_id" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for o in ofertas %}
+                        <option value="{{ o.id }}"
+                            {% if item and item.oferta_id == o.id %}selected{% endif %}>
+                            {{ o.codigo }} - {{ o.cliente.nombre_razon_social if o.cliente else '' }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Código</label>
+                <input type="text" name="codigo" class="form-control"
+                       value="{{ item.codigo if item else '' }}" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select">
+                    <option value="borrador" {% if not item or item.estado == 'borrador' %}selected{% endif %}>Borrador</option>
+                    <option value="vigente" {% if item and item.estado == 'vigente' %}selected{% endif %}>Vigente</option>
+                    <option value="finalizado" {% if item and item.estado == 'finalizado' %}selected{% endif %}>Finalizado</option>
+                    <option value="cancelado" {% if item and item.estado == 'cancelado' %}selected{% endif %}>Cancelado</option>
+                </select>
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Fecha inicio</label>
+                <input type="date" name="fecha_inicio" class="form-control"
+                       value="{{ item.fecha_inicio if item else '' }}" required>
+            </div>
+
+            <div class="col-md-3">
+                <label class="form-label">Fecha fin</label>
+                <input type="date" name="fecha_fin" class="form-control"
+                       value="{{ item.fecha_fin if item and item.fecha_fin else '' }}">
+            </div>
+
+            <div class="col-md-6">
+                <label class="form-label">Objeto</label>
+                <input type="text" name="objeto" class="form-control"
+                       value="{{ item.objeto if item else '' }}">
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Condiciones</label>
+                <textarea name="condiciones" class="form-control" rows="4">{{ item.condiciones if item else '' }}</textarea>
+            </div>
+
+            <div class="col-md-12">
+                <label class="form-label">Observaciones</label>
+                <textarea name="observaciones" class="form-control" rows="3">{{ item.observaciones if item else '' }}</textarea>
+            </div>
+        </div>
+
+        <hr class="my-4">
+
+        <div class="d-flex justify-content-end gap-2">
+            <a href="{{ url_for('contratos.index') }}" class="btn btn-outline-secondary">
+                Cancelar
+            </a>
+            <button type="submit" class="btn btn-primary">
+                {% if item %}Actualizar contrato{% else %}Guardar contrato{% endif %}
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

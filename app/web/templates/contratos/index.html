@@ -1,0 +1,105 @@
+{% extends "base_admin.html" %}
+{% block title %}Contratos{% endblock %}
+
+{% block content %}
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+        <div>
+            <h1 class="mb-1">Contratos</h1>
+            <p class="text-muted mb-0">Listado de contratos registrados</p>
+        </div>
+
+        <a href="{{ url_for('contratos.nuevo') }}" class="btn btn-primary">
+            Nuevo contrato
+        </a>
+    </div>
+
+    <form method="get" class="row g-3 mb-4">
+        <div class="col-md-7">
+            <label class="form-label">Buscar</label>
+            <input
+                type="text"
+                name="q"
+                class="form-control"
+                value="{{ q or '' }}"
+                placeholder="Código, oferta o concepto"
+            >
+        </div>
+
+        <div class="col-md-3">
+            <label class="form-label">Estado</label>
+            <select name="estado" class="form-select">
+                <option value="" {% if not estado %}selected{% endif %}>Todos</option>
+                <option value="borrador" {% if estado == 'borrador' %}selected{% endif %}>Borrador</option>
+                <option value="vigente" {% if estado == 'vigente' %}selected{% endif %}>Vigente</option>
+                <option value="finalizado" {% if estado == 'finalizado' %}selected{% endif %}>Finalizado</option>
+                <option value="cancelado" {% if estado == 'cancelado' %}selected{% endif %}>Cancelado</option>
+            </select>
+        </div>
+
+        <div class="col-md-2 d-flex align-items-end">
+            <div class="d-grid w-100">
+                <button type="submit" class="btn btn-outline-primary">Filtrar</button>
+            </div>
+        </div>
+    </form>
+
+    <div class="table-responsive">
+        <table class="table align-middle">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Código</th>
+                    <th>Cliente</th>
+                    <th>Oferta</th>
+                    <th>Fecha inicio</th>
+                    <th>Fecha fin</th>
+                    <th>Estado</th>
+                    <th class="text-end">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in contratos %}
+                <tr>
+                    <td>{{ item.id }}</td>
+                    <td><span class="fw-semibold">{{ item.codigo }}</span></td>
+                    <td>
+                        <div class="fw-semibold">{{ item.cliente.nombre_razon_social if item.cliente else '' }}</div>
+                        <div class="text-muted small">{{ item.cliente.identificacion if item.cliente else '' }}</div>
+                    </td>
+                    <td>{{ item.oferta.codigo if item.oferta else '' }}</td>
+                    <td>{{ item.fecha_inicio or '' }}</td>
+                    <td>{{ item.fecha_fin or '' }}</td>
+                    <td>
+                        <span class="badge rounded-pill
+                            {% if item.estado == 'borrador' %}text-bg-secondary
+                            {% elif item.estado == 'vigente' %}text-bg-success
+                            {% elif item.estado == 'finalizado' %}text-bg-primary
+                            {% elif item.estado == 'cancelado' %}text-bg-danger
+                            {% else %}text-bg-secondary{% endif %}">
+                            {{ item.estado }}
+                        </span>
+                    </td>
+                    <td class="text-end">
+                        <div class="d-flex justify-content-end gap-2 flex-wrap">
+                            <a href="{{ url_for('contratos.detalle', contrato_id=item.id) }}" class="btn btn-sm btn-outline-dark">
+                                Ver
+                            </a>
+                            <a href="{{ url_for('contratos.editar', contrato_id=item.id) }}" class="btn btn-sm btn-outline-primary">
+                                Editar
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" class="text-center text-muted py-4">
+                        No hay contratos registrados.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

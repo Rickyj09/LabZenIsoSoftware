@@ -3,7 +3,7 @@
 
 {% block content %}
 <div class="page-card">
-    <div class="d-flex justify-content-between align-items-center mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
         <div>
             <h1 class="mb-1">{% if item %}Editar solicitud{% else %}Nueva solicitud{% endif %}</h1>
             <p class="text-muted mb-0">
@@ -58,7 +58,7 @@
             <div class="col-md-3">
                 <label class="form-label">Fecha recepción</label>
                 <input type="date" name="fecha_recepcion" class="form-control"
-                       value="{{ item.fecha_recepcion if item else '' }}">
+                       value="{{ item.fecha_recepcion if item and item.fecha_recepcion else '' }}">
             </div>
 
             <div class="col-md-3">

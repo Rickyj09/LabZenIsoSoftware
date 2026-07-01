@@ -31,42 +31,81 @@
             <span>▾</span>
         </button>
 
-        <div class="collapse {% if request.endpoint == 'dashboard.index' or (request.endpoint and request.endpoint.startswith('empresas.')) or (request.endpoint and request.endpoint.startswith('usuarios.')) %}show{% endif %}" id="menuGeneral">
+        <div class="collapse {% if request.endpoint == 'dashboard.index' or (request.endpoint and request.endpoint.startswith('empresas.')) or (request.endpoint and request.endpoint.startswith('usuarios.')) %}show{% endif %}"
+             id="menuGeneral">
             <a class="sidebar-link {% if request.endpoint == 'dashboard.index' %}active{% endif %}"
                href="{{ url_for('dashboard.index') }}">
                 Dashboard
             </a>
+
             <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('empresas.') %}active{% endif %}"
                href="#">
                 Empresas
             </a>
+
             <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('usuarios.') %}active{% endif %}"
                href="#">
                 Usuarios
             </a>
         </div>
 
+
+        <!--ADMINISTRATIVO-->
+
+
+        <div class="sidebar-group">
+
+    <button class="sidebar-group-btn"
+            type="button"
+            data-bs-toggle="collapse"
+            data-bs-target="#menuAdministrativo"
+            aria-expanded="{% if request.endpoint and (request.endpoint.startswith('clientes.') or request.endpoint.startswith('solicitudes.') or request.endpoint.startswith('ofertas.')) %}true{% else %}false{% endif %}">
+        <span>Administrativo</span>
+        <span>▾</span>
+    </button>
+
+    <div class="collapse {% if request.endpoint and (request.endpoint.startswith('clientes.') or request.endpoint.startswith('solicitudes.') or request.endpoint.startswith('ofertas.')) %}show{% endif %}"
+         id="menuAdministrativo">
+
+        <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('clientes.') %}active{% endif %}"
+           href="{{ url_for('clientes.index') }}">
+            Clientes
+        </a>
+
+        <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('solicitudes.') %}active{% endif %}"
+           href="{{ url_for('solicitudes.index') }}">
+            Solicitudes
+        </a>
+
+        <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('ofertas.') %}active{% endif %}"
+           href="{{ url_for('ofertas.index') }}">
+            Ofertas / Cotizaciones
+        </a>
+
+
+        <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('contratos.') %}active{% endif %}"
+   href="{{ url_for('contratos.index') }}">
+    Contratos
+</a>
+
+
+    </div>
+
+</div>
+
         <!-- OPERACIÓN DEL LABORATORIO -->
         <button class="sidebar-group-btn"
-                type="button"
-                data-bs-toggle="collapse"
-                data-bs-target="#menuOperacion"
-                aria-expanded="{% if request.endpoint and (request.endpoint.startswith('clientes.') or request.endpoint.startswith('solicitudes.') or request.endpoint.startswith('muestras.') or request.endpoint.startswith('muestra_ensayos.') or request.endpoint.startswith('ensayos_catalogo.') or request.endpoint.startswith('metodos.')) %}true{% else %}false{% endif %}">
-            <span>Operación del laboratorio</span>
-            <span>▾</span>
-        </button>
+        type="button"
+        data-bs-toggle="collapse"
+        data-bs-target="#menuOperacion"
+        aria-expanded="{% if request.endpoint and (request.endpoint.startswith('muestras.') or request.endpoint.startswith('muestra_ensayos.') or request.endpoint.startswith('ensayos_catalogo.') or request.endpoint.startswith('metodos.') or request.endpoint.startswith('resultados.')) %}true{% else %}false{% endif %}">
+    <span>Operación del laboratorio</span>
+    <span>▾</span>
+</button>
 
-        <div class="collapse {% if request.endpoint and (request.endpoint.startswith('clientes.') or request.endpoint.startswith('solicitudes.') or request.endpoint.startswith('muestras.') or request.endpoint.startswith('muestra_ensayos.') or request.endpoint.startswith('ensayos_catalogo.') or request.endpoint.startswith('metodos.')) %}show{% endif %}" id="menuOperacion">
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('clientes.') %}active{% endif %}"
-               href="{{ url_for('clientes.index') }}">
-                Clientes
-            </a>
-
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('solicitudes.') %}active{% endif %}"
-               href="{{ url_for('solicitudes.index') }}">
-                Solicitudes
-            </a>
-
+        <div class="collapse {% if request.endpoint and (request.endpoint.startswith('muestras.') or request.endpoint.startswith('muestra_ensayos.') or request.endpoint.startswith('ensayos_catalogo.') or request.endpoint.startswith('metodos.') or request.endpoint.startswith('resultados.')) %}show{% endif %}"
+     id="menuOperacion">
+          
             <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('muestras.') %}active{% endif %}"
                href="{{ url_for('muestras.index') }}">
                 Muestras
@@ -86,6 +125,11 @@
                href="{{ url_for('metodos.index') }}">
                 Métodos
             </a>
+
+            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('resultados.') %}active{% endif %}"
+               href="#">
+                Resultados
+            </a>
         </div>
 
         <!-- SISTEMA DE GESTIÓN -->
@@ -98,7 +142,8 @@
             <span>▾</span>
         </button>
 
-        <div class="collapse {% if request.endpoint and (request.endpoint.startswith('organigrama.') or request.endpoint.startswith('politica_calidad.') or request.endpoint.startswith('objetivos_calidad.') or request.endpoint.startswith('mapa_procesos.') or request.endpoint.startswith('riesgos_oportunidades.') or request.endpoint.startswith('documentacion.')) %}show{% endif %}" id="menuSGC">
+        <div class="collapse {% if request.endpoint and (request.endpoint.startswith('organigrama.') or request.endpoint.startswith('politica_calidad.') or request.endpoint.startswith('objetivos_calidad.') or request.endpoint.startswith('mapa_procesos.') or request.endpoint.startswith('riesgos_oportunidades.') or request.endpoint.startswith('documentacion.')) %}show{% endif %}"
+             id="menuSGC">
             <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('organigrama.') %}active{% endif %}"
                href="{{ url_for('organigrama.index') }}">
                 Organigrama
@@ -120,11 +165,11 @@
             </a>
 
             <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('riesgos_oportunidades.') %}active{% endif %}"
-               href="{{ url_for('mapa_procesos.index') }}">
+               href="#">
                 Riesgos y Oportunidades
             </a>
 
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('documentacion.index') %}active{% endif %}"
+            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('documentacion.') %}active{% endif %}"
                href="{{ url_for('documentacion.index') }}">
                 Gestión Documental
             </a>
@@ -145,15 +190,28 @@
                 type="button"
                 data-bs-toggle="collapse"
                 data-bs-target="#menuAuditoria"
-                aria-expanded="false">
+                aria-expanded="{% if request.endpoint and (request.endpoint.startswith('auditorias.') or request.endpoint.startswith('no_conformidades.') or request.endpoint.startswith('acciones_correctivas.')) %}true{% else %}false{% endif %}">
             <span>Auditoría y Mejora</span>
             <span>▾</span>
         </button>
 
-        <div class="collapse" id="menuAuditoria">
-            <a class="sidebar-link disabled" href="#">Auditorías Internas</a>
-            <a class="sidebar-link disabled" href="#">No Conformidades</a>
-            <a class="sidebar-link disabled" href="#">Acciones Correctivas</a>
+        <div class="collapse {% if request.endpoint and (request.endpoint.startswith('auditorias.') or request.endpoint.startswith('no_conformidades.') or request.endpoint.startswith('acciones_correctivas.')) %}show{% endif %}"
+             id="menuAuditoria">
+            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('auditorias.') %}active{% endif %}"
+               href="#">
+                Auditorías Internas
+            </a>
+
+            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('no_conformidades.') %}active{% endif %}"
+               href="#">
+                No Conformidades
+            </a>
+
+            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('acciones_correctivas.') %}active{% endif %}"
+               href="#">
+                Acciones Correctivas
+            </a>
         </div>
+
     </nav>
 </aside>

@@ -1,5 +1,6 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
+from sqlalchemy import or_
 
 from app.extensions import db
 from app.models.clientes import Cliente, Solicitud
@@ -10,13 +11,38 @@ bp = Blueprint("solicitudes", __name__, url_prefix="/solicitudes")
 @bp.route("/")
 @login_required
 def index():
-    solicitudes = (
+    q = request.args.get("q", "").strip()
+    estado = request.args.get("estado", "").strip()
+
+    query = (
         Solicitud.query
-        .filter_by(empresa_id=current_user.empresa_id)
-        .order_by(Solicitud.id.desc())
-        .all()
+        .filter(Solicitud.empresa_id == current_user.empresa_id)
+        .join(Cliente, Solicitud.cliente_id == Cliente.id)
     )
-    return render_template("solicitudes/index.html", solicitudes=solicitudes)
+
+    if estado:
+        query = query.filter(Solicitud.estado == estado)
+
+    if q:
+        like = f"%{q}%"
+        query = query.filter(
+            or_(
+                Solicitud.codigo.ilike(like),
+                Solicitud.tipo_servicio.ilike(like),
+                Solicitud.descripcion.ilike(like),
+                Cliente.nombre_razon_social.ilike(like),
+                Cliente.identificacion.ilike(like),
+            )
+        )
+
+    solicitudes = query.order_by(Solicitud.id.desc()).all()
+
+    return render_template(
+        "solicitudes/index.html",
+        solicitudes=solicitudes,
+        q=q,
+        estado=estado
+    )
 
 
 @bp.route("/nuevo", methods=["GET", "POST"])
@@ -86,9 +112,20 @@ def nuevo():
         db.session.commit()
 
         flash("Solicitud creada correctamente.", "success")
-        return redirect(url_for("solicitudes.index"))
+        return redirect(url_for("solicitudes.detalle", solicitud_id=solicitud.id))
 
     return render_template("solicitudes/form.html", item=None, clientes=clientes)
+
+
+@bp.route("/<int:solicitud_id>")
+@login_required
+def detalle(solicitud_id):
+    item = (
+        Solicitud.query
+        .filter_by(id=solicitud_id, empresa_id=current_user.empresa_id)
+        .first_or_404()
+    )
+    return render_template("solicitudes/detalle.html", item=item)
 
 
 @bp.route("/<int:solicitud_id>/editar", methods=["GET", "POST"])
@@ -163,6 +200,6 @@ def editar(solicitud_id):
         db.session.commit()
 
         flash("Solicitud actualizada correctamente.", "success")
-        return redirect(url_for("solicitudes.index"))
+        return redirect(url_for("solicitudes.detalle", solicitud_id=item.id))
 
     return render_template("solicitudes/form.html", item=item, clientes=clientes)
