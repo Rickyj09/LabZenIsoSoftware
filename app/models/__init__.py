@@ -17,3 +17,5 @@ from app.models.calidad import NoConformidad, AccionCorrectiva, Riesgo, Personal
 from app.models.auditoria import Auditoria, AuditoriaHallazgo, AuditoriaLog
 from app.models.organigrama import Cargo, Personal
 from app.models.mapa_procesos import Proceso
+from app.models.ofertas import Oferta
+from app.models.contratos import Contrato

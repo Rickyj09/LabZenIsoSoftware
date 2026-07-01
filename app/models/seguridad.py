@@ -40,6 +40,13 @@ class Usuario(UserMixin, TenantMixin, BaseModel):
         lazy=True
     )
 
+    ofertas_creadas = db.relationship(
+    "Oferta",
+    foreign_keys="Oferta.creado_por_id",
+    back_populates="creado_por",
+    lazy=True
+)
+
     muestras_recibidas = db.relationship(
         "Muestra",
         foreign_keys="Muestra.recibido_por_id",
@@ -80,6 +87,13 @@ class Usuario(UserMixin, TenantMixin, BaseModel):
         foreign_keys="PersonalCompetencia.usuario_id",
         back_populates="usuario",
         lazy=True
+    )
+
+    contratos_creados = db.relationship(
+    "Contrato",
+    foreign_keys="Contrato.creado_por_id",
+    back_populates="creado_por",
+    lazy=True
     )
 
     logs = db.relationship("AuditoriaLog", back_populates="usuario", lazy=True)
@@ -156,6 +170,7 @@ class RolPermiso(BaseModel):
 
     rol = db.relationship("Rol", back_populates="permisos")
     permiso = db.relationship("Permiso", back_populates="roles")
+
 
 
 @login_manager.user_loader

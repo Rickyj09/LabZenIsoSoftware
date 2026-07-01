@@ -29,7 +29,9 @@ class Empresa(BaseModel):
     no_conformidades = db.relationship("NoConformidad", back_populates="empresa", lazy=True)
     auditorias = db.relationship("Auditoria", back_populates="empresa", lazy=True)
     auditoria_logs = db.relationship("AuditoriaLog", back_populates="empresa", lazy=True)
-
+    ofertas = db.relationship("Oferta", back_populates="empresa", lazy=True)
+    contratos = db.relationship("Contrato", back_populates="empresa", lazy=True)
+    muestras = db.relationship("Muestra", back_populates="empresa", lazy=True)
 
 class Sede(TenantMixin, BaseModel):
     __tablename__ = "sedes"
