@@ -12,6 +12,21 @@ class Config:
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
+    # Los documentos controlados se almacenan fuera de /static para que toda
+    # lectura pase por una ruta autenticada y validada por empresa.
+    DOCUMENT_STORAGE_ROOT = os.getenv(
+        "DOCUMENT_STORAGE_ROOT",
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "storage", "documentos"))
+    )
+    DOCUMENT_LEGACY_STORAGE_ROOT = os.getenv(
+        "DOCUMENT_LEGACY_STORAGE_ROOT",
+        os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "web", "static", "uploads", "documentos")
+        )
+    )
+    DOCUMENT_MAX_FILE_SIZE = int(os.getenv("DOCUMENT_MAX_FILE_SIZE", 25 * 1024 * 1024))
+    MAX_CONTENT_LENGTH = int(os.getenv("MAX_CONTENT_LENGTH", DOCUMENT_MAX_FILE_SIZE))
+
     # Opcional: mejora el comportamiento del engine
     SQLALCHEMY_ENGINE_OPTIONS = {
         "pool_pre_ping": True,

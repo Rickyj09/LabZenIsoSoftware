@@ -9,7 +9,7 @@
 </div>
 
 <div class="page-card">
-    <form method="post">
+    <form method="post" enctype="multipart/form-data">
         <div class="row g-3">
             <div class="col-md-4">
                 <label class="form-label">Versión</label>
@@ -17,22 +17,23 @@
             </div>
 
             <div class="col-md-4">
-                <label class="form-label">Estado</label>
-                <select name="estado" class="form-select">
-                    {% for e in estados_documento %}
-                    <option value="{{ e }}" {% if e == 'vigente' %}selected{% endif %}>{{ e }}</option>
-                    {% endfor %}
-                </select>
+                <label class="form-label">Versión vigente aprobada</label>
+                <input type="text" class="form-control" value="{{ item.version_vigente.version if item.version_vigente else 'Sin versión aprobada vigente' }}" disabled>
+            </div>
+
+            <div class="col-md-4 d-flex align-items-end">
+                <div class="alert alert-secondary mb-0 w-100 py-2">La nueva versión se creará en BORRADOR.</div>
             </div>
 
             <div class="col-md-12">
-                <label class="form-label">Ruta / URL del archivo</label>
-                <input type="text" name="archivo_url" class="form-control">
+                <label class="form-label">Archivo del documento</label>
+                <input type="file" name="archivo" class="form-control">
+                <div class="form-text">Sube el archivo correspondiente a esta nueva versión.</div>
             </div>
 
             <div class="col-md-12">
                 <label class="form-label">Cambios</label>
-                <textarea name="cambios" class="form-control" rows="3"></textarea>
+                <textarea name="cambios" class="form-control" rows="3" placeholder="Describe claramente qué cambió en esta versión." required></textarea>
             </div>
 
             <div class="col-md-12">
@@ -40,7 +41,7 @@
                 <textarea name="contenido" class="form-control" rows="12"></textarea>
             </div>
 
-            <div class="col-12">
+            <div class="col-12 d-flex gap-2 flex-wrap">
                 <button type="submit" class="btn btn-primary">Guardar versión</button>
                 <a href="{{ url_for('documentacion.detalle', item_id=item.id) }}" class="btn btn-secondary">Cancelar</a>
             </div>

@@ -4,7 +4,7 @@ from app.config import get_config
 from app.extensions import db, migrate, login_manager
 
 
-def create_app():
+def create_app(config_overrides=None):
     app = Flask(
         __name__,
         template_folder="web/templates",
@@ -12,6 +12,8 @@ def create_app():
     )
 
     app.config.from_object(get_config())
+    if config_overrides:
+        app.config.update(config_overrides)
 
     db.init_app(app)
     migrate.init_app(app, db)
@@ -22,8 +24,15 @@ def create_app():
 
     # Registro de blueprints Flask
     register_blueprints(app)
+    register_cli(app)
 
     return app
+
+
+def register_cli(app: Flask) -> None:
+    from app.cli.documentos import documentos_cli
+
+    app.cli.add_command(documentos_cli)
 
 
 def register_blueprints(app: Flask) -> None:
@@ -74,5 +83,10 @@ def register_blueprints(app: Flask) -> None:
     from app.web.routes.documentacion import bp as documentacion_bp
     app.register_blueprint(documentacion_bp)
 
+    from app.web.routes.ofertas import bp as ofertas_bp
+    app.register_blueprint(ofertas_bp)
+
+    from app.web.routes.contratos import bp as contratos_bp
+    app.register_blueprint(contratos_bp)
    
     

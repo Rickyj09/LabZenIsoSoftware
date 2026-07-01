@@ -3,66 +3,290 @@
 {% block title %}Detalle del documento{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
     <div>
         <h2 class="mb-1">{{ item.titulo }}</h2>
         <div class="text-muted">{{ item.codigo }} · {{ item.tipo_documento }}</div>
     </div>
-    <div>
-        <a href="{{ url_for('documentacion.nueva_version', item_id=item.id) }}" class="btn btn-outline-success me-2">
+
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+        {% if item.estado != 'OBSOLETO' and not version_preparacion %}
+        <a href="{{ url_for('documentacion.nueva_version', item_id=item.id) }}" class="btn btn-outline-success">
             Nueva versión
         </a>
-        <a href="{{ url_for('documentacion.editar', item_id=item.id) }}" class="btn btn-primary">
-            Editar
-        </a>
+        {% endif %}
+
+        {% if version_preparacion and version_preparacion.estado == 'BORRADOR' %}
+            {% if item.estado == 'BORRADOR' %}
+            <a href="{{ url_for('documentacion.editar', item_id=item.id) }}" class="btn btn-primary">
+                Editar
+            </a>
+            {% endif %}
+
+            <form method="post" action="{{ url_for('documentacion.enviar_revision', item_id=item.id) }}" class="d-inline">
+                <button type="submit" class="btn btn-warning">
+                    Enviar a revisión
+                </button>
+            </form>
+
+            <form method="post" action="{{ url_for('documentacion.obsoletar', item_id=item.id) }}" class="d-inline">
+                <button type="submit" class="btn btn-outline-danger"
+                        onclick="return confirm('¿Deseas marcar este documento como obsoleto?')">
+                    Marcar obsoleto
+                </button>
+            </form>
+
+        {% elif version_preparacion and version_preparacion.estado == 'EN_REVISION' %}
+            <form method="post"
+                  action="{{ url_for('documentacion.aprobar_version', item_id=item.id, version_id=version_preparacion.id) }}"
+                  class="d-inline">
+                <button type="submit" class="btn btn-success">
+                    Aprobar
+                </button>
+            </form>
+
+            <form method="post" action="{{ url_for('documentacion.obsoletar', item_id=item.id) }}" class="d-inline">
+                <button type="submit" class="btn btn-outline-danger"
+                        onclick="return confirm('¿Deseas marcar este documento como obsoleto?')">
+                    Marcar obsoleto
+                </button>
+            </form>
+
+        {% elif item.estado == 'APROBADO' %}
+            <span class="btn btn-outline-secondary disabled">
+                Documento bloqueado por aprobación
+            </span>
+
+            <form method="post" action="{{ url_for('documentacion.obsoletar', item_id=item.id) }}" class="d-inline">
+                <button type="submit" class="btn btn-outline-danger"
+                        onclick="return confirm('¿Deseas marcar este documento como obsoleto?')">
+                    Marcar obsoleto
+                </button>
+            </form>
+
+        {% elif item.estado == 'OBSOLETO' %}
+            <span class="btn btn-outline-dark disabled">
+                Documento obsoleto
+            </span>
+        {% endif %}
+    </div>
+</div>
+
+<div class="page-card mb-4">
+    <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between">
+        <div class="workflow-step {% if item.estado in ['BORRADOR', 'EN_REVISION', 'APROBADO', 'OBSOLETO'] %}active{% endif %}">
+            1. Borrador
+        </div>
+        <div class="workflow-separator"></div>
+        <div class="workflow-step {% if item.estado in ['EN_REVISION', 'APROBADO', 'OBSOLETO'] %}active{% endif %}">
+            2. En revisión
+        </div>
+        <div class="workflow-separator"></div>
+        <div class="workflow-step {% if item.estado in ['APROBADO', 'OBSOLETO'] %}active{% endif %}">
+            3. Aprobado
+        </div>
+        <div class="workflow-separator"></div>
+        <div class="workflow-step {% if item.estado == 'OBSOLETO' %}active danger{% endif %}">
+            4. Obsoleto
+        </div>
     </div>
 </div>
 
 <div class="row g-4 mb-4">
     <div class="col-md-3">
-        <div class="page-card text-center">
+        <div class="page-card text-center h-100">
             <div class="text-muted mb-2">Estado</div>
-            <div class="fs-5 fw-bold">{{ item.estado }}</div>
+            <div class="fs-5 fw-bold">
+                <span class="badge
+                    {% if item.estado == 'APROBADO' %}bg-success
+                    {% elif item.estado == 'BORRADOR' %}bg-secondary
+                    {% elif item.estado == 'EN_REVISION' %}bg-warning text-dark
+                    {% elif item.estado == 'OBSOLETO' %}bg-danger
+                    {% else %}bg-light text-dark
+                    {% endif %}">
+                    {{ item.estado }}
+                </span>
+            </div>
         </div>
     </div>
 
     <div class="col-md-3">
-        <div class="page-card text-center">
-            <div class="text-muted mb-2">Versión actual</div>
-            <div class="fs-5 fw-bold">{{ item.version_actual or '' }}</div>
+        <div class="page-card text-center h-100">
+            <div class="text-muted mb-2">Versión vigente aprobada</div>
+            <div class="fs-5 fw-bold">{{ version_vigente.version if version_vigente else 'Sin versión aprobada' }}</div>
         </div>
     </div>
 
     <div class="col-md-3">
-        <div class="page-card text-center">
+        <div class="page-card text-center h-100">
             <div class="text-muted mb-2">Proceso</div>
             <div class="fs-5 fw-bold">{{ item.proceso or '-' }}</div>
         </div>
     </div>
 
     <div class="col-md-3">
-        <div class="page-card text-center">
+        <div class="page-card text-center h-100">
             <div class="text-muted mb-2">Tipo</div>
             <div class="fs-5 fw-bold">{{ item.tipo_documento }}</div>
         </div>
     </div>
 </div>
 
-{% if version_actual %}
 <div class="page-card mb-4">
-    <h5 class="mb-3">Versión vigente / actual</h5>
-    <p><strong>Versión:</strong> {{ version_actual.version }}</p>
-    <p><strong>Fecha:</strong> {{ version_actual.fecha_version }}</p>
-    <p><strong>Estado:</strong> {{ version_actual.estado }}</p>
-    <p><strong>Archivo:</strong> {{ version_actual.archivo_url or 'No definido' }}</p>
-    <p><strong>Cambios:</strong> {{ version_actual.cambios or 'No definidos' }}</p>
+    <h5 class="mb-3">Datos generales del documento</h5>
+
+    <div class="row g-3">
+        <div class="col-md-4">
+            <div><strong>Código:</strong></div>
+            <div>{{ item.codigo }}</div>
+        </div>
+        <div class="col-md-4">
+            <div><strong>Título:</strong></div>
+            <div>{{ item.titulo }}</div>
+        </div>
+        <div class="col-md-4">
+            <div><strong>Elaborado por:</strong></div>
+            <div>
+                {% if item.elaborado_por %}
+                    {{ item.elaborado_por.nombre }} {{ item.elaborado_por.apellido or '' }}
+                {% else %}
+                    -
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if version_vigente %}
+<div class="page-card mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h5 class="mb-0">Versión vigente aprobada</h5>
+
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+            <span class="badge
+                {% if version_vigente.estado == 'APROBADO' %}bg-success
+                {% elif version_vigente.estado == 'BORRADOR' %}bg-secondary
+                {% elif version_vigente.estado == 'EN_REVISION' %}bg-warning text-dark
+                {% elif version_vigente.estado == 'OBSOLETO' %}bg-danger
+                {% else %}bg-light text-dark
+                {% endif %}">
+                {{ version_vigente.estado }}
+            </span>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-md-3">
+            <div><strong>Versión:</strong></div>
+            <div>{{ version_vigente.version }}</div>
+        </div>
+        <div class="col-md-3">
+            <div><strong>Fecha de versión:</strong></div>
+            <div>{{ version_vigente.fecha_version }}</div>
+        </div>
+        <div class="col-md-3">
+            <div><strong>Fecha de aprobación:</strong></div>
+            <div>{{ version_vigente.fecha_aprobacion or '-' }}</div>
+        </div>
+        <div class="col-md-3">
+            <div><strong>Archivo:</strong></div>
+            <div>
+                {% if version_vigente.archivo_storage_path or version_vigente.archivo_url %}
+                    <div class="d-flex gap-2 flex-wrap">
+                        {% if preview_url %}
+                        <a href="#preview-documento" class="btn btn-sm btn-outline-primary">
+                            Previsualizar
+                        </a>
+                        {% endif %}
+                        <a href="{{ url_for('documentacion.descargar_version', version_id=version_vigente.id) }}" class="btn btn-sm btn-outline-secondary">
+                            Descargar
+                        </a>
+                    </div>
+                    <div class="small text-muted mt-2">
+                        {{ version_vigente.archivo_nombre_original or version_vigente.archivo_nombre_guardado or (version_vigente.archivo_url.split('/')[-1] if version_vigente.archivo_url else 'Archivo documental') }}
+                    </div>
+                {% else %}
+                    No definido
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-md-4">
+            <div><strong>Elaborado por:</strong></div>
+            <div>
+                {% if version_vigente.elaborado_por %}
+                    {{ version_vigente.elaborado_por.nombre }} {{ version_vigente.elaborado_por.apellido or '' }}
+                {% else %}
+                    -
+                {% endif %}
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div><strong>Revisado por:</strong></div>
+            <div>
+                {% if version_vigente.revisado_por %}
+                    {{ version_vigente.revisado_por.nombre }} {{ version_vigente.revisado_por.apellido or '' }}
+                {% else %}
+                    -
+                {% endif %}
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div><strong>Aprobado por:</strong></div>
+            <div>
+                {% if version_vigente.aprobado_por %}
+                    {{ version_vigente.aprobado_por.nombre }} {{ version_vigente.aprobado_por.apellido or '' }}
+                {% else %}
+                    -
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="mb-3">
+        <strong>Cambios:</strong>
+        <div class="mt-1">{{ version_vigente.cambios or 'No definidos' }}</div>
+    </div>
+
     <hr>
-    <div style="white-space: pre-wrap;">{{ version_actual.contenido or 'Sin contenido registrado.' }}</div>
+    <div style="white-space: pre-wrap;">{{ version_vigente.contenido or 'Sin contenido registrado.' }}</div>
+</div>
+{% else %}
+<div class="alert alert-secondary mb-4">Sin versión aprobada vigente.</div>
+{% endif %}
+
+{% if version_preparacion %}
+<div class="page-card mb-4">
+    <h5>Versión en preparación</h5>
+    <p class="mb-1"><strong>Versión:</strong> {{ version_preparacion.version }}</p>
+    <p class="mb-1"><strong>Estado:</strong> {{ version_preparacion.estado }}</p>
+    <p class="mb-0"><strong>Cambios:</strong> {{ version_preparacion.cambios }}</p>
 </div>
 {% endif %}
 
-<div class="page-card">
+{% if preview_url %}
+<div id="preview-documento" class="page-card mb-4">
+    <h5 class="mb-3">Previsualización del documento</h5>
+
+    {% if preview_tipo == 'pdf' %}
+        <iframe src="{{ preview_url }}"
+                width="100%"
+                height="720"
+                style="border: 1px solid #dee2e6; border-radius: 12px;">
+        </iframe>
+    {% elif preview_tipo in ['png', 'jpg', 'jpeg'] %}
+        <div class="text-center">
+            <img src="{{ preview_url }}" alt="Documento" class="img-fluid rounded border">
+        </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<div id="historial" class="page-card mb-4">
     <h5 class="mb-3">Historial de versiones</h5>
+
     <div class="table-responsive">
         <table class="table table-hover align-middle">
             <thead>
@@ -72,6 +296,10 @@
                     <th>Estado</th>
                     <th>Archivo</th>
                     <th>Cambios</th>
+                    <th>Elaboró</th>
+                    <th>Revisó</th>
+                    <th>Aprobó</th>
+                    <th style="width: 150px;">Acción</th>
                 </tr>
             </thead>
             <tbody>
@@ -79,17 +307,112 @@
                 <tr>
                     <td>{{ v.version }}</td>
                     <td>{{ v.fecha_version }}</td>
-                    <td>{{ v.estado }}</td>
-                    <td>{{ v.archivo_url or '' }}</td>
+                    <td>
+                        <span class="badge
+                            {% if v.estado == 'APROBADO' %}bg-success
+                            {% elif v.estado == 'BORRADOR' %}bg-secondary
+                            {% elif v.estado == 'EN_REVISION' %}bg-warning text-dark
+                            {% elif v.estado == 'SUSTITUIDO' %}bg-dark
+                            {% elif v.estado == 'RECHAZADO' %}bg-danger
+                            {% elif v.estado == 'OBSOLETO' %}bg-danger
+                            {% else %}bg-light text-dark
+                            {% endif %}">
+                            {{ v.estado }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if v.archivo_storage_path or v.archivo_url %}
+                            <a href="{{ url_for('documentacion.descargar_version', version_id=v.id) }}" class="btn btn-sm btn-outline-primary">
+                                Descargar
+                            </a>
+                            <div class="small text-muted mt-1">
+                                {{ v.archivo_nombre_original or v.archivo_nombre_guardado or (v.archivo_url.split('/')[-1] if v.archivo_url else 'Archivo documental') }}
+                            </div>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
                     <td>{{ v.cambios or '' }}</td>
+                    <td>
+                        {% if v.elaborado_por %}
+                            {{ v.elaborado_por.nombre }} {{ v.elaborado_por.apellido or '' }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if v.revisado_por %}
+                            {{ v.revisado_por.nombre }} {{ v.revisado_por.apellido or '' }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if v.aprobado_por %}
+                            {{ v.aprobado_por.nombre }} {{ v.aprobado_por.apellido or '' }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                            {% if v.estado == 'EN_REVISION' and version_preparacion and v.id == version_preparacion.id and item.estado != 'OBSOLETO' %}
+                        <form method="post"
+                              action="{{ url_for('documentacion.aprobar_version', item_id=item.id, version_id=v.id) }}">
+                            <button type="submit" class="btn btn-sm btn-outline-success">
+                                Aprobar
+                            </button>
+                        </form>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="5" class="text-center text-muted">No existen versiones registradas.</td>
+                    <td colspan="9" class="text-center text-muted">No existen versiones registradas.</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
+</div>
+
+<div class="page-card">
+    <h5 class="mb-3">Trazabilidad de aprobaciones y acciones</h5>
+
+    {% if version_trazabilidad and version_trazabilidad.aprobaciones %}
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Usuario</th>
+                    <th>Acción</th>
+                    <th>Comentario</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for a in version_trazabilidad.aprobaciones %}
+                <tr>
+                    <td>{{ a.fecha_accion }}</td>
+                    <td>
+                        {% if a.usuario %}
+                            {{ a.usuario.nombre }} {{ a.usuario.apellido or '' }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>{{ a.accion }}</td>
+                    <td>{{ a.comentario or '' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="text-muted">
+        No existen acciones registradas para la versión mostrada.
+    </div>
+    {% endif %}
 </div>
 {% endblock %}

@@ -5,10 +5,17 @@
 {% block content %}
 <div class="mb-4">
     <h2>{% if item %}Editar documento{% else %}Nuevo documento{% endif %}</h2>
+    <div class="text-muted">
+        {% if item %}
+            Actualiza la información general del documento.
+        {% else %}
+            Registra un nuevo documento controlado del sistema.
+        {% endif %}
+    </div>
 </div>
 
 <div class="page-card">
-    <form method="post">
+    <form method="post" enctype="multipart/form-data">
         <div class="row g-3">
             <div class="col-md-3">
                 <label class="form-label">Código</label>
@@ -38,40 +45,44 @@
                        value="{{ item.proceso if item else '' }}">
             </div>
 
+            {% if item %}
             <div class="col-md-4">
-                <label class="form-label">Estado</label>
-                <select name="estado" class="form-select" required>
-                    {% for e in estados_documento %}
-                    <option value="{{ e }}" {% if item and item.estado == e %}selected{% elif not item and e == 'borrador' %}selected{% endif %}>
-                        {{ e }}
-                    </option>
-                    {% endfor %}
-                </select>
+                <label class="form-label">Versión vigente aprobada</label>
+                <input type="text" class="form-control" value="{{ item.version_vigente.version if item.version_vigente else 'Sin versión aprobada vigente' }}" disabled>
             </div>
+            {% endif %}
 
             {% if not item %}
             <div class="col-md-4">
                 <label class="form-label">Versión inicial</label>
-                <input type="text" name="version" class="form-control" value="1.0" required>
+                <input type="text" name="version" class="form-control" value="1" required>
             </div>
 
             <div class="col-md-12">
-                <label class="form-label">Ruta / URL del archivo</label>
-                <input type="text" name="archivo_url" class="form-control">
+                <label class="form-label">Archivo del documento</label>
+                <input type="file" name="archivo" class="form-control">
+                <div class="form-text">Formatos sugeridos: PDF, DOC, DOCX, XLS, XLSX, PNG, JPG.</div>
             </div>
 
             <div class="col-md-12">
                 <label class="form-label">Cambios / observaciones de la versión</label>
-                <textarea name="cambios" class="form-control" rows="3"></textarea>
+                <textarea name="cambios" class="form-control" rows="3" placeholder="Ejemplo: Versión inicial del documento." required></textarea>
             </div>
 
             <div class="col-md-12">
                 <label class="form-label">Contenido</label>
                 <textarea name="contenido" class="form-control" rows="12"></textarea>
             </div>
+            {% else %}
+            <div class="col-12">
+                <div class="alert alert-light border">
+                    Para modificar el contenido o generar una nueva revisión del documento, utiliza la opción
+                    <strong>Nueva versión</strong> desde el detalle del documento.
+                </div>
+            </div>
             {% endif %}
 
-            <div class="col-12">
+            <div class="col-12 d-flex gap-2 flex-wrap">
                 <button type="submit" class="btn btn-primary">Guardar</button>
                 <a href="{{ url_for('documentacion.index') }}" class="btn btn-secondary">Cancelar</a>
             </div>

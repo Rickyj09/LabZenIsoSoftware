@@ -25,3 +25,7 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Private document storage (files are managed outside Git)
+/storage/documentos/
+/backups/

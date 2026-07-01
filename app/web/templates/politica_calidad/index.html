@@ -11,10 +11,12 @@
                 <a href="{{ url_for('politica_calidad.nuevo') }}" class="btn btn-primary">
                     Crear política
                 </a>
-            {% else %}
+            {% elif not version_preparacion %}
                 <a href="{{ url_for('politica_calidad.nueva_version') }}" class="btn btn-success">
                     Nueva versión
                 </a>
+            {% else %}
+                <span class="btn btn-outline-secondary disabled">Versión en preparación</span>
             {% endif %}
         </div>
     </div>
@@ -27,8 +29,14 @@
             <p><strong>Tipo:</strong> {{ documento.tipo_documento }}</p>
             <p><strong>Proceso:</strong> {{ documento.proceso }}</p>
             <p><strong>Estado:</strong> {{ documento.estado }}</p>
-            <p><strong>Versión actual:</strong> {{ documento.version_actual }}</p>
+            <p><strong>Versión vigente aprobada:</strong> {{ version_vigente.version if version_vigente else 'Sin versión aprobada vigente' }}</p>
         </div>
+    </div>
+    {% endif %}
+
+    {% if version_preparacion %}
+    <div class="alert alert-info">
+        Versión {{ version_preparacion.version }} en preparación: {{ version_preparacion.estado }}.
     </div>
     {% endif %}
 

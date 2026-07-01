@@ -1,10 +1,15 @@
-from datetime import date
-
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from flask_login import login_required, current_user
 
 from app.extensions import db
 from app.models.documentos import Documento, DocumentoVersion
+from app.services.document_versioning_service import (
+    DocumentVersioningError,
+    create_draft_version,
+    create_initial_version,
+    get_current_version,
+    get_preparation_version,
+)
 
 bp = Blueprint("politica_calidad", __name__, url_prefix="/politica-calidad")
 
@@ -13,6 +18,7 @@ bp = Blueprint("politica_calidad", __name__, url_prefix="/politica-calidad")
 @login_required
 def index():
     documento = Documento.query.filter_by(
+        empresa_id=current_user.empresa_id,
         codigo="POL-CAL-001",
         tipo_documento="POLITICA"
     ).first()
@@ -23,23 +29,22 @@ def index():
     if documento:
         versiones = (
             DocumentoVersion.query
-            .filter_by(documento_id=documento.id)
+            .filter_by(
+                documento_id=documento.id,
+                empresa_id=current_user.empresa_id,
+            )
             .order_by(DocumentoVersion.fecha_version.desc(), DocumentoVersion.id.desc())
             .all()
         )
 
-        if documento.version_actual:
-            version_vigente = (
-                DocumentoVersion.query
-                .filter_by(documento_id=documento.id, version=documento.version_actual)
-                .first()
-            )
+        version_vigente = get_current_version(documento)
 
     return render_template(
         "politica_calidad/index.html",
         documento=documento,
         versiones=versiones,
         version_vigente=version_vigente,
+        version_preparacion=get_preparation_version(documento) if documento else None,
     )
 
 
@@ -47,6 +52,7 @@ def index():
 @login_required
 def nuevo():
     existente = Documento.query.filter_by(
+        empresa_id=current_user.empresa_id,
         codigo="POL-CAL-001",
         tipo_documento="POLITICA"
     ).first()
@@ -71,25 +77,26 @@ def nuevo():
             titulo=titulo,
             tipo_documento="POLITICA",
             proceso="SGC",
-            estado="vigente",
+            estado="BORRADOR",
             version_actual=version,
             elaborado_por_id=current_user.id,
         )
         db.session.add(documento)
         db.session.flush()
 
-        version_doc = DocumentoVersion(
-            empresa_id=current_user.empresa_id,
-            documento_id=documento.id,
-            version=version,
-            contenido=contenido,
-            fecha_version=date.today(),
-            cambios=cambios,
-            elaborado_por_id=current_user.id,
-            estado="vigente",
-        )
-        db.session.add(version_doc)
-        db.session.commit()
+        try:
+            create_initial_version(
+                documento=documento,
+                version=version,
+                contenido=contenido,
+                cambios=cambios,
+                user_id=current_user.id,
+            )
+            db.session.commit()
+        except DocumentVersioningError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+            return render_template("politica_calidad/form.html", modo="nuevo", documento=None, version=None)
 
         flash("Política de Calidad creada correctamente.", "success")
         return redirect(url_for("politica_calidad.index"))
@@ -101,6 +108,7 @@ def nuevo():
 @login_required
 def nueva_version():
     documento = Documento.query.filter_by(
+        empresa_id=current_user.empresa_id,
         codigo="POL-CAL-001",
         tipo_documento="POLITICA"
     ).first()
@@ -118,21 +126,19 @@ def nueva_version():
             flash("Versión y contenido son obligatorios.", "danger")
             return render_template("politica_calidad/form.html", modo="version", documento=documento, version=None)
 
-        documento.version_actual = version
-        documento.estado = "vigente"
-
-        nueva = DocumentoVersion(
-            empresa_id=current_user.empresa_id,
-            documento_id=documento.id,
-            version=version,
-            contenido=contenido,
-            fecha_version=date.today(),
-            cambios=cambios,
-            elaborado_por_id=current_user.id,
-            estado="vigente",
-        )
-        db.session.add(nueva)
-        db.session.commit()
+        try:
+            create_draft_version(
+                documento=documento,
+                version=version,
+                contenido=contenido,
+                cambios=cambios,
+                user_id=current_user.id,
+            )
+            db.session.commit()
+        except DocumentVersioningError as exc:
+            db.session.rollback()
+            flash(str(exc), "danger")
+            return render_template("politica_calidad/form.html", modo="version", documento=documento, version=None)
 
         flash("Nueva versión registrada correctamente.", "success")
         return redirect(url_for("politica_calidad.index"))
