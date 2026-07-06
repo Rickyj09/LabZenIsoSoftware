@@ -1,7 +1,7 @@
 from app import create_app
 from app.extensions import db
 from app.models.empresa import Empresa
-from app.models.seguridad import Usuario
+from app.models.seguridad import Rol, Usuario, UsuarioRol
 
 
 app = create_app()
@@ -48,5 +48,26 @@ with app.app_context():
         print("Usuario admin creado.")
     else:
         print("El usuario admin ya existe.")
+
+    # 3. Garantizar que el usuario inicial tenga un rol administrativo.
+    rol_administrador = Rol.query.filter(
+        db.func.upper(Rol.nombre) == "ADMINISTRADOR"
+    ).first()
+    if not rol_administrador:
+        rol_administrador = Rol(
+            nombre="ADMINISTRADOR",
+            descripcion="Rol administrador del sistema",
+            es_sistema=True,
+        )
+        db.session.add(rol_administrador)
+        db.session.flush()
+
+    if not UsuarioRol.query.filter_by(
+        usuario_id=usuario.id,
+        rol_id=rol_administrador.id,
+    ).first():
+        db.session.add(UsuarioRol(usuario_id=usuario.id, rol_id=rol_administrador.id))
+        db.session.commit()
+        print("Rol ADMINISTRADOR asignado al usuario admin.")
 
     print("Proceso finalizado.")

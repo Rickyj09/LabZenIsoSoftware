@@ -16,8 +16,17 @@
             {% endif %}
         </div>
     </div>
+    {% if can('documentos.crear') %}
     <a href="{{ url_for('documentacion.nuevo') }}" class="btn btn-primary">Nuevo documento</a>
+    {% endif %}
 </div>
+
+{% if documental_pending_count and can('documentos.ver_pendientes') %}
+<div class="alert alert-warning d-flex justify-content-between align-items-center mb-4">
+    <span>Tiene {{ documental_pending_count }} documento(s) pendiente(s) por revisar o aprobar.</span>
+    <a href="{{ url_for('documentacion.pendientes') }}" class="btn btn-sm btn-warning">Ver pendientes</a>
+</div>
+{% endif %}
 
 <div class="page-card mb-4">
     <form method="get" class="row g-3">
@@ -96,15 +105,17 @@
                                 Ver
                             </a>
 
-                            {% if item.estado == 'BORRADOR' %}
+                            {% if item.estado == 'BORRADOR' and can('documentos.editar') %}
                             <a href="{{ url_for('documentacion.editar', item_id=item.id) }}" class="btn btn-sm btn-outline-primary">
                                 Editar
                             </a>
                             {% endif %}
 
+                            {% if can('documentos.ver_historial') %}
                             <a href="{{ url_for('documentacion.detalle', item_id=item.id) }}#historial" class="btn btn-sm btn-outline-dark">
                                 Historial
                             </a>
+                            {% endif %}
                         </div>
                     </td>
                 </tr>

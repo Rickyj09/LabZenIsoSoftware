@@ -3,6 +3,7 @@ from flask_login import login_required, current_user
 
 from app.extensions import db
 from app.models.documentos import Documento, DocumentoVersion
+from app.security.permissions import require_permission
 from app.services.document_versioning_service import (
     DocumentVersioningError,
     create_draft_version,
@@ -17,6 +18,7 @@ bp = Blueprint("politica_calidad", __name__, url_prefix="/politica-calidad")
 
 @bp.route("/")
 @login_required
+@require_permission("documentos.ver")
 def index():
     documento = Documento.query.filter_by(
         empresa_id=current_user.empresa_id,
@@ -51,6 +53,7 @@ def index():
 
 @bp.route("/nuevo", methods=["GET", "POST"])
 @login_required
+@require_permission("documentos.crear")
 def nuevo():
     existente = Documento.query.filter_by(
         empresa_id=current_user.empresa_id,
@@ -119,6 +122,7 @@ def nuevo():
 
 @bp.route("/nueva-version", methods=["GET", "POST"])
 @login_required
+@require_permission("documentos.editar")
 def nueva_version():
     documento = Documento.query.filter_by(
         empresa_id=current_user.empresa_id,

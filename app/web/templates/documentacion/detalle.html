@@ -10,19 +10,20 @@
     </div>
 
     <div class="d-flex gap-2 flex-wrap align-items-center">
-        {% if item.estado != 'OBSOLETO' and not version_preparacion and not version_rechazada %}
+        {% if can('documentos.editar') and item.estado != 'OBSOLETO' and not version_preparacion and not version_rechazada %}
         <a href="{{ url_for('documentacion.nueva_version', item_id=item.id) }}" class="btn btn-outline-success">
             Nueva versión
         </a>
         {% endif %}
 
         {% if version_preparacion and version_preparacion.estado == 'BORRADOR' %}
-            {% if item.estado == 'BORRADOR' %}
+            {% if item.estado == 'BORRADOR' and can('documentos.editar') %}
             <a href="{{ url_for('documentacion.editar', item_id=item.id) }}" class="btn btn-primary">
                 Editar
             </a>
             {% endif %}
 
+            {% if can('documentos.enviar_revision') %}
             <form method="post" action="{{ url_for('documentacion.enviar_revision', item_id=item.id) }}" class="d-flex gap-2">
                 <input type="text" name="comentario" class="form-control form-control-sm"
                        placeholder="Comentario de revisión (opcional)">
@@ -30,8 +31,10 @@
                     Enviar a revisión
                 </button>
             </form>
+            {% endif %}
 
         {% elif version_preparacion and version_preparacion.estado == 'EN_REVISION' %}
+            {% if can('documentos.aprobar') %}
             <form method="post"
                   action="{{ url_for('documentacion.aprobar_version', item_id=item.id, version_id=version_preparacion.id) }}"
                   class="d-flex gap-2">
@@ -41,7 +44,9 @@
                     Aprobar
                 </button>
             </form>
+            {% endif %}
 
+            {% if can('documentos.rechazar') %}
             <form method="post"
                   action="{{ url_for('documentacion.rechazar_version', item_id=item.id, version_id=version_preparacion.id) }}"
                   class="d-flex gap-2">
@@ -51,8 +56,10 @@
                     Rechazar
                 </button>
             </form>
+            {% endif %}
 
         {% elif version_rechazada %}
+            {% if can('documentos.devolver_borrador') %}
             <form method="post"
                   action="{{ url_for('documentacion.devolver_borrador', item_id=item.id, version_id=version_rechazada.id) }}"
                   class="d-flex gap-2">
@@ -62,12 +69,14 @@
                     Devolver a borrador
                 </button>
             </form>
+            {% endif %}
 
         {% elif item.estado == 'APROBADO' and version_vigente %}
             <span class="btn btn-outline-secondary disabled">
                 Documento bloqueado por aprobación
             </span>
 
+            {% if can('documentos.obsoletar') %}
             <form method="post" action="{{ url_for('documentacion.obsoletar', item_id=item.id) }}" class="d-flex gap-2">
                 <input type="text" name="motivo" class="form-control form-control-sm"
                        placeholder="Motivo de obsolescencia" required>
@@ -76,6 +85,7 @@
                     Marcar obsoleto
                 </button>
             </form>
+            {% endif %}
 
         {% elif item.estado == 'OBSOLETO' %}
             <span class="btn btn-outline-dark disabled">
@@ -211,9 +221,11 @@
                             Previsualizar
                         </a>
                         {% endif %}
+                        {% if can('documentos.descargar') %}
                         <a href="{{ url_for('documentacion.descargar_version', version_id=version_vigente.id) }}" class="btn btn-sm btn-outline-secondary">
                             Descargar
                         </a>
+                        {% endif %}
                     </div>
                     <div class="small text-muted mt-2">
                         {{ version_vigente.archivo_nombre_original or version_vigente.archivo_nombre_guardado or (version_vigente.archivo_url.split('/')[-1] if version_vigente.archivo_url else 'Archivo documental') }}
@@ -308,6 +320,7 @@
 </div>
 {% endif %}
 
+{% if can_view_history %}
 <div id="historial" class="page-card mb-4">
     <h5 class="mb-3">Historial de versiones</h5>
 
@@ -346,9 +359,11 @@
                     </td>
                     <td>
                         {% if v.archivo_storage_path or v.archivo_url %}
+                            {% if can('documentos.descargar') %}
                             <a href="{{ url_for('documentacion.descargar_version', version_id=v.id) }}" class="btn btn-sm btn-outline-primary">
                                 Descargar
                             </a>
+                            {% endif %}
                             <div class="small text-muted mt-1">
                                 {{ v.archivo_nombre_original or v.archivo_nombre_guardado or (v.archivo_url.split('/')[-1] if v.archivo_url else 'Archivo documental') }}
                             </div>
@@ -436,4 +451,5 @@
     </div>
     {% endif %}
 </div>
+{% endif %}
 {% endblock %}

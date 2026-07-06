@@ -1,4 +1,5 @@
 from flask import Flask
+from flask_login import current_user
 
 from app.config import get_config
 from app.extensions import db, migrate, login_manager
@@ -25,8 +26,30 @@ def create_app(config_overrides=None):
     # Registro de blueprints Flask
     register_blueprints(app)
     register_cli(app)
+    register_template_context(app)
 
     return app
+
+
+def register_template_context(app: Flask) -> None:
+    from app.security.permissions import current_user_can
+    from app.services.document_pending_service import count_pending_documents_for_user
+
+    @app.context_processor
+    def document_security_context():
+        def can(permission_code):
+            return current_user_can(permission_code)
+
+        pending_count = 0
+        if (
+            current_user.is_authenticated
+            and current_user_can("documentos.ver_pendientes")
+        ):
+            pending_count = count_pending_documents_for_user(current_user)
+        return {
+            "can": can,
+            "documental_pending_count": pending_count,
+        }
 
 
 def register_cli(app: Flask) -> None:

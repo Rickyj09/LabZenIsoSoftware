@@ -14,6 +14,7 @@ from flask import (
 from flask_login import login_required, current_user
 
 from app.extensions import db
+from app.security.permissions import current_user_can, require_permission
 from app.models.documentos import (
     Documento,
     DocumentoVersion,
@@ -47,6 +48,7 @@ from app.services.storage_service import (
     store_document_file,
     validate_document_file,
 )
+from app.services.document_pending_service import get_pending_documents_for_user
 
 bp = Blueprint("documentacion", __name__, url_prefix="/documentacion")
 
@@ -98,6 +100,7 @@ def extension_version(version_doc):
 
 @bp.route("/")
 @login_required
+@require_permission("documentos.ver")
 def index():
     tipo = request.args.get("tipo", "").strip()
     estado = request.args.get("estado", "").strip()
@@ -140,6 +143,7 @@ def index():
 
 @bp.route("/registros")
 @login_required
+@require_permission("documentos.ver")
 def registros():
     estado = request.args.get("estado", "").strip()
     q = request.args.get("q", "").strip()
@@ -178,6 +182,7 @@ def registros():
 
 @bp.route("/archivo")
 @login_required
+@require_permission("documentos.ver")
 def archivo():
     q = request.args.get("q", "").strip()
 
@@ -208,8 +213,19 @@ def archivo():
     )
 
 
+@bp.route("/pendientes")
+@login_required
+@require_permission("documentos.ver_pendientes")
+def pendientes():
+    return render_template(
+        "documentacion/pendientes.html",
+        pendientes=get_pending_documents_for_user(current_user),
+    )
+
+
 @bp.route("/nuevo", methods=["GET", "POST"])
 @login_required
+@require_permission("documentos.crear")
 def nuevo():
     if request.method == "POST":
         codigo = request.form.get("codigo", "").strip().upper()
@@ -337,18 +353,22 @@ def nuevo():
 
 @bp.route("/<int:item_id>")
 @login_required
+@require_permission("documentos.ver")
 def detalle(item_id):
     item = Documento.query.filter_by(
         id=item_id,
         empresa_id=current_user.empresa_id
     ).first_or_404()
 
-    versiones = (
-        DocumentoVersion.query
-        .filter_by(documento_id=item.id, empresa_id=current_user.empresa_id)
-        .order_by(DocumentoVersion.fecha_version.desc(), DocumentoVersion.id.desc())
-        .all()
-    )
+    can_view_history = current_user_can("documentos.ver_historial")
+    versiones = []
+    if can_view_history:
+        versiones = (
+            DocumentoVersion.query
+            .filter_by(documento_id=item.id, empresa_id=current_user.empresa_id)
+            .order_by(DocumentoVersion.fecha_version.desc(), DocumentoVersion.id.desc())
+            .all()
+        )
 
     version_vigente = get_current_version(item)
     version_preparacion = get_preparation_version(item)
@@ -357,7 +377,11 @@ def detalle(item_id):
 
     preview_url = None
     preview_tipo = None
-    if version_mostrada and (version_mostrada.archivo_storage_path or version_mostrada.archivo_url):
+    if (
+        current_user_can("documentos.descargar")
+        and version_mostrada
+        and (version_mostrada.archivo_storage_path or version_mostrada.archivo_url)
+    ):
         preview_tipo = extension_version(version_mostrada)
         if preview_tipo in PREVIEWABLE_EXTENSIONS:
             preview_url = url_for(
@@ -379,7 +403,8 @@ def detalle(item_id):
             .filter_by(documento_id=item.id, empresa_id=current_user.empresa_id)
             .order_by(DocumentoAprobacion.fecha_accion.desc(), DocumentoAprobacion.id.desc())
             .all()
-        ),
+        ) if can_view_history else [],
+        can_view_history=can_view_history,
         preview_url=preview_url,
         preview_tipo=preview_tipo,
     )
@@ -387,6 +412,7 @@ def detalle(item_id):
 
 @bp.route("/version/<int:version_id>/descargar")
 @login_required
+@require_permission("documentos.descargar")
 def descargar_version(version_id):
     version_doc = (
         DocumentoVersion.query
@@ -430,6 +456,7 @@ def descargar_version(version_id):
 
 @bp.route("/<int:item_id>/editar", methods=["GET", "POST"])
 @login_required
+@require_permission("documentos.editar")
 def editar(item_id):
     item = Documento.query.filter_by(
         id=item_id,
@@ -494,6 +521,7 @@ def editar(item_id):
 
 @bp.route("/<int:item_id>/nueva-version", methods=["GET", "POST"])
 @login_required
+@require_permission("documentos.editar")
 def nueva_version(item_id):
     item = Documento.query.filter_by(
         id=item_id,
@@ -584,6 +612,7 @@ def nueva_version(item_id):
 
 @bp.route("/<int:item_id>/aprobar-version/<int:version_id>", methods=["POST"])
 @login_required
+@require_permission("documentos.aprobar")
 def aprobar_version(item_id, version_id):
     item = Documento.query.filter_by(
         id=item_id,
@@ -616,6 +645,7 @@ def aprobar_version(item_id, version_id):
 
 @bp.route("/<int:item_id>/enviar-revision", methods=["POST"])
 @login_required
+@require_permission("documentos.enviar_revision")
 def enviar_revision(item_id):
     item = Documento.query.filter_by(
         id=item_id,
@@ -648,6 +678,7 @@ def enviar_revision(item_id):
 
 @bp.route("/<int:item_id>/rechazar-version/<int:version_id>", methods=["POST"])
 @login_required
+@require_permission("documentos.rechazar")
 def rechazar_version(item_id, version_id):
     item = Documento.query.filter_by(
         id=item_id,
@@ -679,6 +710,7 @@ def rechazar_version(item_id, version_id):
 
 @bp.route("/<int:item_id>/devolver-borrador/<int:version_id>", methods=["POST"])
 @login_required
+@require_permission("documentos.devolver_borrador")
 def devolver_borrador(item_id, version_id):
     item = Documento.query.filter_by(
         id=item_id,
@@ -710,6 +742,7 @@ def devolver_borrador(item_id, version_id):
 
 @bp.route("/<int:item_id>/obsoletar", methods=["POST"])
 @login_required
+@require_permission("documentos.obsoletar")
 def obsoletar(item_id):
     item = Documento.query.filter_by(
         id=item_id,

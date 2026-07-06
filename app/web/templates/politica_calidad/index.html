@@ -7,11 +7,11 @@
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h3>Política de Calidad</h3>
         <div>
-            {% if not documento %}
+            {% if not documento and can('documentos.crear') %}
                 <a href="{{ url_for('politica_calidad.nuevo') }}" class="btn btn-primary">
                     Crear política
                 </a>
-            {% elif not version_preparacion %}
+            {% elif documento and not version_preparacion and can('documentos.editar') %}
                 <a href="{{ url_for('politica_calidad.nueva_version') }}" class="btn btn-success">
                     Nueva versión
                 </a>
@@ -55,7 +55,7 @@
     </div>
     {% endif %}
 
-    {% if versiones %}
+    {% if versiones and can('documentos.ver_historial') %}
     <div class="card">
         <div class="card-header">
             <strong>Historial de versiones</strong>
