@@ -153,8 +153,7 @@ class HistoricalDocumentMigrationTest(unittest.TestCase):
         )
         stored = store_document_file(
             upload,
-            empresa_id=version_doc.empresa_id,
-            documento_id=version_doc.documento_id,
+            documento=version_doc.documento,
             version=version_doc.version,
         )
         apply_stored_file_metadata(version_doc, stored)
@@ -164,6 +163,26 @@ class HistoricalDocumentMigrationTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, b"archivo privado")
+        self.assertIn("privado.pdf", response.headers["Content-Disposition"])
+        response.close()
+
+    def test_downloads_existing_private_file_with_technical_name(self):
+        version_doc = self.add_version(version_id=408)
+        relative_path = "empresa_101/documento_301/v408/2e3ebfe3c3ea470580fa31e4e0648fc0.pdf"
+        physical_path = self.private_root / relative_path
+        physical_path.parent.mkdir(parents=True)
+        physical_path.write_bytes(b"archivo privado anterior")
+        version_doc.archivo_nombre_original = "procedimiento original.pdf"
+        version_doc.archivo_nombre_guardado = physical_path.name
+        version_doc.archivo_storage_path = relative_path
+        version_doc.archivo_mime = "application/pdf"
+        db.session.commit()
+
+        response = self.login(201).get(f"/documentacion/version/{version_doc.id}/descargar")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b"archivo privado anterior")
+        self.assertIn("procedimiento original.pdf", response.headers["Content-Disposition"])
         response.close()
 
     def test_downloads_non_migrated_legacy_file_through_protected_route(self):

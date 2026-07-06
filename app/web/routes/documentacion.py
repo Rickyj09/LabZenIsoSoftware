@@ -275,8 +275,7 @@ def nuevo():
 
             stored_file = store_document_file(
                 archivo,
-                empresa_id=current_user.empresa_id,
-                documento_id=documento.id,
+                documento=documento,
                 version=version,
             )
             version_doc = create_initial_version(
@@ -529,8 +528,7 @@ def nueva_version(item_id):
         try:
             stored_file = store_document_file(
                 archivo,
-                empresa_id=current_user.empresa_id,
-                documento_id=item.id,
+                documento=item,
                 version=version,
             )
             nueva = create_draft_version(

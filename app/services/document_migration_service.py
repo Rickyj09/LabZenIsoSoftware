@@ -80,8 +80,7 @@ def migrate_historical_document_files(*, apply=False, reporter=None, versions=No
                 )
                 stored_file = store_document_file(
                     legacy_file,
-                    empresa_id=version_doc.empresa_id,
-                    documento_id=version_doc.documento_id,
+                    documento=version_doc.documento,
                     version=version_doc.version,
                 )
 
