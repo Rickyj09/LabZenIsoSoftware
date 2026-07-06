@@ -10,7 +10,7 @@ from app import create_app
 from app.extensions import db
 from app.models.documentos import Documento, DocumentoVersion
 from app.models.empresa import Empresa
-from app.models.seguridad import Usuario
+from app.models.seguridad import Permiso, Rol, RolPermiso, Usuario, UsuarioRol
 from app.services.document_migration_service import migrate_historical_document_files
 from app.services.storage_service import (
     apply_stored_file_metadata,
@@ -72,6 +72,20 @@ class HistoricalDocumentMigrationTest(unittest.TestCase):
             elaborado_por_id=201,
         )
         db.session.add_all([empresa_1, empresa_2, usuario_1, usuario_2, documento])
+        download_role = Rol(id=501, nombre="TEST_DOWNLOAD", es_sistema=False)
+        download_permission = Permiso(
+            id=502,
+            codigo="documentos.descargar",
+            nombre="Descargar documentos",
+            modulo="documentos",
+        )
+        db.session.add_all([download_role, download_permission])
+        db.session.flush()
+        db.session.add_all([
+            RolPermiso(id=503, rol_id=download_role.id, permiso_id=download_permission.id),
+            UsuarioRol(id=504, usuario_id=201, rol_id=download_role.id),
+            UsuarioRol(id=505, usuario_id=202, rol_id=download_role.id),
+        ])
         db.session.commit()
 
     def tearDown(self):

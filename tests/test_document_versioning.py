@@ -7,7 +7,7 @@ from app import create_app
 from app.extensions import db
 from app.models.documentos import Documento, DocumentoVersion
 from app.models.empresa import Empresa
-from app.models.seguridad import Usuario
+from app.models.seguridad import Permiso, Rol, RolPermiso, Usuario, UsuarioRol
 from app.services.document_versioning_service import (
     DocumentVersioningError,
     approve_version,
@@ -55,6 +55,19 @@ class DocumentVersioningTest(unittest.TestCase):
                 password_hash="test",
                 activo=True,
             ),
+        ])
+        edit_role = Rol(id=401, nombre="TEST_EDITOR", es_sistema=False)
+        edit_permission = Permiso(
+            id=402,
+            codigo="documentos.editar",
+            nombre="Editar documentos",
+            modulo="documentos",
+        )
+        db.session.add_all([edit_role, edit_permission])
+        db.session.flush()
+        db.session.add_all([
+            RolPermiso(id=403, rol_id=edit_role.id, permiso_id=edit_permission.id),
+            UsuarioRol(id=404, usuario_id=201, rol_id=edit_role.id),
         ])
         db.session.commit()
 
