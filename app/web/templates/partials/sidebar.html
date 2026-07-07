@@ -172,9 +172,27 @@
             </a>
 
             {% if can('documentos.ver') %}
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('documentacion.') %}active{% endif %}"
+            <a class="sidebar-link {% if request.endpoint == 'documentacion.dashboard' %}active{% endif %}"
+               href="{{ url_for('documentacion.dashboard') }}">
+                Dashboard documental
+                {% if documental_pending_count %}
+                <span class="badge bg-danger ms-1">{{ documental_pending_count }}</span>
+                {% endif %}
+            </a>
+
+            {% if can('documentos.ver_pendientes') %}
+            <a class="sidebar-link {% if request.endpoint == 'documentacion.pendientes' %}active{% endif %}"
+               href="{{ url_for('documentacion.pendientes') }}">
+                Mis pendientes
+                {% if documental_pending_count %}
+                <span class="badge bg-danger ms-1">{{ documental_pending_count }}</span>
+                {% endif %}
+            </a>
+            {% endif %}
+
+            <a class="sidebar-link {% if request.endpoint == 'documentacion.index' %}active{% endif %}"
                href="{{ url_for('documentacion.index') }}">
-                Gestión Documental
+                Documentos
                 {% if documental_pending_count %}
                 <span class="badge bg-danger ms-1">{{ documental_pending_count }}</span>
                 {% endif %}
@@ -189,15 +207,6 @@
                href="{{ url_for('documentacion.archivo') }}">
                 Archivo
             </a>
-            {% if can('documentos.ver_pendientes') %}
-            <a class="sidebar-link {% if request.endpoint == 'documentacion.pendientes' %}active{% endif %}"
-               href="{{ url_for('documentacion.pendientes') }}">
-                Mis pendientes
-                {% if documental_pending_count %}
-                <span class="badge bg-danger ms-1">{{ documental_pending_count }}</span>
-                {% endif %}
-            </a>
-            {% endif %}
             {% endif %}
         </div>
 

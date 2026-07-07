@@ -49,6 +49,7 @@ from app.services.storage_service import (
     validate_document_file,
 )
 from app.services.document_pending_service import get_pending_documents_for_user
+from app.services.document_dashboard_service import get_document_dashboard_stats
 
 bp = Blueprint("documentacion", __name__, url_prefix="/documentacion")
 
@@ -220,6 +221,16 @@ def pendientes():
     return render_template(
         "documentacion/pendientes.html",
         pendientes=get_pending_documents_for_user(current_user),
+    )
+
+
+@bp.route("/dashboard")
+@login_required
+@require_permission("documentos.ver")
+def dashboard():
+    return render_template(
+        "documentacion/dashboard.html",
+        stats=get_document_dashboard_stats(current_user),
     )
 
 

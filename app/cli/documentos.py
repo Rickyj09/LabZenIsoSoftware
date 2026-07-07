@@ -1,5 +1,6 @@
 import click
 
+from app.services.document_demo_seed_service import seed_demo_documents
 from app.services.document_migration_service import migrate_historical_document_files
 
 
@@ -37,3 +38,15 @@ def migrar_archivos_historicos(dry_run, apply_changes):
         click.echo("Simulación finalizada: no se copiaron archivos ni se modificó la base de datos.")
     if summary.errores:
         raise click.ClickException("La migración terminó con errores; revisa el detalle anterior.")
+@documentos_cli.command(name="seed-demo")
+@click.option("--empresa-id", default=1, show_default=True, type=int, help="Empresa donde se crearán los datos demo.")
+def seed_demo(empresa_id):
+    """Crea datos demo idempotentes para el módulo documental."""
+    summary = seed_demo_documents(empresa_id=empresa_id)
+    click.echo(f"Datos demo documentales listos para empresa_id={summary['empresa_id']}.")
+    click.echo("Documentos demo: " + ", ".join(summary["document_codes"]))
+    click.echo("Usuarios demo: " + ", ".join(summary["usernames"]))
+    if summary["created_documents"]:
+        click.echo("Creados en esta ejecución: " + ", ".join(summary["created_documents"]))
+    else:
+        click.echo("No se duplicaron documentos; los códigos demo ya existían.")

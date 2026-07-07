@@ -1,0 +1,236 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Dashboard documental{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+    <div>
+        <h2 class="mb-1">Dashboard documental</h2>
+        <div class="text-muted">Indicadores simples del estado documental de la empresa actual.</div>
+    </div>
+    <div class="d-flex gap-2">
+        {% if can('documentos.ver_pendientes') %}
+        <a href="{{ url_for('documentacion.pendientes') }}" class="btn btn-outline-warning">Mis pendientes</a>
+        {% endif %}
+        <a href="{{ url_for('documentacion.index') }}" class="btn btn-primary">Ver documentos</a>
+    </div>
+</div>
+
+{% if stats.documents_without_file_count %}
+<div class="alert alert-warning d-flex justify-content-between align-items-center mb-4">
+    <span>Hay {{ stats.documents_without_file_count }} versión(es) documental(es) activas sin archivo asociado.</span>
+    <span class="badge bg-warning text-dark">Alerta administrativa</span>
+</div>
+{% endif %}
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="page-card h-100">
+            <div class="text-muted small">Total de documentos</div>
+            <div class="display-6">{{ stats.total_documents }}</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="page-card h-100">
+            <div class="text-muted small">Pendientes de revisión/aprobación</div>
+            <div class="display-6">{{ stats.pending_count }}</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="page-card h-100">
+            <div class="text-muted small">Documentos en actualización</div>
+            <div class="display-6">{{ stats.documents_in_update_count }}</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="page-card h-100">
+            <div class="text-muted small">Con versión vigente</div>
+            <div class="display-6">{{ stats.documents_with_current_version_count }}</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    {% for label, value, badge in [
+        ('BORRADOR', stats.technical_status.BORRADOR, 'bg-secondary'),
+        ('EN REVISIÓN', stats.technical_status.EN_REVISION, 'bg-warning text-dark'),
+        ('APROBADOS / VIGENTES', stats.technical_status.APROBADO, 'bg-success'),
+        ('RECHAZADOS', stats.technical_status.RECHAZADO, 'bg-danger'),
+        ('OBSOLETOS', stats.technical_status.OBSOLETO, 'bg-dark'),
+        ('SIN ARCHIVO', stats.documents_without_file_count, 'bg-warning text-dark')
+    ] %}
+    <div class="col-md-2 col-sm-4">
+        <div class="page-card h-100">
+            <div class="small text-muted">{{ label }}</div>
+            <span class="badge {{ badge }} fs-6">{{ value }}</span>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-lg-6">
+        <div class="page-card h-100">
+            <h5 class="mb-3">Estado funcional del flujograma</h5>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <tbody>
+                        <tr><td>Borrador</td><td class="text-end">{{ stats.flow_status.BORRADOR }}</td></tr>
+                        <tr><td>En revisión</td><td class="text-end">{{ stats.flow_status.EN_REVISION }}</td></tr>
+                        <tr><td>Rechazado</td><td class="text-end">{{ stats.flow_status.RECHAZADO }}</td></tr>
+                        <tr><td>Vigente</td><td class="text-end">{{ stats.flow_status.VIGENTE }}</td></tr>
+                        <tr><td>En actualización</td><td class="text-end">{{ stats.flow_status.EN_ACTUALIZACION }}</td></tr>
+                        <tr><td>Obsoleto</td><td class="text-end">{{ stats.flow_status.OBSOLETO }}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="page-card h-100">
+            <h5 class="mb-3">Documentos por tipo</h5>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>Tipo documental</th>
+                            <th class="text-end">Cantidad</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for tipo, cantidad in stats.document_types %}
+                        <tr>
+                            <td>{{ tipo }}</td>
+                            <td class="text-end">{{ cantidad }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="2" class="text-center text-muted py-3">No existen documentos registrados.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-lg-6">
+        <div class="page-card h-100">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">Pendientes recientes</h5>
+                {% if can('documentos.ver_pendientes') %}
+                <a href="{{ url_for('documentacion.pendientes') }}" class="btn btn-sm btn-outline-warning">Ver todos</a>
+                {% endif %}
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>Código</th>
+                            <th>Título</th>
+                            <th>Versión</th>
+                            <th>Envío</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for version in stats.pending_documents %}
+                        <tr>
+                            <td>{{ version.documento.codigo }}</td>
+                            <td>{{ version.documento.titulo }}</td>
+                            <td>{{ version.version }}</td>
+                            <td>{{ version.fecha_envio_revision.strftime('%Y-%m-%d') if version.fecha_envio_revision else '' }}</td>
+                            <td class="text-end">
+                                <a href="{{ url_for('documentacion.detalle', item_id=version.documento.id) }}" class="btn btn-sm btn-outline-primary">
+                                    {% if can('documentos.aprobar') or can('documentos.rechazar') %}Revisar{% else %}Ver{% endif %}
+                                </a>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted py-3">No hay pendientes visibles para este usuario.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="page-card h-100">
+            <h5 class="mb-3">Últimos documentos cargados</h5>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th>Código</th>
+                            <th>Título</th>
+                            <th>Tipo</th>
+                            <th>Estado</th>
+                            <th>Versión</th>
+                            <th>Actualización</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in stats.recent_documents %}
+                        <tr>
+                            <td>{{ item.codigo }}</td>
+                            <td>
+                                <a href="{{ url_for('documentacion.detalle', item_id=item.id) }}">{{ item.titulo }}</a>
+                                {% if item.elaborado_por %}
+                                <div class="small text-muted">{{ item.elaborado_por.nombre }} {{ item.elaborado_por.apellido }}</div>
+                                {% endif %}
+                            </td>
+                            <td>{{ item.tipo_documento }}</td>
+                            <td>{{ item.estado }}</td>
+                            <td>{{ item.version_vigente.version if item.version_vigente else item.version_actual }}</td>
+                            <td>{{ item.updated_at.strftime('%Y-%m-%d') if item.updated_at else '' }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center text-muted py-3">No hay documentos recientes.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="page-card">
+    <h5 class="mb-3">Documentos obsoletos recientes</h5>
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Código</th>
+                    <th>Título</th>
+                    <th>Versión</th>
+                    <th>Fecha de obsolescencia</th>
+                    <th>Motivo</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for version in stats.recent_obsolete_documents %}
+                <tr>
+                    <td>{{ version.documento.codigo }}</td>
+                    <td>{{ version.documento.titulo }}</td>
+                    <td>{{ version.version }}</td>
+                    <td>{{ version.fecha_obsolescencia.strftime('%Y-%m-%d') if version.fecha_obsolescencia else '' }}</td>
+                    <td>{{ version.motivo_obsolescencia or '' }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" class="text-center text-muted py-3">No hay documentos obsoletos recientes.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
