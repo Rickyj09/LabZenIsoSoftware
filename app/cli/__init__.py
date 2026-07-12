@@ -1,1 +1,1 @@
-"""Comandos administrativos de LabZenIsoSoftware."""
+"""Comandos administrativos de LabZenISO Software."""
