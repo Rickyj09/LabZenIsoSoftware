@@ -36,7 +36,7 @@
 
     {% if version_preparacion %}
     <div class="alert alert-info">
-        Versión {{ version_preparacion.version }} en preparación: {{ version_preparacion.estado }}.
+        Versión {{ version_preparacion.version }} en preparación: {{ document_state_label(version_preparacion.estado) }}.
     </div>
     {% endif %}
 
@@ -48,7 +48,7 @@
         <div class="card-body">
             <p><strong>Versión:</strong> {{ version_vigente.version }}</p>
             <p><strong>Fecha:</strong> {{ version_vigente.fecha_version }}</p>
-            <p><strong>Estado:</strong> {{ version_vigente.estado }}</p>
+            <p><strong>Estado:</strong> {{ document_state_label(version_vigente.estado) }}</p>
             <hr>
             <div style="white-space: pre-wrap;">{{ version_vigente.contenido or '' }}</div>
         </div>
@@ -77,7 +77,7 @@
                         <td>{{ v.id }}</td>
                         <td>{{ v.version }}</td>
                         <td>{{ v.fecha_version }}</td>
-                        <td>{{ v.estado }}</td>
+                        <td>{{ document_state_label(v.estado) }}</td>
                         <td>{{ v.cambios or '' }}</td>
                     </tr>
                     {% endfor %}

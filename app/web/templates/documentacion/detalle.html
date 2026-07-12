@@ -16,8 +16,8 @@
         </a>
         {% endif %}
 
-        {% if version_preparacion and version_preparacion.estado == 'BORRADOR' %}
-            {% if item.estado == 'BORRADOR' and can('documentos.editar') %}
+        {% if version_preparacion and version_preparacion.estado == 'EN_ELABORACION' %}
+            {% if item.estado == 'EN_ELABORACION' and can('documentos.editar') %}
             <a href="{{ url_for('documentacion.editar', item_id=item.id) }}" class="btn btn-primary">
                 Editar
             </a>
@@ -66,7 +66,7 @@
                 <input type="text" name="comentario" class="form-control form-control-sm"
                        placeholder="Comentario de devolución" required>
                 <button type="submit" class="btn btn-outline-warning">
-                    Devolver a borrador
+                    Devolver a elaboración
                 </button>
             </form>
             {% endif %}
@@ -97,8 +97,8 @@
 
 <div class="page-card mb-4">
     <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between">
-        <div class="workflow-step {% if item.estado in ['BORRADOR', 'EN_REVISION', 'APROBADO', 'OBSOLETO'] %}active{% endif %}">
-            1. Borrador
+        <div class="workflow-step {% if item.estado in ['EN_ELABORACION', 'EN_REVISION', 'APROBADO', 'OBSOLETO'] %}active{% endif %}">
+            1. En elaboración
         </div>
         <div class="workflow-separator"></div>
         <div class="workflow-step {% if item.estado in ['EN_REVISION', 'APROBADO', 'OBSOLETO'] %}active{% endif %}">
@@ -120,14 +120,8 @@
         <div class="page-card text-center h-100">
             <div class="text-muted mb-2">Estado</div>
             <div class="fs-5 fw-bold">
-                <span class="badge
-                    {% if item.estado == 'APROBADO' %}bg-success
-                    {% elif item.estado == 'BORRADOR' %}bg-secondary
-                    {% elif item.estado == 'EN_REVISION' %}bg-warning text-dark
-                    {% elif item.estado == 'OBSOLETO' %}bg-danger
-                    {% else %}bg-light text-dark
-                    {% endif %}">
-                    {{ item.estado }}
+                <span class="badge {{ document_state_badge_class(item.estado) }}">
+                    {{ document_state_label(item.estado) }}
                 </span>
             </div>
         </div>
@@ -186,14 +180,8 @@
         <h5 class="mb-0">Versión vigente aprobada</h5>
 
         <div class="d-flex gap-2 flex-wrap align-items-center">
-            <span class="badge
-                {% if version_vigente.estado == 'APROBADO' %}bg-success
-                {% elif version_vigente.estado == 'BORRADOR' %}bg-secondary
-                {% elif version_vigente.estado == 'EN_REVISION' %}bg-warning text-dark
-                {% elif version_vigente.estado == 'OBSOLETO' %}bg-danger
-                {% else %}bg-light text-dark
-                {% endif %}">
-                {{ version_vigente.estado }}
+            <span class="badge {{ document_state_badge_class(version_vigente.estado) }}">
+                {{ document_state_label(version_vigente.estado) }}
             </span>
         </div>
     </div>
@@ -286,7 +274,7 @@
 <div class="page-card mb-4">
     <h5>Versión en preparación</h5>
     <p class="mb-1"><strong>Versión:</strong> {{ version_preparacion.version }}</p>
-    <p class="mb-1"><strong>Estado:</strong> {{ version_preparacion.estado }}</p>
+    <p class="mb-1"><strong>Estado:</strong> {{ document_state_label(version_preparacion.estado) }}</p>
     <p class="mb-1"><strong>Enviada a revisión:</strong> {{ version_preparacion.fecha_envio_revision or '-' }}</p>
     <p class="mb-1"><strong>Comentario de revisión:</strong> {{ version_preparacion.comentario_revision or '-' }}</p>
     <p class="mb-0"><strong>Cambios:</strong> {{ version_preparacion.cambios or '-' }}</p>
@@ -345,16 +333,8 @@
                     <td>{{ v.version }}</td>
                     <td>{{ v.fecha_version }}</td>
                     <td>
-                        <span class="badge
-                            {% if v.estado == 'APROBADO' %}bg-success
-                            {% elif v.estado == 'BORRADOR' %}bg-secondary
-                            {% elif v.estado == 'EN_REVISION' %}bg-warning text-dark
-                            {% elif v.estado == 'SUSTITUIDO' %}bg-dark
-                            {% elif v.estado == 'RECHAZADO' %}bg-danger
-                            {% elif v.estado == 'OBSOLETO' %}bg-danger
-                            {% else %}bg-light text-dark
-                            {% endif %}">
-                            {{ v.estado }}
+                        <span class="badge {{ document_state_badge_class(v.estado) }}">
+                            {{ document_state_label(v.estado) }}
                         </span>
                     </td>
                     <td>
@@ -437,7 +417,7 @@
                         {% endif %}
                     </td>
                     <td>{{ a.accion }}</td>
-                    <td>{{ a.estado_anterior or 'INICIO' }} → {{ a.estado_nuevo }}</td>
+                    <td>{{ document_state_label(a.estado_anterior) if a.estado_anterior else 'INICIO' }} → {{ document_state_label(a.estado_nuevo) }}</td>
                     <td>{{ a.comentario or '' }}</td>
                     <td>{{ a.ip or '-' }}</td>
                 </tr>

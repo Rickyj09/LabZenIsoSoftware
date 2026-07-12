@@ -47,7 +47,7 @@
             <label class="form-label">Estado</label>
             <select name="estado" class="form-select">
                 <option value="">Todos</option>
-                <option value="BORRADOR" {% if estado == 'BORRADOR' %}selected{% endif %}>BORRADOR</option>
+                <option value="EN_ELABORACION" {% if estado == 'EN_ELABORACION' %}selected{% endif %}>EN ELABORACIÓN</option>
                 <option value="EN_REVISION" {% if estado == 'EN_REVISION' %}selected{% endif %}>EN REVISIÓN</option>
                 <option value="APROBADO" {% if estado == 'APROBADO' %}selected{% endif %}>APROBADO</option>
                 <option value="OBSOLETO" {% if estado == 'OBSOLETO' %}selected{% endif %}>OBSOLETO</option>
@@ -88,14 +88,8 @@
                     <td>{{ item.tipo_documento }}</td>
                     <td>{{ item.proceso or '' }}</td>
                     <td>
-                        <span class="badge
-                            {% if item.estado == 'APROBADO' %}bg-success
-                            {% elif item.estado == 'BORRADOR' %}bg-secondary
-                            {% elif item.estado == 'EN_REVISION' %}bg-warning text-dark
-                            {% elif item.estado == 'OBSOLETO' %}bg-danger
-                            {% else %}bg-light text-dark
-                            {% endif %}">
-                            {{ item.estado }}
+                        <span class="badge {{ document_state_badge_class(item.estado) }}">
+                            {{ document_state_label(item.estado) }}
                         </span>
                     </td>
                     <td>{{ item.version_vigente.version if item.version_vigente else 'Sin versión aprobada' }}</td>
@@ -105,7 +99,7 @@
                                 Ver
                             </a>
 
-                            {% if item.estado == 'BORRADOR' and can('documentos.editar') %}
+                            {% if item.estado == 'EN_ELABORACION' and can('documentos.editar') %}
                             <a href="{{ url_for('documentacion.editar', item_id=item.id) }}" class="btn btn-sm btn-outline-primary">
                                 Editar
                             </a>

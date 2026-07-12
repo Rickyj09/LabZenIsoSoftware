@@ -112,7 +112,7 @@ class DocumentPendingAlertTest(unittest.TestCase):
 
     def test_quality_sees_only_review_pending_from_own_company(self):
         _, expected = self.add_version(301, "EN_REVISION")
-        self.add_version(302, "BORRADOR")
+        self.add_version(302, "EN_ELABORACION")
         self.add_version(303, "APROBADO")
         self.add_version(304, "RECHAZADO")
         self.add_version(305, "OBSOLETO")

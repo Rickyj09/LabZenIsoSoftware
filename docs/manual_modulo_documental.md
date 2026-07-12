@@ -6,7 +6,7 @@ El módulo documental permite controlar documentos del sistema de gestión del l
 
 ## Estados documentales
 
-- `BORRADOR`: documento o versión en preparación.
+- `EN_ELABORACION`: documento o versión en preparación.
 - `EN_REVISION`: documento enviado para revisión o aprobación.
 - `RECHAZADO`: versión observada que requiere corrección.
 - `APROBADO`: versión aprobada.
@@ -15,7 +15,7 @@ El módulo documental permite controlar documentos del sistema de gestión del l
 
 ## APROBADO vs VIGENTE
 
-Una versión `APROBADA` es una versión que superó la revisión. Un documento es `VIGENTE` cuando su campo de versión vigente apunta a una versión aprobada activa. En la práctica, “vigente” es la versión oficial que debe usarse.
+Una versión `APROBADA` es una versión que superó la revisión. Un documento es `VIGENTE` cuando su campo de versión vigente apunta a una versión aprobada activa. En la práctica, â€œvigenteâ€ es la versión oficial que debe usarse.
 
 ## VIGENTE vs EN ACTUALIZACIÓN
 
@@ -24,12 +24,12 @@ Un documento puede tener una versión vigente y, al mismo tiempo, una nueva vers
 ## Crear documento
 
 1. Entrar a Gestión Documental.
-2. Seleccionar “Nuevo documento”.
+2. Seleccionar â€œNuevo documentoâ€.
 3. Completar código, título, tipo documental, proceso y versión.
 4. Adjuntar archivo si aplica.
 5. Guardar.
 
-El documento queda inicialmente en `BORRADOR`.
+El documento queda inicialmente en `EN_ELABORACION`.
 
 ## Subir archivo
 
@@ -37,11 +37,11 @@ Al crear un documento o una nueva versión, puede adjuntarse un archivo. Los arc
 
 ## Enviar a revisión
 
-Desde el detalle del documento, usar la acción “Enviar a revisión”. El documento pasa a `EN_REVISION` y queda visible para usuarios con rol de revisión/aprobación.
+Desde el detalle del documento, usar la acción â€œEnviar a revisiónâ€. El documento pasa a `EN_REVISION` y queda visible para usuarios con rol de revisión/aprobación.
 
 ## Revisar pendientes
 
-Los usuarios autorizados pueden entrar a “Mis pendientes” o al dashboard documental para revisar documentos en estado `EN_REVISION`.
+Los usuarios autorizados pueden entrar a â€œMis pendientesâ€ o al dashboard documental para revisar documentos en estado `EN_REVISION`.
 
 ## Aprobar documento
 
@@ -55,13 +55,13 @@ Un usuario autorizado puede aprobar una versión en revisión. Al aprobar:
 
 El rechazo requiere comentario. La versión queda `RECHAZADO` y el comentario queda registrado en la trazabilidad.
 
-## Devolver a borrador
+## Devolver a elaboración
 
-Una versión rechazada puede devolverse a `BORRADOR` para corrección. Esta acción también requiere comentario.
+Una versión rechazada puede devolverse a `EN_ELABORACION` para corrección. Esta acción también requiere comentario.
 
 ## Crear nueva versión
 
-Desde un documento aprobado, seleccionar “Nueva versión”. La versión vigente anterior se mantiene como oficial mientras la nueva versión se prepara, revisa y aprueba.
+Desde un documento aprobado, seleccionar â€œNueva versiónâ€. La versión vigente anterior se mantiene como oficial mientras la nueva versión se prepara, revisa y aprueba.
 
 ## Obsoletar documento
 

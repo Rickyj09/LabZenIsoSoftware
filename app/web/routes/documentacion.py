@@ -293,7 +293,7 @@ def nuevo():
                 titulo=titulo,
                 tipo_documento=tipo_documento,
                 proceso=proceso or None,
-                estado="BORRADOR",
+                estado="EN_ELABORACION",
                 version_actual=version,
                 elaborado_por_id=current_user.id,
             )
@@ -320,7 +320,7 @@ def nuevo():
                 usuario=current_user,
                 accion="CREAR_VERSION",
                 estado_anterior=None,
-                estado_nuevo="BORRADOR",
+                estado_nuevo="EN_ELABORACION",
                 comentario=cambios,
                 **workflow_request_metadata(),
             )
@@ -476,7 +476,7 @@ def editar(item_id):
 
     if not can_edit_document(item):
         flash(
-            "Solo los documentos en borrador pueden editarse directamente. Para un documento aprobado debes crear una nueva versión.",
+            "Solo los documentos en elaboración pueden editarse directamente. Para un documento aprobado debes crear una nueva versión.",
             "warning",
         )
         return redirect(url_for("documentacion.detalle", item_id=item.id))
@@ -585,7 +585,7 @@ def nueva_version(item_id):
                 usuario=current_user,
                 accion="CREAR_VERSION",
                 estado_anterior=None,
-                estado_nuevo="BORRADOR",
+                estado_nuevo="EN_ELABORACION",
                 comentario=cambios,
                 **workflow_request_metadata(),
             )
@@ -715,7 +715,7 @@ def rechazar_version(item_id, version_id):
         flash(str(exc), "warning")
         return redirect(url_for("documentacion.detalle", item_id=item.id))
 
-    flash("Versión rechazada. Debe devolverse a borrador para su corrección.", "warning")
+    flash("Versión rechazada. Debe devolverse a elaboración para su corrección.", "warning")
     return redirect(url_for("documentacion.detalle", item_id=item.id))
 
 
@@ -747,7 +747,7 @@ def devolver_borrador(item_id, version_id):
         flash(str(exc), "warning")
         return redirect(url_for("documentacion.detalle", item_id=item.id))
 
-    flash("Versión devuelta a borrador para corrección.", "success")
+    flash("Versión devuelta a elaboración para corrección.", "success")
     return redirect(url_for("documentacion.detalle", item_id=item.id))
 
 

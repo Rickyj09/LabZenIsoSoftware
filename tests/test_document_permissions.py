@@ -119,7 +119,7 @@ class DocumentPermissionTest(unittest.TestCase):
             session["_fresh"] = True
         return client
 
-    def add_document(self, document_id, state="BORRADOR", version_state="BORRADOR"):
+    def add_document(self, document_id, state="EN_ELABORACION", version_state="EN_ELABORACION"):
         document = Documento(
             id=document_id,
             empresa_id=101,

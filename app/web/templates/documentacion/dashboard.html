@@ -32,7 +32,7 @@
     </div>
     <div class="col-md-3">
         <div class="page-card h-100">
-            <div class="text-muted small">Pendientes de revisión/aprobación</div>
+            <div class="text-muted small">Pendientes de mi revisión</div>
             <div class="display-6">{{ stats.pending_count }}</div>
         </div>
     </div>
@@ -52,7 +52,7 @@
 
 <div class="row g-3 mb-4">
     {% for label, value, badge in [
-        ('BORRADOR', stats.technical_status.BORRADOR, 'bg-secondary'),
+        ('EN ELABORACIÓN', stats.technical_status.EN_ELABORACION, 'bg-secondary'),
         ('EN REVISIÓN', stats.technical_status.EN_REVISION, 'bg-warning text-dark'),
         ('APROBADOS / VIGENTES', stats.technical_status.APROBADO, 'bg-success'),
         ('RECHAZADOS', stats.technical_status.RECHAZADO, 'bg-danger'),
@@ -75,7 +75,7 @@
             <div class="table-responsive">
                 <table class="table table-sm align-middle">
                     <tbody>
-                        <tr><td>Borrador</td><td class="text-end">{{ stats.flow_status.BORRADOR }}</td></tr>
+                        <tr><td>En elaboración</td><td class="text-end">{{ stats.flow_status.EN_ELABORACION }}</td></tr>
                         <tr><td>En revisión</td><td class="text-end">{{ stats.flow_status.EN_REVISION }}</td></tr>
                         <tr><td>Rechazado</td><td class="text-end">{{ stats.flow_status.RECHAZADO }}</td></tr>
                         <tr><td>Vigente</td><td class="text-end">{{ stats.flow_status.VIGENTE }}</td></tr>
@@ -120,7 +120,7 @@
     <div class="col-lg-6">
         <div class="page-card h-100">
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5 class="mb-0">Pendientes recientes</h5>
+                <h5 class="mb-0">Pendientes asignados a mí</h5>
                 {% if can('documentos.ver_pendientes') %}
                 <a href="{{ url_for('documentacion.pendientes') }}" class="btn btn-sm btn-outline-warning">Ver todos</a>
                 {% endif %}
@@ -151,7 +151,7 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="5" class="text-center text-muted py-3">No hay pendientes visibles para este usuario.</td>
+                            <td colspan="5" class="text-center text-muted py-3">No hay documentos asignados a tu revisión.</td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -186,7 +186,16 @@
                                 {% endif %}
                             </td>
                             <td>{{ item.tipo_documento }}</td>
-                            <td>{{ item.estado }}</td>
+                            <td>
+                                <span class="badge {{ document_state_badge_class(item.estado) }}">
+                                    {{ document_state_label(item.estado) }}
+                                </span>
+                                {% if item.pending_for_current_user %}
+                                <div class="mt-1">
+                                    <span class="badge bg-info text-dark">Pendiente de mi revisión</span>
+                                </div>
+                                {% endif %}
+                            </td>
                             <td>{{ item.version_vigente.version if item.version_vigente else item.version_actual }}</td>
                             <td>{{ item.updated_at.strftime('%Y-%m-%d') if item.updated_at else '' }}</td>
                         </tr>

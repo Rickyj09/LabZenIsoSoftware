@@ -6,7 +6,7 @@ Validar estos escenarios en la rama funcional del módulo documental, usando usu
 
 1. Ingresar como usuario técnico.
 2. Crear un documento nuevo desde Gestión Documental.
-3. Confirmar que el documento queda en estado `BORRADOR`.
+3. Confirmar que el documento queda en estado `EN_ELABORACION`.
 4. Enviar el documento a revisión.
 5. Confirmar que el documento cambia a `EN_REVISION`.
 6. Ingresar como usuario `CALIDAD` o `ADMINISTRADOR`.
@@ -22,7 +22,7 @@ Validar estos escenarios en la rama funcional del módulo documental, usando usu
 16. Enviar la nueva versión a revisión.
 17. Rechazar la nueva versión con comentario obligatorio.
 18. Confirmar que el comentario de rechazo queda visible en la trazabilidad.
-19. Devolver la versión rechazada a borrador con comentario.
+19. Devolver la versión rechazada a elaboración con comentario.
 20. Enviar nuevamente a revisión.
 21. Aprobar la nueva versión.
 22. Confirmar que la versión anterior queda `SUSTITUIDA`.
@@ -47,4 +47,4 @@ Validar estos escenarios en la rama funcional del módulo documental, usando usu
 
 ## Criterio de aceptación funcional
 
-El flujo queda aprobado si el ciclo completo creación → revisión → aprobación → nueva versión → sustitución → obsolescencia conserva trazabilidad, permisos, descarga protegida y aislamiento por empresa.
+El flujo queda aprobado si el ciclo completo creación â†’ revisión â†’ aprobación â†’ nueva versión â†’ sustitución â†’ obsolescencia conserva trazabilidad, permisos, descarga protegida y aislamiento por empresa.

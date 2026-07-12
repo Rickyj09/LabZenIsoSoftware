@@ -5,7 +5,7 @@ from app.extensions import db
 from app.models.documentos import DocumentoVersion
 
 
-ACTIVE_PREPARATION_STATES = ("BORRADOR", "EN_REVISION")
+ACTIVE_PREPARATION_STATES = ("EN_ELABORACION", "EN_REVISION")
 VERSION_NUMBER_PATTERN = re.compile(r"^\d+(?:\.\d+){0,3}$")
 
 
@@ -62,7 +62,7 @@ def create_initial_version(*, documento, version, cambios, contenido, user_id):
         fecha_version=date.today(),
         cambios=cambios or "Versión inicial del documento",
         elaborado_por_id=user_id,
-        estado="BORRADOR",
+        estado="EN_ELABORACION",
     )
     db.session.add(version_doc)
     return version_doc
@@ -90,7 +90,7 @@ def create_draft_version(*, documento, version, cambios, contenido, user_id):
         fecha_version=date.today(),
         cambios=cambios.strip(),
         elaborado_por_id=user_id,
-        estado="BORRADOR",
+        estado="EN_ELABORACION",
     )
     db.session.add(version_doc)
     return version_doc
@@ -99,8 +99,8 @@ def create_draft_version(*, documento, version, cambios, contenido, user_id):
 def send_to_review(*, documento, version_doc, user_id):
     if documento.estado == "OBSOLETO":
         raise DocumentVersioningError("No se puede revisar un documento obsoleto.")
-    if version_doc.estado != "BORRADOR":
-        raise DocumentVersioningError("Solo una versión en borrador puede enviarse a revisión.")
+    if version_doc.estado != "EN_ELABORACION":
+        raise DocumentVersioningError("Solo una versión en elaboración puede enviarse a revisión.")
     if version_doc.id != getattr(get_preparation_version(documento), "id", None):
         raise DocumentVersioningError("La versión seleccionada no es la versión activa en preparación.")
 
@@ -137,4 +137,4 @@ def approve_version(*, documento, version_doc, user_id):
 
 
 def can_edit_document(documento) -> bool:
-    return documento.estado == "BORRADOR"
+    return documento.estado == "EN_ELABORACION"

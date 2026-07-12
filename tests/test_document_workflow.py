@@ -71,7 +71,7 @@ class DocumentWorkflowTest(unittest.TestCase):
             codigo=f"DOC-{document_id}",
             titulo=f"Documento {document_id}",
             tipo_documento="PROCEDIMIENTO",
-            estado="BORRADOR",
+            estado="EN_ELABORACION",
             version_actual="1",
             elaborado_por_id=201 if empresa_id == 101 else 202,
         )
@@ -152,7 +152,7 @@ class DocumentWorkflowTest(unittest.TestCase):
         self.assertEqual(document.version_vigente_id, current.id)
         self.assertIsNotNone(draft.fecha_envio_revision)
         self.assertEqual(event.accion, "ENVIAR_REVISION")
-        self.assertEqual((event.estado_anterior, event.estado_nuevo), ("BORRADOR", "EN_REVISION"))
+        self.assertEqual((event.estado_anterior, event.estado_nuevo), ("EN_ELABORACION", "EN_REVISION"))
         self.assertEqual((event.ip, event.user_agent), ("127.0.0.1", "workflow-test"))
 
     def test_approval_substitutes_previous_and_records_both_events(self):
@@ -231,9 +231,9 @@ class DocumentWorkflowTest(unittest.TestCase):
         )
         self.assign_event_ids()
 
-        self.assertEqual((draft.estado, document.estado), ("BORRADOR", "BORRADOR"))
+        self.assertEqual((draft.estado, document.estado), ("EN_ELABORACION", "EN_ELABORACION"))
         self.assertEqual(event.accion, "DEVOLVER_BORRADOR")
-        self.assertEqual((event.estado_anterior, event.estado_nuevo), ("RECHAZADO", "BORRADOR"))
+        self.assertEqual((event.estado_anterior, event.estado_nuevo), ("RECHAZADO", "EN_ELABORACION"))
         self.assertEqual(draft.comentario_rechazo, "Corregir alcance")
 
     def test_obsolescence_requires_reason_and_only_accepts_approved_document(self):

@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session
@@ -86,7 +87,19 @@ class DocumentDashboardTest(unittest.TestCase):
             session["_fresh"] = True
         return client
 
-    def add_document(self, document_id, code, state, version_state, *, company_id=101, document_type="PROCEDIMIENTO"):
+    def add_document(
+        self,
+        document_id,
+        code,
+        state,
+        version_state,
+        *,
+        company_id=101,
+        document_type="PROCEDIMIENTO",
+        revisado_por_id=None,
+        aprobado_por_id=None,
+        fecha_envio_revision=None,
+    ):
         document = Documento(
             id=document_id,
             empresa_id=company_id,
@@ -104,6 +117,9 @@ class DocumentDashboardTest(unittest.TestCase):
             version="1",
             estado=version_state,
             elaborado_por_id=202 if company_id == 101 else 204,
+            revisado_por_id=revisado_por_id,
+            aprobado_por_id=aprobado_por_id,
+            fecha_envio_revision=fecha_envio_revision,
         )
         db.session.add_all([document, version])
         db.session.commit()
@@ -129,8 +145,8 @@ class DocumentDashboardTest(unittest.TestCase):
                 self.assertEqual(client.get(path).status_code, 200)
 
     def test_dashboard_filters_by_company_id(self):
-        self.add_document(301, "EMP1-DOC", "BORRADOR", "BORRADOR", company_id=101)
-        self.add_document(302, "EMP2-DOC", "BORRADOR", "BORRADOR", company_id=102)
+        self.add_document(301, "EMP1-DOC", "EN_ELABORACION", "EN_ELABORACION", company_id=101)
+        self.add_document(302, "EMP2-DOC", "EN_ELABORACION", "EN_ELABORACION", company_id=102)
 
         response = self.login(201).get("/documentacion/dashboard")
         body = response.get_data(as_text=True)
@@ -139,7 +155,7 @@ class DocumentDashboardTest(unittest.TestCase):
         self.assertNotIn("EMP2-DOC", body)
 
     def test_dashboard_counts_document_states(self):
-        self.add_document(303, "DOC-BOR", "BORRADOR", "BORRADOR")
+        self.add_document(303, "DOC-BOR", "EN_ELABORACION", "EN_ELABORACION")
         self.add_document(304, "DOC-REV", "EN_REVISION", "EN_REVISION")
         self.add_document(305, "DOC-RECH", "RECHAZADO", "RECHAZADO")
         self.add_document(306, "DOC-OBS", "OBSOLETO", "OBSOLETO")
@@ -149,7 +165,7 @@ class DocumentDashboardTest(unittest.TestCase):
 
         stats = get_document_dashboard_stats(db.session.get(Usuario, 201))
 
-        self.assertEqual(stats["technical_status"]["BORRADOR"], 1)
+        self.assertEqual(stats["technical_status"]["EN_ELABORACION"], 1)
         self.assertEqual(stats["technical_status"]["EN_REVISION"], 1)
         self.assertEqual(stats["technical_status"]["RECHAZADO"], 1)
         self.assertEqual(stats["technical_status"]["OBSOLETO"], 1)
@@ -165,7 +181,7 @@ class DocumentDashboardTest(unittest.TestCase):
             empresa_id=101,
             documento_id=updating.id,
             version="2",
-            estado="BORRADOR",
+            estado="EN_ELABORACION",
             elaborado_por_id=202,
         ))
         db.session.commit()
@@ -175,24 +191,73 @@ class DocumentDashboardTest(unittest.TestCase):
         self.assertEqual(stats["flow_status"]["VIGENTE"], 1)
         self.assertEqual(stats["flow_status"]["EN_ACTUALIZACION"], 1)
 
-    def test_dashboard_pending_visible_only_to_authorized_reviewers(self):
-        self.add_document(310, "DOC-PEND", "EN_REVISION", "EN_REVISION")
+    def test_dashboard_pending_uses_real_assignment_not_role_only(self):
+        self.add_document(310, "DOC-PEND", "EN_REVISION", "EN_REVISION", revisado_por_id=201)
+        self.add_document(311, "DOC-SIN-ASIGNAR", "EN_REVISION", "EN_REVISION")
 
         quality_body = self.login(201).get("/documentacion/dashboard").get_data(as_text=True)
+        stats = get_document_dashboard_stats(db.session.get(Usuario, 201))
 
         self.assertIn("DOC-PEND", quality_body)
+        self.assertIn("Pendiente de mi revisión", quality_body)
+        self.assertEqual([item.documento.codigo for item in stats["pending_documents"]], ["DOC-PEND"])
+        self.assertEqual(stats["pending_count"], 1)
         self.assertEqual(get_document_dashboard_stats(db.session.get(Usuario, 202))["pending_count"], 0)
         self.assertEqual(get_document_dashboard_stats(db.session.get(Usuario, 203))["pending_count"], 0)
 
+    def test_dashboard_prioritizes_documents_assigned_to_current_user(self):
+        now = datetime.now(timezone.utc)
+        self.add_document(320, "DOC-RECIENTE", "EN_ELABORACION", "EN_ELABORACION")
+        self.add_document(
+            321,
+            "DOC-MI-PENDIENTE",
+            "EN_REVISION",
+            "EN_REVISION",
+            revisado_por_id=201,
+            fecha_envio_revision=now - timedelta(days=2),
+        )
+
+        stats = get_document_dashboard_stats(db.session.get(Usuario, 201))
+
+        self.assertEqual(stats["recent_documents"][0].codigo, "DOC-MI-PENDIENTE")
+        self.assertTrue(stats["recent_documents"][0].pending_for_current_user)
+
+    def test_dashboard_orders_my_pending_by_oldest_review_submission(self):
+        now = datetime.now(timezone.utc)
+        self.add_document(
+            330,
+            "DOC-PEND-NUEVO",
+            "EN_REVISION",
+            "EN_REVISION",
+            revisado_por_id=201,
+            fecha_envio_revision=now,
+        )
+        self.add_document(
+            331,
+            "DOC-PEND-VIEJO",
+            "EN_REVISION",
+            "EN_REVISION",
+            aprobado_por_id=201,
+            fecha_envio_revision=now - timedelta(days=5),
+        )
+
+        stats = get_document_dashboard_stats(db.session.get(Usuario, 201))
+
+        self.assertEqual(
+            [item.documento.codigo for item in stats["pending_documents"]],
+            ["DOC-PEND-VIEJO", "DOC-PEND-NUEVO"],
+        )
+        self.assertEqual(stats["recent_documents"][0].codigo, "DOC-PEND-VIEJO")
+
     def test_dashboard_shows_recent_documents(self):
-        self.add_document(311, "DOC-RECENT", "BORRADOR", "BORRADOR")
+        self.add_document(340, "DOC-RECENT", "EN_ELABORACION", "EN_ELABORACION")
 
         response = self.login(201).get("/documentacion/dashboard")
 
         self.assertIn("DOC-RECENT", response.get_data(as_text=True))
 
     def test_dashboard_counts_documents_without_file(self):
-        self.add_document(312, "DOC-SIN-ARCHIVO", "BORRADOR", "BORRADOR")
+        self.add_document(350, "DOC-SIN-ARCHIVO", "EN_ELABORACION", "EN_ELABORACION")
 
         stats = get_document_dashboard_stats(db.session.get(Usuario, 201))
         response = self.login(201).get("/documentacion/dashboard")

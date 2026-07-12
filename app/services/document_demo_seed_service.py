@@ -9,7 +9,7 @@ from app.models.seguridad import Rol, Usuario, UsuarioRol
 
 
 DEMO_DOCUMENTS = (
-    ("DEMO-BOR-001", "Procedimiento en borrador demo", "PROCEDIMIENTO"),
+    ("DEMO-BOR-001", "Procedimiento en elaboración demo", "PROCEDIMIENTO"),
     ("DEMO-REV-001", "Instructivo pendiente de revisión demo", "INSTRUCTIVO"),
     ("DEMO-VIG-001", "Política vigente demo", "POLITICA"),
     ("DEMO-RECH-001", "Formato rechazado demo", "FORMATO"),
@@ -154,20 +154,20 @@ def seed_demo_documents(empresa_id=1):
     draft, created = _get_or_create_document(
         empresa_id=empresa_id,
         code="DEMO-BOR-001",
-        title="Procedimiento en borrador demo",
+        title="Procedimiento en elaboración demo",
         document_type="PROCEDIMIENTO",
-        state="BORRADOR",
+        state="EN_ELABORACION",
         author_id=technician.id,
     )
     remember(draft, created)
     draft_version, _ = _get_or_create_version(
         document=draft,
         version="1",
-        state="BORRADOR",
+        state="EN_ELABORACION",
         author_id=technician.id,
-        changes="Versión demo en borrador.",
+        changes="Versión demo en elaboración.",
     )
-    _add_event(draft, draft_version, technician, "CREAR_VERSION", None, "BORRADOR", "Documento demo en borrador.")
+    _add_event(draft, draft_version, technician, "CREAR_VERSION", None, "EN_ELABORACION", "Documento demo en elaboración.")
 
     review, created = _get_or_create_document(
         empresa_id=empresa_id,
@@ -187,7 +187,7 @@ def seed_demo_documents(empresa_id=1):
         fecha_envio_revision=_now(),
         comentario_revision="Documento demo listo para revisión.",
     )
-    _add_event(review, review_version, technician, "ENVIAR_REVISION", "BORRADOR", "EN_REVISION", "Enviado a revisión demo.")
+    _add_event(review, review_version, technician, "ENVIAR_REVISION", "EN_ELABORACION", "EN_REVISION", "Enviado a revisión demo.")
 
     current, created = _get_or_create_document(
         empresa_id=empresa_id,
@@ -257,7 +257,7 @@ def seed_demo_documents(empresa_id=1):
     _get_or_create_version(
         document=updating,
         version="2",
-        state="BORRADOR",
+        state="EN_ELABORACION",
         author_id=technician.id,
         changes="Actualización demo en preparación.",
     )

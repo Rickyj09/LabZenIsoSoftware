@@ -81,8 +81,8 @@ def send_for_review(*, documento, version_doc, usuario, comentario=None, ip=None
     _validate_context(documento, version_doc, usuario)
     if documento.estado == "OBSOLETO":
         raise DocumentWorkflowError("No se puede revisar un documento obsoleto.")
-    if version_doc.estado != "BORRADOR":
-        raise DocumentWorkflowError("Solo una versión en borrador puede enviarse a revisión.")
+    if version_doc.estado != "EN_ELABORACION":
+        raise DocumentWorkflowError("Solo una versión en elaboración puede enviarse a revisión.")
     if version_doc.id != getattr(get_preparation_version(documento), "id", None):
         raise DocumentWorkflowError("La versión seleccionada no es la preparación activa.")
 
@@ -177,15 +177,15 @@ def return_to_draft(*, documento, version_doc, usuario, comentario, ip=None, use
     comment = _require_comment(comentario, "El comentario de devolución es obligatorio.")
     _validate_context(documento, version_doc, usuario)
     if version_doc.estado != "RECHAZADO":
-        raise DocumentWorkflowError("Solo una versión rechazada puede devolverse a borrador.")
+        raise DocumentWorkflowError("Solo una versión rechazada puede devolverse a elaboración.")
     if version_doc.id != getattr(get_latest_rejected_version(documento), "id", None):
         raise DocumentWorkflowError("La versión rechazada seleccionada no es la más reciente.")
     if get_preparation_version(documento):
         raise DocumentWorkflowError("Ya existe otra versión activa en preparación.")
 
     previous_state = version_doc.estado
-    version_doc.estado = "BORRADOR"
-    documento.estado = "APROBADO" if get_current_version(documento) else "BORRADOR"
+    version_doc.estado = "EN_ELABORACION"
+    documento.estado = "APROBADO" if get_current_version(documento) else "EN_ELABORACION"
     return record_document_event(
         documento=documento,
         version_doc=version_doc,

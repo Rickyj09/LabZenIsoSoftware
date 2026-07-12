@@ -2,21 +2,28 @@ from app.extensions import db
 from app.models.base import BaseModel, TenantMixin
 
 
+ESTADO_EN_ELABORACION = "EN_ELABORACION"
+ESTADO_EN_REVISION = "EN_REVISION"
+ESTADO_APROBADO = "APROBADO"
+ESTADO_RECHAZADO = "RECHAZADO"
+ESTADO_OBSOLETO = "OBSOLETO"
+ESTADO_SUSTITUIDO = "SUSTITUIDO"
+
 ESTADOS_DOCUMENTO = (
-    "BORRADOR",
-    "EN_REVISION",
-    "APROBADO",
-    "RECHAZADO",
-    "OBSOLETO",
+    ESTADO_EN_ELABORACION,
+    ESTADO_EN_REVISION,
+    ESTADO_APROBADO,
+    ESTADO_RECHAZADO,
+    ESTADO_OBSOLETO,
 )
 
 ESTADOS_VERSION_DOCUMENTO = (
-    "BORRADOR",
-    "EN_REVISION",
-    "APROBADO",
-    "RECHAZADO",
-    "OBSOLETO",
-    "SUSTITUIDO",
+    ESTADO_EN_ELABORACION,
+    ESTADO_EN_REVISION,
+    ESTADO_APROBADO,
+    ESTADO_RECHAZADO,
+    ESTADO_OBSOLETO,
+    ESTADO_SUSTITUIDO,
 )
 
 ACCIONES_EVENTO_DOCUMENTO = (
@@ -29,13 +36,39 @@ ACCIONES_EVENTO_DOCUMENTO = (
     "SUSTITUIR_VERSION",
 )
 
+ESTADO_DOCUMENTO_LABELS = {
+    ESTADO_EN_ELABORACION: "EN ELABORACIÓN",
+    ESTADO_EN_REVISION: "EN REVISIÓN",
+    ESTADO_APROBADO: "APROBADO",
+    ESTADO_RECHAZADO: "RECHAZADO",
+    ESTADO_OBSOLETO: "OBSOLETO",
+    ESTADO_SUSTITUIDO: "SUSTITUIDO",
+}
+
+ESTADO_DOCUMENTO_BADGE_CLASSES = {
+    ESTADO_EN_ELABORACION: "bg-secondary",
+    ESTADO_EN_REVISION: "bg-warning text-dark",
+    ESTADO_APROBADO: "bg-success",
+    ESTADO_RECHAZADO: "bg-danger",
+    ESTADO_OBSOLETO: "bg-danger",
+    ESTADO_SUSTITUIDO: "bg-dark",
+}
+
+
+def etiqueta_estado_documental(estado):
+    return ESTADO_DOCUMENTO_LABELS.get(estado, (estado or "").replace("_", " "))
+
+
+def clase_badge_estado_documental(estado):
+    return ESTADO_DOCUMENTO_BADGE_CLASSES.get(estado, "bg-light text-dark")
+
 
 class Documento(TenantMixin, BaseModel):
     __tablename__ = "documentos"
     __table_args__ = (
         db.UniqueConstraint("empresa_id", "codigo", name="uq_documentos_empresa_codigo"),
         db.CheckConstraint(
-            "estado IN ('BORRADOR', 'EN_REVISION', 'APROBADO', 'RECHAZADO', 'OBSOLETO')",
+            "estado IN ('EN_ELABORACION', 'EN_REVISION', 'APROBADO', 'RECHAZADO', 'OBSOLETO')",
             name="ck_documentos_estado_valido",
         ),
     )
@@ -44,7 +77,7 @@ class Documento(TenantMixin, BaseModel):
     titulo = db.Column(db.String(200), nullable=False)
     tipo_documento = db.Column(db.String(50), nullable=False)
     proceso = db.Column(db.String(100))
-    estado = db.Column(db.String(30), default="BORRADOR", nullable=False)
+    estado = db.Column(db.String(30), default=ESTADO_EN_ELABORACION, nullable=False)
     version_actual = db.Column(db.String(20), nullable=False, default="1")
     version_vigente_id = db.Column(
         db.BigInteger,
@@ -82,7 +115,7 @@ class DocumentoVersion(TenantMixin, BaseModel):
     __table_args__ = (
         db.UniqueConstraint("documento_id", "version", name="uq_documento_version_numero"),
         db.CheckConstraint(
-            "estado IN ('BORRADOR', 'EN_REVISION', 'APROBADO', 'RECHAZADO', 'OBSOLETO', 'SUSTITUIDO')",
+            "estado IN ('EN_ELABORACION', 'EN_REVISION', 'APROBADO', 'RECHAZADO', 'OBSOLETO', 'SUSTITUIDO')",
             name="ck_documento_versiones_estado_valido",
         ),
         db.Index("ix_documento_versiones_documento_id", "documento_id"),
@@ -91,8 +124,8 @@ class DocumentoVersion(TenantMixin, BaseModel):
             "uq_documento_version_preparacion_activa",
             "documento_id",
             unique=True,
-            postgresql_where=db.text("estado IN ('BORRADOR', 'EN_REVISION')"),
-            sqlite_where=db.text("estado IN ('BORRADOR', 'EN_REVISION')"),
+            postgresql_where=db.text("estado IN ('EN_ELABORACION', 'EN_REVISION')"),
+            sqlite_where=db.text("estado IN ('EN_ELABORACION', 'EN_REVISION')"),
         ),
     )
 
@@ -124,7 +157,7 @@ class DocumentoVersion(TenantMixin, BaseModel):
     comentario_aprobacion = db.Column(db.Text)
     comentario_rechazo = db.Column(db.Text)
     motivo_obsolescencia = db.Column(db.Text)
-    estado = db.Column(db.String(30), default="BORRADOR", nullable=False)
+    estado = db.Column(db.String(30), default=ESTADO_EN_ELABORACION, nullable=False)
 
     empresa = db.relationship("Empresa")
     documento = db.relationship(

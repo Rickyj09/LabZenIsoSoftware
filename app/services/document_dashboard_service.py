@@ -1,13 +1,13 @@
-from sqlalchemy import and_, exists, func, or_
+from sqlalchemy import and_, case, exists, func, or_
 from sqlalchemy.orm import joinedload
 
+from app.extensions import db
 from app.models.documentos import Documento, DocumentoVersion
-from app.services.document_pending_service import get_pending_documents_for_user
 
 
-TECHNICAL_DOCUMENT_STATES = ("BORRADOR", "EN_REVISION", "APROBADO", "RECHAZADO", "OBSOLETO")
-FLOW_DOCUMENT_STATES = ("BORRADOR", "EN_REVISION", "RECHAZADO", "VIGENTE", "EN_ACTUALIZACION", "OBSOLETO")
-PREPARATION_STATES = ("BORRADOR", "EN_REVISION", "RECHAZADO")
+TECHNICAL_DOCUMENT_STATES = ("EN_ELABORACION", "EN_REVISION", "APROBADO", "RECHAZADO", "OBSOLETO")
+FLOW_DOCUMENT_STATES = ("EN_ELABORACION", "EN_REVISION", "RECHAZADO", "VIGENTE", "EN_ACTUALIZACION", "OBSOLETO")
+PREPARATION_STATES = ("EN_ELABORACION", "EN_REVISION", "RECHAZADO")
 
 
 def _company_documents_query(user):
@@ -23,6 +23,70 @@ def _company_versions_query(user):
             Documento.empresa_id == user.empresa_id,
         )
     )
+
+
+def _assigned_pending_version_conditions(user):
+    return (
+        DocumentoVersion.empresa_id == user.empresa_id,
+        DocumentoVersion.documento_id == Documento.id,
+        DocumentoVersion.empresa_id == Documento.empresa_id,
+        DocumentoVersion.estado == "EN_REVISION",
+        or_(
+            DocumentoVersion.revisado_por_id == user.id,
+            DocumentoVersion.aprobado_por_id == user.id,
+        ),
+    )
+
+
+def _assigned_pending_exists(user):
+    return (
+        exists()
+        .where(and_(*_assigned_pending_version_conditions(user)))
+        .correlate(Documento)
+    )
+
+
+def _assigned_pending_date_subquery(user):
+    return (
+        db.session.query(func.min(DocumentoVersion.fecha_envio_revision))
+        .filter(and_(*_assigned_pending_version_conditions(user)))
+        .correlate(Documento)
+        .scalar_subquery()
+    )
+
+
+def _annotate_assigned_pending_documents(documents, user):
+    document_ids = [document.id for document in documents]
+    pending_document_ids = set()
+    pending_dates_by_document_id = {}
+    if document_ids:
+        rows = (
+            db.session.query(
+                DocumentoVersion.documento_id,
+                func.min(DocumentoVersion.fecha_envio_revision),
+            )
+            .join(Documento, DocumentoVersion.documento_id == Documento.id)
+            .filter(
+                DocumentoVersion.empresa_id == user.empresa_id,
+                Documento.empresa_id == user.empresa_id,
+                DocumentoVersion.documento_id.in_(document_ids),
+                DocumentoVersion.estado == "EN_REVISION",
+                or_(
+                    DocumentoVersion.revisado_por_id == user.id,
+                    DocumentoVersion.aprobado_por_id == user.id,
+                ),
+            )
+            .group_by(DocumentoVersion.documento_id)
+            .all()
+        )
+        pending_document_ids = {document_id for document_id, _pending_date in rows}
+        pending_dates_by_document_id = {document_id: pending_date for document_id, pending_date in rows}
+
+    for document in documents:
+        pending_date = pending_dates_by_document_id.get(document.id)
+        document.pending_for_current_user = document.id in pending_document_ids
+        document.pending_for_current_user_date = pending_date
+    return documents
 
 
 def count_by_document_status(user):
@@ -91,7 +155,7 @@ def count_by_flow_status(user):
     )
 
     counts = {state: 0 for state in FLOW_DOCUMENT_STATES}
-    counts["BORRADOR"] = _company_documents_query(user).filter(Documento.estado == "BORRADOR").count()
+    counts["EN_ELABORACION"] = _company_documents_query(user).filter(Documento.estado == "EN_ELABORACION").count()
     counts["EN_REVISION"] = _company_documents_query(user).filter(Documento.estado == "EN_REVISION").count()
     counts["RECHAZADO"] = _company_documents_query(user).filter(Documento.estado == "RECHAZADO").count()
     counts["OBSOLETO"] = _company_documents_query(user).filter(Documento.estado == "OBSOLETO").count()
@@ -121,15 +185,58 @@ def count_by_document_type(user):
 
 
 def get_recent_documents(user, limit=5):
-    return (
+    pending_exists = _assigned_pending_exists(user)
+    pending_date = _assigned_pending_date_subquery(user)
+    documents = (
         _company_documents_query(user)
         .options(
             joinedload(Documento.elaborado_por),
             joinedload(Documento.version_vigente),
         )
-        .order_by(Documento.updated_at.desc(), Documento.id.desc())
+        .order_by(
+            case((pending_exists, 0), else_=1),
+            pending_date.asc(),
+            Documento.updated_at.desc(),
+            Documento.id.desc(),
+        )
         .limit(limit)
         .all()
+    )
+    return _annotate_assigned_pending_documents(documents, user)
+
+
+def get_pending_documents_assigned_to_user(user, limit=None):
+    query = (
+        _company_versions_query(user)
+        .filter(
+            DocumentoVersion.estado == "EN_REVISION",
+            or_(
+                DocumentoVersion.revisado_por_id == user.id,
+                DocumentoVersion.aprobado_por_id == user.id,
+            ),
+        )
+        .options(joinedload(DocumentoVersion.documento))
+        .order_by(
+            DocumentoVersion.fecha_envio_revision.asc(),
+            DocumentoVersion.id.asc(),
+        )
+    )
+    if limit:
+        query = query.limit(limit)
+    return query.all()
+
+
+def count_pending_documents_assigned_to_user(user):
+    return (
+        _company_versions_query(user)
+        .filter(
+            DocumentoVersion.estado == "EN_REVISION",
+            or_(
+                DocumentoVersion.revisado_por_id == user.id,
+                DocumentoVersion.aprobado_por_id == user.id,
+            ),
+        )
+        .count()
     )
 
 
@@ -166,7 +273,7 @@ def get_documents_without_file_count(user):
 
 
 def get_document_dashboard_stats(user):
-    pending_documents = get_pending_documents_for_user(user)
+    pending_count = count_pending_documents_assigned_to_user(user)
     technical_status = count_by_document_status(user)
     flow_status = count_by_flow_status(user)
     total_documents = _company_documents_query(user).count()
@@ -180,8 +287,8 @@ def get_document_dashboard_stats(user):
         "technical_status": technical_status,
         "flow_status": flow_status,
         "document_types": count_by_document_type(user),
-        "pending_count": len(pending_documents),
-        "pending_documents": pending_documents[:5],
+        "pending_count": pending_count,
+        "pending_documents": get_pending_documents_assigned_to_user(user, limit=5),
         "recent_documents": get_recent_documents(user, limit=5),
         "recent_obsolete_documents": get_recent_obsolete_documents(user, limit=5),
         "documents_without_file_count": get_documents_without_file_count(user),

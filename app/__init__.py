@@ -32,6 +32,10 @@ def create_app(config_overrides=None):
 
 
 def register_template_context(app: Flask) -> None:
+    from app.models.documentos import (
+        clase_badge_estado_documental,
+        etiqueta_estado_documental,
+    )
     from app.security.permissions import current_user_can
     from app.services.document_pending_service import count_pending_documents_for_user
 
@@ -49,6 +53,8 @@ def register_template_context(app: Flask) -> None:
         return {
             "can": can,
             "documental_pending_count": pending_count,
+            "document_state_label": etiqueta_estado_documental,
+            "document_state_badge_class": clase_badge_estado_documental,
         }
 
 

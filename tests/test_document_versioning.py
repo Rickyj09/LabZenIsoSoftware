@@ -77,7 +77,7 @@ class DocumentVersioningTest(unittest.TestCase):
         self.context.pop()
         self.temp_directory.cleanup()
 
-    def make_document(self, document_id, empresa_id=101, estado="BORRADOR"):
+    def make_document(self, document_id, empresa_id=101, estado="EN_ELABORACION"):
         document = Documento(
             id=document_id,
             empresa_id=empresa_id,
@@ -128,8 +128,8 @@ class DocumentVersioningTest(unittest.TestCase):
         document = self.make_document(301)
         version_doc = self.initial(document)
 
-        self.assertEqual(document.estado, "BORRADOR")
-        self.assertEqual(version_doc.estado, "BORRADOR")
+        self.assertEqual(document.estado, "EN_ELABORACION")
+        self.assertEqual(version_doc.estado, "EN_ELABORACION")
         self.assertIsNone(document.version_vigente_id)
 
     def test_new_draft_does_not_replace_current_approved_version(self):
@@ -140,13 +140,13 @@ class DocumentVersioningTest(unittest.TestCase):
             documento=document,
             version="2",
             cambios="Nueva revisión",
-            contenido="Borrador",
+            contenido="En elaboración",
             user_id=201,
         )
         self.assign_version_id(draft)
         db.session.flush()
 
-        self.assertEqual(draft.estado, "BORRADOR")
+        self.assertEqual(draft.estado, "EN_ELABORACION")
         self.assertEqual(document.version_vigente_id, current.id)
         self.assertEqual(document.version_actual, "1")
         self.assertEqual(document.estado, "APROBADO")
@@ -225,7 +225,7 @@ class DocumentVersioningTest(unittest.TestCase):
             empresa_id=101,
             documento_id=document.id,
             version="1",
-            estado="BORRADOR",
+            estado="EN_ELABORACION",
         ))
 
         with self.assertRaises(IntegrityError):

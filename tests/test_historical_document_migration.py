@@ -67,7 +67,7 @@ class HistoricalDocumentMigrationTest(unittest.TestCase):
             codigo="DOC-TEST-001",
             titulo="Documento de prueba",
             tipo_documento="PROCEDIMIENTO",
-            estado="BORRADOR",
+            estado="EN_ELABORACION",
             version_actual="1",
             elaborado_por_id=201,
         )
@@ -102,7 +102,7 @@ class HistoricalDocumentMigrationTest(unittest.TestCase):
             version=str(version_id),
             archivo_url=archivo_url,
             fecha_version=date.today(),
-            estado="BORRADOR",
+            estado="EN_ELABORACION",
         )
         db.session.add(version_doc)
         db.session.commit()

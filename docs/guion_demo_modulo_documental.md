@@ -8,10 +8,10 @@ Ingresar con un usuario con permisos documentales. Explicar que el sistema traba
 
 ## 2. Dashboard documental
 
-Abrir “Dashboard documental”. Mostrar los indicadores principales:
+Abrir â€œDashboard documentalâ€. Mostrar los indicadores principales:
 
 - total de documentos;
-- documentos en borrador;
+- documentos en elaboración;
 - documentos en revisión;
 - vigentes;
 - rechazados;
@@ -26,7 +26,7 @@ Mostrar la alerta visual y explicar que sirve para que Calidad o Administración
 
 ## 4. Creación de documento como técnico
 
-Ingresar como usuario técnico o explicar el rol. Crear un documento nuevo, completar datos básicos y dejarlo en `BORRADOR`.
+Ingresar como usuario técnico o explicar el rol. Crear un documento nuevo, completar datos básicos y dejarlo en `EN_ELABORACION`.
 
 ## 5. Envío a revisión
 
@@ -38,7 +38,7 @@ Cambiar a un usuario `CALIDAD` o `ADMINISTRADOR`. Mostrar que el pendiente apare
 
 ## 7. Bandeja de pendientes
 
-Entrar a “Mis pendientes”. Mostrar código, título, versión y fecha de envío.
+Entrar a â€œMis pendientesâ€. Mostrar código, título, versión y fecha de envío.
 
 ## 8. Aprobación o rechazo
 
