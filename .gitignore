@@ -31,3 +31,4 @@ app/web/static/uploads/
 storage/
 backups/
 *.backup
+docs/cliente/*.docx
