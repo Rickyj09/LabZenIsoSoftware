@@ -52,8 +52,8 @@ def is_docx_version(version_doc):
     return filename.lower().endswith(".docx")
 
 
-def onlyoffice_document_key(*, empresa_id, documento_id, version_id, archivo_sha256):
-    raw = f"{int(empresa_id)}:{int(documento_id)}:{int(version_id)}:{archivo_sha256}"
+def onlyoffice_document_key(*, empresa_id, documento_id, version_id, archivo_sha256, source_id=None):
+    raw = f"{int(empresa_id)}:{int(documento_id)}:{int(version_id)}:{source_id or 'working'}:{archivo_sha256}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -98,20 +98,33 @@ class OnlyOfficeDocumentViewService:
         if not version:
             raise LookupError("Versión documental no encontrada.")
 
-        resolve_viewable_docx_path(version)
+        from app.services.document_snapshot_service import DocumentSnapshotService
+
+        snapshot_service = DocumentSnapshotService()
+        source = snapshot_service.official_source_for_version(
+            documento=documento,
+            version_doc=version,
+        )
+        if not (source.filename or "").lower().endswith(".docx"):
+            raise OnlyOfficeInvalidDocumentError("La fuente documental oficial no es un archivo DOCX compatible.")
+        if source.kind == "snapshot":
+            snapshot_service.resolve_snapshot_path(source.snapshot)
+        else:
+            resolve_viewable_docx_path(version)
 
         health = OnlyOfficeHealthService(self.app).check()
         if not health.available:
             raise OnlyOfficeUnavailableError(health.message or "ONLYOFFICE no está disponible.")
 
-        document_url = self._build_document_url(documento, version)
+        document_url = self._build_document_url(documento, version, source)
         document_key = onlyoffice_document_key(
             empresa_id=documento.empresa_id,
             documento_id=documento.id,
             version_id=version.id,
-            archivo_sha256=version.archivo_sha256,
+            archivo_sha256=source.sha256,
+            source_id=source.snapshot.public_id if source.snapshot else None,
         )
-        config = self._build_editor_config(documento, version, document_url, document_key, user)
+        config = self._build_editor_config(documento, version, document_url, document_key, user, source)
         config["token"] = sign_onlyoffice_config(config)
 
         return OnlyOfficeDocumentViewContext(
@@ -122,12 +135,13 @@ class OnlyOfficeDocumentViewService:
             csp_origin=self.app.config["ONLYOFFICE_PUBLIC_URL"].rstrip("/"),
         )
 
-    def _build_document_url(self, documento, version):
+    def _build_document_url(self, documento, version, source):
         token = generate_onlyoffice_document_token(
             empresa_id=documento.empresa_id,
             documento_id=documento.id,
             version_id=version.id,
-            archivo_sha256=version.archivo_sha256,
+            archivo_sha256=source.sha256,
+            snapshot_public_id=source.snapshot.public_id if source.snapshot else None,
         )
         path = url_for("onlyoffice_integration.document_file", version_id=version.id)
         return (
@@ -137,8 +151,8 @@ class OnlyOfficeDocumentViewService:
             + urlencode({"token": token})
         )
 
-    def _build_editor_config(self, documento, version, document_url, document_key, user):
-        title = version.archivo_nombre_original or f"{documento.codigo}_v{version.version}.docx"
+    def _build_editor_config(self, documento, version, document_url, document_key, user, source=None):
+        title = (source.filename if source else None) or version.archivo_nombre_original or f"{documento.codigo}_v{version.version}.docx"
         return {
             "document": {
                 "fileType": "docx",

@@ -41,6 +41,15 @@ class AtomicDocumentReplacement:
     size: int
 
 
+@dataclass(frozen=True)
+class StoredSnapshotFile:
+    stored_name: str
+    storage_path: str
+    mime_type: str
+    size: int
+    sha256: str
+
+
 def validate_document_file(file_storage) -> None:
     if not file_storage or not file_storage.filename:
         return
@@ -58,6 +67,12 @@ def _safe_version(value) -> str:
     normalized = secure_filename(str(value or "1")).replace("_", "-")
     normalized = re.sub(r"[^A-Za-z0-9.-]+", "-", normalized).strip(".-")
     return normalized or "1"
+
+
+def _safe_snapshot_type(value) -> str:
+    normalized = secure_filename(str(value or "snapshot")).replace("_", "-").lower()
+    normalized = re.sub(r"[^a-z0-9-]+", "-", normalized).strip("-")
+    return normalized or "snapshot"
 
 
 def slugify_filename_part(texto, *, max_length=100) -> str:
@@ -184,6 +199,8 @@ def apply_stored_file_metadata(version_doc, stored_file: StoredDocumentFile | No
 
 
 def validate_docx_file_path(path: Path) -> None:
+    if path.is_symlink():
+        raise DocumentStorageError("No se permiten enlaces simbolicos como documento DOCX.")
     try:
         with zipfile.ZipFile(path) as archive:
             names = set(archive.namelist())
@@ -196,6 +213,8 @@ def validate_docx_file_path(path: Path) -> None:
 
 
 def file_digest_and_size(path: Path) -> tuple[str, int]:
+    if path.is_symlink():
+        raise DocumentStorageError("No se permiten enlaces simbolicos en el storage documental.")
     digest = hashlib.sha256()
     size = 0
     with path.open("rb") as input_file:
@@ -215,8 +234,12 @@ def prepare_document_file_replacement(version_doc, source_path: Path) -> AtomicD
     validate_docx_file_path(source_path)
     new_sha256, new_size = file_digest_and_size(source_path)
     destination = resolve_document_path(version_doc.archivo_storage_path)
+    if "snapshots" in destination.parts:
+        raise DocumentStorageError("No se permite reemplazar archivos dentro del area de snapshots.")
     if not destination.is_file():
         raise DocumentStorageError("La copia de trabajo actual no existe.")
+    if destination.is_symlink():
+        raise DocumentStorageError("La copia de trabajo no puede ser un enlace simbolico.")
 
     backup = destination.with_name(f".backup-{uuid4().hex}-{destination.name}")
     replacement = destination.with_name(f".replace-{uuid4().hex}-{destination.name}")
@@ -262,6 +285,80 @@ def replace_document_file_atomically(version_doc, source_path: Path) -> tuple[st
     return replacement.sha256, replacement.size
 
 
+def store_snapshot_copy(*, source_path: Path, documento, version_doc, secuencia: int, tipo: str) -> StoredSnapshotFile:
+    """Crea una copia fisica independiente e inmutable de un DOCX de trabajo."""
+    if source_path.is_symlink():
+        raise DocumentStorageError("No se permite congelar un enlace simbolico.")
+    if not source_path.is_file():
+        raise DocumentStorageError("La copia de trabajo no existe.")
+    validate_docx_file_path(source_path)
+    source_sha256, source_size = file_digest_and_size(source_path)
+
+    relative_directory = Path(
+        f"empresa_{int(documento.empresa_id)}",
+        f"documento_{int(documento.id)}",
+        f"v{_safe_version(getattr(version_doc, 'version', version_doc.id))}",
+        "snapshots",
+    )
+    destination_directory = (_storage_root() / relative_directory).resolve()
+    destination_directory.mkdir(parents=True, exist_ok=True)
+    if os.path.commonpath([str(_storage_root()), str(destination_directory)]) != str(_storage_root()):
+        raise DocumentStorageError("La ruta de snapshots no es valida.")
+
+    stored_name = f"{int(secuencia):04d}-{_safe_snapshot_type(tipo)}-{source_sha256[:12]}.docx"
+    destination = (destination_directory / stored_name).resolve()
+    if os.path.commonpath([str(_storage_root()), str(destination)]) != str(_storage_root()):
+        raise DocumentStorageError("La ruta del snapshot no es valida.")
+    if destination.exists():
+        raise DocumentStorageError("Ya existe un snapshot con la misma ruta.")
+
+    temporary = (destination_directory / f".snapshot-{uuid4().hex}.tmp").resolve()
+    try:
+        shutil.copyfile(source_path, temporary, follow_symlinks=False)
+        validate_docx_file_path(temporary)
+        copied_sha256, copied_size = file_digest_and_size(temporary)
+        if copied_sha256 != source_sha256 or copied_size != source_size:
+            raise DocumentStorageError("El hash del snapshot no coincide con el origen.")
+        os.replace(temporary, destination)
+        try:
+            destination.chmod(0o444)
+        except OSError:
+            current_app.logger.debug("No se pudo marcar snapshot como solo lectura: %s", stored_name)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
+        raise
+
+    return StoredSnapshotFile(
+        stored_name=stored_name,
+        storage_path=(relative_directory / stored_name).as_posix(),
+        mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        size=source_size,
+        sha256=source_sha256,
+    )
+
+
+def delete_snapshot_file(storage_path: str | None) -> None:
+    if not storage_path:
+        return
+    path = resolve_document_path(storage_path)
+    if "snapshots" not in path.parts:
+        raise DocumentStorageError("La ruta no pertenece al area de snapshots.")
+    try:
+        path.chmod(0o666)
+    except OSError:
+        current_app.logger.debug("No se pudo ajustar permisos antes de eliminar snapshot: %s", storage_path)
+    path.unlink(missing_ok=True)
+
+
+def restore_working_copy_from_snapshot(*, snapshot_storage_path: str, version_doc) -> AtomicDocumentReplacement:
+    snapshot_path = resolve_document_path(snapshot_storage_path)
+    if snapshot_path.is_symlink() or not snapshot_path.is_file():
+        raise DocumentStorageError("El snapshot no esta disponible para restauracion.")
+    validate_docx_file_path(snapshot_path)
+    return prepare_document_file_replacement(version_doc, snapshot_path)
+
+
 def resolve_document_path(storage_path: str) -> Path:
     if not storage_path:
         raise DocumentStorageError("El documento no tiene una ruta privada registrada.")
@@ -270,6 +367,8 @@ def resolve_document_path(storage_path: str) -> Path:
     candidate = (root / Path(storage_path)).resolve()
     if os.path.commonpath([str(root), str(candidate)]) != str(root):
         raise DocumentStorageError("La ruta privada del documento no es válida.")
+    if candidate.is_symlink():
+        raise DocumentStorageError("La ruta privada del documento no puede ser un enlace simbolico.")
     return candidate
 
 

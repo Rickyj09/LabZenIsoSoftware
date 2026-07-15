@@ -74,7 +74,14 @@ def validate_onlyoffice_ping_token(token):
     return payload
 
 
-def generate_onlyoffice_document_token(*, empresa_id, documento_id, version_id, archivo_sha256):
+def generate_onlyoffice_document_token(
+    *,
+    empresa_id,
+    documento_id,
+    version_id,
+    archivo_sha256,
+    snapshot_public_id=None,
+):
     settings = _document_jwt_settings()
     now = datetime.now(timezone.utc)
     payload = {
@@ -90,6 +97,8 @@ def generate_onlyoffice_document_token(*, empresa_id, documento_id, version_id, 
         "version_id": int(version_id),
         "archivo_sha256": archivo_sha256,
     }
+    if snapshot_public_id:
+        payload["snapshot_public_id"] = str(snapshot_public_id)
     return jwt.encode(payload, settings["secret"], algorithm="HS256")
 
 

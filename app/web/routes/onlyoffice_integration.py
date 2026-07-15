@@ -1,13 +1,14 @@
 from flask import Blueprint, abort, current_app, jsonify, render_template, request, send_file
 from flask_login import login_required
 
-from app.models.documentos import Documento, DocumentoVersion
+from app.models.documentos import Documento, DocumentoSnapshot, DocumentoVersion
 from app.security.permissions import require_permission
 from app.services.onlyoffice_document_view_service import (
     DOCX_MIME,
     is_docx_version,
     resolve_viewable_docx_path,
 )
+from app.services.document_snapshot_service import DocumentSnapshotError, DocumentSnapshotService
 from app.services.onlyoffice_health_service import OnlyOfficeHealthService
 from app.services.onlyoffice_jwt_service import (
     OnlyOfficeTokenError,
@@ -124,29 +125,53 @@ def document_file(version_id):
     )
     if not version:
         abort(404)
-    if version.archivo_sha256 != payload.get("archivo_sha256"):
-        abort(401)
-    if not is_docx_version(version):
-        abort(422)
+    snapshot_public_id = (payload.get("snapshot_public_id") or "").strip()
+    snapshot = None
+    if snapshot_public_id:
+        snapshot = DocumentoSnapshot.query.filter_by(
+            public_id=snapshot_public_id,
+            documento_version_id=version.id,
+            documento_id=version.documento_id,
+            empresa_id=version.empresa_id,
+        ).first()
+        if not snapshot:
+            abort(404)
+        if snapshot.archivo_sha256 != payload.get("archivo_sha256"):
+            abort(401)
+        try:
+            physical_path = DocumentSnapshotService().resolve_snapshot_path(snapshot)
+        except DocumentSnapshotError:
+            abort(422)
+        download_name = snapshot.archivo_nombre_original or version.archivo_nombre_original or "documento.docx"
+        mimetype = snapshot.archivo_mime or version.archivo_mime or DOCX_MIME
+        content_length = snapshot.archivo_size
+    else:
+        if version.archivo_sha256 != payload.get("archivo_sha256"):
+            abort(401)
+        if not is_docx_version(version):
+            abort(422)
 
-    try:
-        physical_path = resolve_viewable_docx_path(version)
-    except FileNotFoundError:
-        abort(404)
-    except ValueError:
-        abort(422)
+        try:
+            physical_path = resolve_viewable_docx_path(version)
+        except FileNotFoundError:
+            abort(404)
+        except ValueError:
+            abort(422)
+        download_name = version.archivo_nombre_original or "documento.docx"
+        mimetype = version.archivo_mime or DOCX_MIME
+        content_length = version.archivo_size
 
     response = send_file(
         physical_path,
         as_attachment=False,
-        download_name=version.archivo_nombre_original or "documento.docx",
-        mimetype=version.archivo_mime or DOCX_MIME,
+        download_name=download_name,
+        mimetype=mimetype,
         conditional=True,
     )
     response.headers["Cache-Control"] = "private, max-age=60"
     response.headers["X-Content-Type-Options"] = "nosniff"
-    if version.archivo_size:
-        response.headers["Content-Length"] = str(version.archivo_size)
+    if content_length:
+        response.headers["Content-Length"] = str(content_length)
     return response
 
 

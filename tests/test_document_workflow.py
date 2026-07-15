@@ -1,12 +1,18 @@
 import tempfile
 import unittest
+import zipfile
+from io import BytesIO
+
+from sqlalchemy import event
+from sqlalchemy.orm import Session
 
 from app import create_app
 from app.extensions import db
-from app.models.documentos import Documento, DocumentoAprobacion
+from app.models.documentos import Documento, DocumentoAprobacion, DocumentoSnapshot
 from app.models.empresa import Empresa
 from app.models.seguridad import Usuario
 from app.services.document_versioning_service import create_draft_version, create_initial_version
+from app.services.storage_service import apply_stored_file_metadata, store_document_file
 from app.services.document_workflow_service import (
     DocumentWorkflowError,
     approve_version,
@@ -15,6 +21,7 @@ from app.services.document_workflow_service import (
     return_to_draft,
     send_for_review,
 )
+from werkzeug.datastructures import FileStorage
 
 
 class DocumentWorkflowTest(unittest.TestCase):
@@ -32,6 +39,19 @@ class DocumentWorkflowTest(unittest.TestCase):
         db.create_all()
         self.next_version_id = 1001
         self.next_event_id = 5001
+        self.next_snapshot_id = 9001
+
+        def assign_ids(session, _flush_context, _instances):
+            for item in session.new:
+                if isinstance(item, DocumentoAprobacion) and item.id is None:
+                    item.id = self.next_event_id
+                    self.next_event_id += 1
+                elif isinstance(item, DocumentoSnapshot) and item.id is None:
+                    item.id = self.next_snapshot_id
+                    self.next_snapshot_id += 1
+
+        self.assign_ids = assign_ids
+        event.listen(Session, "before_flush", self.assign_ids)
 
         self.company = Empresa(id=101, nombre="Empresa uno")
         self.other_company = Empresa(id=102, nombre="Empresa dos")
@@ -59,6 +79,7 @@ class DocumentWorkflowTest(unittest.TestCase):
         db.session.commit()
 
     def tearDown(self):
+        event.remove(Session, "before_flush", self.assign_ids)
         db.session.remove()
         db.drop_all()
         self.context.pop()
@@ -90,16 +111,55 @@ class DocumentWorkflowTest(unittest.TestCase):
             if isinstance(item, DocumentoAprobacion) and item.id is None:
                 item.id = self.next_event_id
                 self.next_event_id += 1
+            elif isinstance(item, DocumentoSnapshot) and item.id is None:
+                item.id = self.next_snapshot_id
+                self.next_snapshot_id += 1
         db.session.flush()
 
+    def minimal_docx(self, text="Workflow"):
+        stream = BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr(
+                "[Content_Types].xml",
+                """<?xml version="1.0" encoding="UTF-8"?>
+                <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+                  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+                  <Default Extension="xml" ContentType="application/xml"/>
+                  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+                </Types>""",
+            )
+            archive.writestr(
+                "word/document.xml",
+                f"""<?xml version="1.0" encoding="UTF-8"?>
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body>
+                </w:document>""",
+            )
+        return stream.getvalue()
+
+    def attach_docx(self, document, version_doc, text="Workflow"):
+        stored = store_document_file(
+            FileStorage(
+                stream=BytesIO(self.minimal_docx(text)),
+                filename=f"{document.codigo}_v{version_doc.version}.docx",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            documento=document,
+            version=version_doc.version,
+        )
+        apply_stored_file_metadata(version_doc, stored)
+        db.session.flush()
+        return version_doc
+
     def initial(self, document, version="1", user_id=201):
-        return self.assign_version_id(create_initial_version(
+        version_doc = self.assign_version_id(create_initial_version(
             documento=document,
             version=version,
             cambios="Versión inicial",
             contenido="Contenido",
             user_id=user_id,
         ))
+        return self.attach_docx(document, version_doc, f"Version {version}")
 
     def send(self, document, version_doc, user=None, comment="Lista para revisión"):
         event = send_for_review(
@@ -107,6 +167,8 @@ class DocumentWorkflowTest(unittest.TestCase):
             version_doc=version_doc,
             usuario=user or self.user,
             comentario=comment,
+            resumen_cambios=comment,
+            hojas_modificadas="No aplica",
             ip="127.0.0.1",
             user_agent="workflow-test",
         )
@@ -132,13 +194,14 @@ class DocumentWorkflowTest(unittest.TestCase):
         return version_doc
 
     def draft(self, document, version="2"):
-        return self.assign_version_id(create_draft_version(
+        version_doc = self.assign_version_id(create_draft_version(
             documento=document,
             version=version,
             cambios="Cambio controlado",
             contenido="Contenido nuevo",
             user_id=self.user.id,
         ))
+        return self.attach_docx(document, version_doc, f"Version {version}")
 
     def test_send_to_review_records_metadata_and_keeps_current_version(self):
         document = self.make_document()

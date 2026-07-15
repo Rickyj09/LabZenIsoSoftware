@@ -2,6 +2,7 @@ import tempfile
 import unittest
 import subprocess
 import zipfile
+import re
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 from app import create_app, redact_sensitive_request_tokens
 from app.extensions import db
 from app.models.base import BaseModel
-from app.models.documentos import Documento, DocumentoEdicion, DocumentoEdicionEvento, DocumentoVersion
+from app.models.documentos import Documento, DocumentoEdicion, DocumentoEdicionEvento, DocumentoSnapshot, DocumentoVersion
 from app.models.empresa import Empresa
 from app.models.seguridad import Permiso, Rol, RolPermiso, Usuario, UsuarioRol
 from app.services.onlyoffice_health_service import OnlyOfficeHealthService
@@ -28,6 +29,12 @@ from app.services.onlyoffice_document_edit_service import (
     OnlyOfficeDocumentEditService,
     OnlyOfficeEditConflictError,
     OnlyOfficeEditSessionService,
+)
+from app.services.document_workflow_service import (
+    approve_version as workflow_approve_version,
+    reject_version as workflow_reject_version,
+    return_to_draft as workflow_return_to_draft,
+    send_for_review as workflow_send_for_review,
 )
 from app.services.storage_service import apply_stored_file_metadata, store_document_file
 from app.services.storage_service import file_digest_and_size, resolve_document_path
@@ -284,6 +291,184 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         apply_stored_file_metadata(version, stored)
         db.session.commit()
         return document, version
+
+    def replace_working_docx(self, version, text):
+        path = resolve_document_path(version.archivo_storage_path)
+        path.write_bytes(self.minimal_docx(text))
+        sha256, size = file_digest_and_size(path)
+        version.archivo_sha256 = sha256
+        version.archivo_size = size
+        db.session.commit()
+        return sha256
+
+    def test_workflow_send_for_review_creates_immutable_snapshot_without_new_version(self):
+        document, version = self.add_document_with_file(content=self.minimal_docx("ciclo uno"))
+        user = db.session.get(Usuario, 201)
+        document_count = Documento.query.count()
+        version_count = DocumentoVersion.query.count()
+
+        workflow_send_for_review(
+            documento=document,
+            version_doc=version,
+            usuario=user,
+            comentario="Listo para revision",
+            resumen_cambios="Se actualizo el procedimiento",
+            hojas_modificadas="Seccion 1",
+        )
+        db.session.commit()
+
+        snapshot = DocumentoSnapshot.query.filter_by(documento_version_id=version.id, tipo="ENVIO_REVISION").one()
+        self.assertEqual(snapshot.estado, "DISPONIBLE")
+        self.assertTrue(snapshot.inmutable)
+        self.assertEqual(snapshot.ciclo_revision, 1)
+        self.assertEqual(snapshot.secuencia, 1)
+        self.assertEqual(snapshot.archivo_sha256, version.archivo_sha256)
+        self.assertIn("/snapshots/", f"/{snapshot.storage_path}")
+        self.assertTrue(resolve_document_path(snapshot.storage_path).is_file())
+        self.assertEqual(Documento.query.count(), document_count)
+        self.assertEqual(DocumentoVersion.query.count(), version_count)
+
+    def test_reject_return_to_draft_and_resend_keeps_previous_snapshots(self):
+        document, version = self.add_document_with_file(content=self.minimal_docx("ciclo uno"))
+        user = db.session.get(Usuario, 201)
+
+        workflow_send_for_review(
+            documento=document,
+            version_doc=version,
+            usuario=user,
+            resumen_cambios="Primer ciclo",
+            hojas_modificadas="No aplica",
+        )
+        workflow_reject_version(documento=document, version_doc=version, usuario=user, comentario="Corregir")
+        db.session.commit()
+
+        first_review = DocumentoSnapshot.query.filter_by(
+            documento_version_id=version.id,
+            tipo="ENVIO_REVISION",
+            ciclo_revision=1,
+        ).one()
+        rejected = DocumentoSnapshot.query.filter_by(documento_version_id=version.id, tipo="RECHAZADO").one()
+        self.assertIsNone(rejected.storage_path)
+        self.assertEqual(rejected.snapshot_origen_id, first_review.id)
+
+        self.replace_working_docx(version, "cambio descartable")
+        workflow_return_to_draft(documento=document, version_doc=version, usuario=user, comentario="Devolver")
+        db.session.commit()
+        self.assertEqual(db.session.get(DocumentoVersion, version.id).archivo_sha256, first_review.archivo_sha256)
+
+        self.replace_working_docx(version, "ciclo dos")
+        workflow_send_for_review(
+            documento=document,
+            version_doc=version,
+            usuario=user,
+            resumen_cambios="Segundo ciclo",
+            hojas_modificadas="Seccion 2",
+        )
+        db.session.commit()
+
+        reviews = (
+            DocumentoSnapshot.query
+            .filter_by(documento_version_id=version.id, tipo="ENVIO_REVISION")
+            .order_by(DocumentoSnapshot.ciclo_revision.asc())
+            .all()
+        )
+        self.assertEqual([snapshot.ciclo_revision for snapshot in reviews], [1, 2])
+        self.assertEqual([snapshot.secuencia for snapshot in reviews], [1, 3])
+        self.assertNotEqual(reviews[0].archivo_sha256, reviews[1].archivo_sha256)
+        self.assertTrue(resolve_document_path(reviews[0].storage_path).is_file())
+
+    def test_approve_version_creates_approved_snapshot_and_uses_review_hash(self):
+        document, version = self.add_document_with_file(content=self.minimal_docx("aprobado"))
+        user = db.session.get(Usuario, 201)
+
+        workflow_send_for_review(
+            documento=document,
+            version_doc=version,
+            usuario=user,
+            resumen_cambios="Listo",
+            hojas_modificadas="No aplica",
+        )
+        review = DocumentoSnapshot.query.filter_by(documento_version_id=version.id, tipo="ENVIO_REVISION").one()
+        workflow_approve_version(documento=document, version_doc=version, usuario=user, comentario="Aprobado")
+        db.session.commit()
+
+        approved = DocumentoSnapshot.query.filter_by(documento_version_id=version.id, tipo="APROBADO").one()
+        self.assertEqual(approved.snapshot_origen_id, review.id)
+        self.assertEqual(approved.archivo_sha256, review.archivo_sha256)
+        self.assertEqual(db.session.get(DocumentoVersion, version.id).estado, "APROBADO")
+        self.assertEqual(db.session.get(Documento, document.id).version_vigente_id, version.id)
+
+    def test_workflow_snapshots_are_linked_to_audit_events(self):
+        document, version = self.add_document_with_file(content=self.minimal_docx("eventos"))
+        user = db.session.get(Usuario, 201)
+
+        workflow_send_for_review(
+            documento=document,
+            version_doc=version,
+            usuario=user,
+            resumen_cambios="Revision con evento",
+            hojas_modificadas="No aplica",
+        )
+        db.session.commit()
+        review = DocumentoSnapshot.query.filter_by(documento_version_id=version.id, tipo="ENVIO_REVISION").one()
+        self.assertIsNotNone(review.workflow_evento_id)
+        self.assertEqual(review.workflow_evento.accion, "ENVIAR_REVISION")
+
+        workflow_reject_version(documento=document, version_doc=version, usuario=user, comentario="Corregir")
+        db.session.commit()
+        rejected = DocumentoSnapshot.query.filter_by(documento_version_id=version.id, tipo="RECHAZADO").one()
+        self.assertIsNotNone(rejected.workflow_evento_id)
+        self.assertEqual(rejected.workflow_evento.accion, "RECHAZAR")
+
+        workflow_return_to_draft(documento=document, version_doc=version, usuario=user, comentario="Devolver")
+        self.replace_working_docx(version, "eventos ciclo dos")
+        workflow_send_for_review(
+            documento=document,
+            version_doc=version,
+            usuario=user,
+            resumen_cambios="Segundo envio con evento",
+            hojas_modificadas="No aplica",
+        )
+        workflow_approve_version(documento=document, version_doc=version, usuario=user, comentario="Aprobar")
+        db.session.commit()
+        approved = DocumentoSnapshot.query.filter_by(documento_version_id=version.id, tipo="APROBADO").one()
+        self.assertIsNotNone(approved.workflow_evento_id)
+        self.assertEqual(approved.workflow_evento.accion, "APROBAR")
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_onlyoffice_viewer_uses_review_snapshot_in_read_only_mode(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx("snapshot oficial"))
+        user = db.session.get(Usuario, 201)
+        workflow_send_for_review(
+            documento=document,
+            version_doc=version,
+            usuario=user,
+            resumen_cambios="Revision",
+            hojas_modificadas="No aplica",
+        )
+        db.session.commit()
+        snapshot = DocumentoSnapshot.query.filter_by(documento_version_id=version.id, tipo="ENVIO_REVISION").one()
+
+        response = self.login(201).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/ver")
+        self.assertEqual(response.status_code, 200)
+        body = response.get_data(as_text=True)
+        self.assertIn('"mode": "view"', body)
+        self.assertIn('"edit": false', body)
+        self.assertIn('"download": false', body)
+        self.assertIn('"print": false', body)
+        token_match = re.search(r"archivo\?token=([^\"&]+)", body)
+        self.assertIsNotNone(token_match)
+        payload = jwt.decode(
+            token_match.group(1),
+            self.app.config["ONLYOFFICE_JWT_SECRET"],
+            algorithms=["HS256"],
+            audience="labzeniso-onlyoffice-document-view",
+            issuer=self.app.config["ONLYOFFICE_PING_JWT_ISSUER"],
+        )
+        self.assertEqual(payload["snapshot_public_id"], snapshot.public_id)
+        self.assertEqual(payload["archivo_sha256"], snapshot.archivo_sha256)
+        self.assertNotIn("callbackUrl", body)
 
     def test_onlyoffice_disabled_does_not_break_app_startup(self):
         app = create_app({

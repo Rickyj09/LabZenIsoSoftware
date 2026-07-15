@@ -1,12 +1,14 @@
 import tempfile
 import unittest
+import zipfile
+from io import BytesIO
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app import create_app
 from app.extensions import db
-from app.models.documentos import Documento, DocumentoAprobacion, DocumentoVersion
+from app.models.documentos import Documento, DocumentoAprobacion, DocumentoSnapshot, DocumentoVersion
 from app.models.empresa import Empresa
 from app.models.seguridad import Permiso, Rol, RolPermiso, Usuario, UsuarioRol
 from app.services.document_pending_service import (
@@ -15,6 +17,9 @@ from app.services.document_pending_service import (
     user_has_document_pending_alert,
 )
 from app.services.document_workflow_service import approve_version, reject_version
+from app.services.document_workflow_service import send_for_review
+from app.services.storage_service import apply_stored_file_metadata, store_document_file
+from werkzeug.datastructures import FileStorage
 
 
 class DocumentPendingAlertTest(unittest.TestCase):
@@ -31,12 +36,16 @@ class DocumentPendingAlertTest(unittest.TestCase):
         self.context.push()
         db.create_all()
         self.next_event_id = 8001
+        self.next_snapshot_id = 9001
 
         def assign_event_ids(session, _flush_context, _instances):
             for item in session.new:
                 if isinstance(item, DocumentoAprobacion) and item.id is None:
                     item.id = self.next_event_id
                     self.next_event_id += 1
+                elif isinstance(item, DocumentoSnapshot) and item.id is None:
+                    item.id = self.next_snapshot_id
+                    self.next_snapshot_id += 1
 
         self.assign_event_ids = assign_event_ids
         event.listen(Session, "before_flush", self.assign_event_ids)
@@ -103,6 +112,49 @@ class DocumentPendingAlertTest(unittest.TestCase):
         db.session.commit()
         return document, version
 
+    def minimal_docx(self, text="Pendiente"):
+        stream = BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr(
+                "[Content_Types].xml",
+                """<?xml version="1.0" encoding="UTF-8"?>
+                <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+                  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+                  <Default Extension="xml" ContentType="application/xml"/>
+                  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+                </Types>""",
+            )
+            archive.writestr(
+                "word/document.xml",
+                f"""<?xml version="1.0" encoding="UTF-8"?>
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body>
+                </w:document>""",
+            )
+        return stream.getvalue()
+
+    def add_review_version_with_snapshot(self, item_id):
+        document, version = self.add_version(item_id, "EN_ELABORACION")
+        stored = store_document_file(
+            FileStorage(
+                stream=BytesIO(self.minimal_docx(f"DOC-{item_id}")),
+                filename=f"DOC-{item_id}.docx",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            documento=document,
+            version=version.version,
+        )
+        apply_stored_file_metadata(version, stored)
+        send_for_review(
+            documento=document,
+            version_doc=version,
+            usuario=db.session.get(Usuario, 201),
+            resumen_cambios="Listo",
+            hojas_modificadas="No aplica",
+        )
+        db.session.commit()
+        return document, version
+
     def login(self, user_id):
         client = self.app.test_client()
         with client.session_transaction() as session:
@@ -159,7 +211,7 @@ class DocumentPendingAlertTest(unittest.TestCase):
         self.assertIn("No tiene documentos pendientes", response.get_data(as_text=True))
 
     def test_alert_disappears_after_approval(self):
-        document, version = self.add_version(310, "EN_REVISION")
+        document, version = self.add_review_version_with_snapshot(310)
         quality = db.session.get(Usuario, 201)
         self.assertEqual(count_pending_documents_for_user(quality), 1)
 
@@ -169,7 +221,7 @@ class DocumentPendingAlertTest(unittest.TestCase):
         self.assertEqual(count_pending_documents_for_user(quality), 0)
 
     def test_alert_disappears_after_rejection(self):
-        document, version = self.add_version(311, "EN_REVISION")
+        document, version = self.add_review_version_with_snapshot(311)
         quality = db.session.get(Usuario, 201)
         self.assertEqual(count_pending_documents_for_user(quality), 1)
 

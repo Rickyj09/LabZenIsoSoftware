@@ -50,6 +50,28 @@ ESTADOS_EDICION_DOCUMENTO = (
     ESTADO_EDICION_CANCELADA,
 )
 
+SNAPSHOT_ENVIO_REVISION = "ENVIO_REVISION"
+SNAPSHOT_APROBADO = "APROBADO"
+SNAPSHOT_RECHAZADO = "RECHAZADO"
+
+TIPOS_DOCUMENTO_SNAPSHOT = (
+    SNAPSHOT_ENVIO_REVISION,
+    SNAPSHOT_APROBADO,
+    SNAPSHOT_RECHAZADO,
+)
+
+SNAPSHOT_CREANDO = "CREANDO"
+SNAPSHOT_DISPONIBLE = "DISPONIBLE"
+SNAPSHOT_ERROR = "ERROR"
+SNAPSHOT_INVALIDADO = "INVALIDADO"
+
+ESTADOS_DOCUMENTO_SNAPSHOT = (
+    SNAPSHOT_CREANDO,
+    SNAPSHOT_DISPONIBLE,
+    SNAPSHOT_ERROR,
+    SNAPSHOT_INVALIDADO,
+)
+
 ESTADO_DOCUMENTO_LABELS = {
     ESTADO_EN_ELABORACION: "EN ELABORACIÓN",
     ESTADO_EN_REVISION: "EN REVISIÓN",
@@ -225,6 +247,90 @@ class DocumentoAprobacion(TenantMixin, BaseModel):
         back_populates="eventos",
     )
     documento_version = db.relationship("DocumentoVersion", back_populates="aprobaciones")
+
+
+class DocumentoSnapshot(TenantMixin, BaseModel):
+    __tablename__ = "documento_snapshots"
+    __table_args__ = (
+        db.CheckConstraint(
+            "tipo IN ('ENVIO_REVISION', 'APROBADO', 'RECHAZADO')",
+            name="ck_documento_snapshots_tipo_valido",
+        ),
+        db.CheckConstraint(
+            "estado IN ('CREANDO', 'DISPONIBLE', 'ERROR', 'INVALIDADO')",
+            name="ck_documento_snapshots_estado_valido",
+        ),
+        db.CheckConstraint("secuencia > 0", name="ck_documento_snapshots_secuencia_positiva"),
+        db.CheckConstraint("ciclo_revision > 0", name="ck_documento_snapshots_ciclo_positivo"),
+        db.CheckConstraint("archivo_size IS NULL OR archivo_size > 0", name="ck_documento_snapshots_size_positivo"),
+        db.CheckConstraint(
+            "archivo_sha256 IS NULL OR length(archivo_sha256) = 64",
+            name="ck_documento_snapshots_sha256_valido",
+        ),
+        db.CheckConstraint(
+            "hash_origen IS NULL OR length(hash_origen) = 64",
+            name="ck_documento_snapshots_hash_origen_valido",
+        ),
+        db.CheckConstraint(
+            "estado <> 'DISPONIBLE' OR inmutable = true",
+            name="ck_documento_snapshots_disponible_inmutable",
+        ),
+        db.UniqueConstraint("public_id", name="uq_documento_snapshots_public_id"),
+        db.UniqueConstraint("storage_path", name="uq_documento_snapshots_storage_path"),
+        db.UniqueConstraint("documento_version_id", "secuencia", name="uq_documento_snapshots_version_secuencia"),
+        db.UniqueConstraint(
+            "documento_version_id",
+            "tipo",
+            "ciclo_revision",
+            name="uq_documento_snapshots_version_tipo_ciclo",
+        ),
+        db.Index("ix_documento_snapshots_documento_id", "documento_id"),
+        db.Index("ix_documento_snapshots_documento_version_id", "documento_version_id"),
+        db.Index("ix_documento_snapshots_tipo", "tipo"),
+        db.Index("ix_documento_snapshots_ciclo_revision", "ciclo_revision"),
+        db.Index("ix_documento_snapshots_secuencia", "secuencia"),
+        db.Index("ix_documento_snapshots_creado_en", "creado_en"),
+        db.Index("ix_documento_snapshots_archivo_sha256", "archivo_sha256"),
+        db.Index("ix_documento_snapshots_workflow_evento_id", "workflow_evento_id"),
+        db.Index(
+            "uq_documento_snapshots_aprobado_unico",
+            "documento_version_id",
+            unique=True,
+            postgresql_where=db.text("tipo = 'APROBADO' AND estado = 'DISPONIBLE'"),
+            sqlite_where=db.text("tipo = 'APROBADO' AND estado = 'DISPONIBLE'"),
+        ),
+    )
+
+    public_id = db.Column(db.String(64), nullable=False)
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
+    documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
+    secuencia = db.Column(db.Integer, nullable=False)
+    ciclo_revision = db.Column(db.Integer, nullable=False)
+    tipo = db.Column(db.String(30), nullable=False)
+    estado = db.Column(db.String(30), nullable=False, default=SNAPSHOT_CREANDO)
+    storage_path = db.Column(db.String(500))
+    archivo_nombre_interno = db.Column(db.String(255))
+    archivo_nombre_original = db.Column(db.String(255))
+    archivo_mime = db.Column(db.String(255))
+    archivo_size = db.Column(db.BigInteger)
+    archivo_sha256 = db.Column(db.String(64))
+    hash_origen = db.Column(db.String(64))
+    creado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
+    creado_en = db.Column(db.DateTime(timezone=True), nullable=False)
+    workflow_evento_id = db.Column(db.BigInteger, db.ForeignKey("documento_aprobaciones.id"), nullable=True)
+    snapshot_origen_id = db.Column(db.BigInteger, db.ForeignKey("documento_snapshots.id"), nullable=True)
+    comentario = db.Column(db.Text)
+    resumen_cambios = db.Column(db.Text)
+    hojas_modificadas = db.Column(db.String(500))
+    metadata_json = db.Column(db.JSON)
+    inmutable = db.Column(db.Boolean, nullable=False, default=True)
+
+    empresa = db.relationship("Empresa")
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    creado_por = db.relationship("Usuario", foreign_keys=[creado_por_id])
+    workflow_evento = db.relationship("DocumentoAprobacion", foreign_keys=[workflow_evento_id])
+    snapshot_origen = db.relationship("DocumentoSnapshot", remote_side="DocumentoSnapshot.id")
 
 
 class DocumentoEdicion(TenantMixin, BaseModel):

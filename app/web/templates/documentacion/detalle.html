@@ -24,7 +24,11 @@
             {% endif %}
 
             {% if can('documentos.enviar_revision') %}
-            <form method="post" action="{{ url_for('documentacion.enviar_revision', item_id=item.id) }}" class="d-flex gap-2">
+            <form method="post" action="{{ url_for('documentacion.enviar_revision', item_id=item.id) }}" class="d-flex gap-2 flex-wrap">
+                <input type="text" name="resumen_cambios" class="form-control form-control-sm"
+                       placeholder="Resumen de modificaciones" required>
+                <input type="text" name="hojas_modificadas" class="form-control form-control-sm"
+                       placeholder="Hojas modificadas o No aplica" required>
                 <input type="text" name="comentario" class="form-control form-control-sm"
                        placeholder="Comentario de revisión (opcional)">
                 <button type="submit" class="btn btn-warning">
@@ -425,6 +429,45 @@
             </tbody>
         </table>
     </div>
+</div>
+
+<div class="page-card mb-4">
+    <h5 class="mb-3">Snapshots documentales</h5>
+
+    {% if snapshots %}
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Ciclo</th>
+                    <th>Tipo</th>
+                    <th>Estado</th>
+                    <th>Hash</th>
+                    <th>Resumen</th>
+                    <th>Hojas</th>
+                    <th>Evento</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for snapshot in snapshots %}
+                <tr>
+                    <td>{{ snapshot.secuencia }}</td>
+                    <td>{{ snapshot.ciclo_revision }}</td>
+                    <td>{{ snapshot.tipo }}</td>
+                    <td>{{ snapshot.estado }}</td>
+                    <td><code>{{ snapshot.archivo_sha256[:12] if snapshot.archivo_sha256 else '-' }}</code></td>
+                    <td>{{ snapshot.resumen_cambios or snapshot.comentario or '-' }}</td>
+                    <td>{{ snapshot.hojas_modificadas or '-' }}</td>
+                    <td>{{ snapshot.workflow_evento.accion if snapshot.workflow_evento else '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="text-muted">No existen snapshots documentales registrados.</div>
+    {% endif %}
 </div>
 
 <div class="page-card">

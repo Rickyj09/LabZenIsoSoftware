@@ -1,12 +1,14 @@
 import tempfile
 import unittest
+import zipfile
+from io import BytesIO
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app import create_app
 from app.extensions import db
-from app.models.documentos import Documento, DocumentoAprobacion, DocumentoVersion
+from app.models.documentos import Documento, DocumentoAprobacion, DocumentoSnapshot, DocumentoVersion
 from app.models.empresa import Empresa
 from app.models.seguridad import Permiso, Rol, RolPermiso, Usuario, UsuarioRol
 from app.security.permissions import user_has_permission
@@ -49,6 +51,7 @@ class DocumentPermissionTest(unittest.TestCase):
         self.next_event_id = 9001
         self.next_document_id = 7001
         self.next_version_id = 8001
+        self.next_snapshot_id = 10001
 
         def assign_event_ids(session, _flush_context, _instances):
             for item in session.new:
@@ -61,6 +64,9 @@ class DocumentPermissionTest(unittest.TestCase):
                 elif isinstance(item, Documento) and item.id is None:
                     item.id = self.next_document_id
                     self.next_document_id += 1
+                elif isinstance(item, DocumentoSnapshot) and item.id is None:
+                    item.id = self.next_snapshot_id
+                    self.next_snapshot_id += 1
 
         self.assign_event_ids = assign_event_ids
         event.listen(Session, "before_flush", self.assign_event_ids)
@@ -119,6 +125,28 @@ class DocumentPermissionTest(unittest.TestCase):
             session["_fresh"] = True
         return client
 
+    def minimal_docx(self, text="Permisos"):
+        stream = BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr(
+                "[Content_Types].xml",
+                """<?xml version="1.0" encoding="UTF-8"?>
+                <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+                  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+                  <Default Extension="xml" ContentType="application/xml"/>
+                  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+                </Types>""",
+            )
+            archive.writestr(
+                "word/document.xml",
+                f"""<?xml version="1.0" encoding="UTF-8"?>
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body>
+                </w:document>""",
+            )
+        stream.seek(0)
+        return stream
+
     def add_document(self, document_id, state="EN_ELABORACION", version_state="EN_ELABORACION"):
         document = Documento(
             id=document_id,
@@ -170,6 +198,7 @@ class DocumentPermissionTest(unittest.TestCase):
             "titulo": "Documento técnico",
             "tipo_documento": "PROCEDIMIENTO",
             "version": "1",
+            "archivo": (self.minimal_docx("Documento tecnico"), "documento-tecnico.docx"),
             "cambios": "Versión inicial",
         })
         document = Documento.query.filter_by(codigo="DOC-TECNICO").one()

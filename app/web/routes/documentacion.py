@@ -50,6 +50,7 @@ from app.services.storage_service import (
 )
 from app.services.document_pending_service import get_pending_documents_for_user
 from app.services.document_dashboard_service import get_document_dashboard_stats
+from app.services.document_snapshot_service import DocumentSnapshotError, DocumentSnapshotService
 from app.services.onlyoffice_document_view_service import (
     OnlyOfficeDocumentViewError,
     OnlyOfficeDocumentViewService,
@@ -398,6 +399,7 @@ def detalle(item_id):
     version_rechazada = get_latest_rejected_version(item)
     version_mostrada = version_vigente or version_preparacion or (versiones[0] if versiones else None)
     active_edit_info = get_active_edit_info(version_preparacion, current_user) if version_preparacion else None
+    snapshots = DocumentSnapshotService().list_snapshots(documento=item) if can_view_history else []
 
     preview_url = None
     preview_tipo = None
@@ -435,6 +437,7 @@ def detalle(item_id):
         onlyoffice_edit_enabled=bool(current_app.config.get("ONLYOFFICE_EDIT_ENABLED")),
         is_docx_version=is_docx_version,
         active_edit_info=active_edit_info,
+        snapshots=snapshots,
     )
 
 
@@ -616,6 +619,26 @@ def descargar_version(version_id):
         )
         .first_or_404()
     )
+
+    try:
+        source = DocumentSnapshotService().official_source_for_version(
+            documento=version_doc.documento,
+            version_doc=version_doc,
+        )
+        if source.kind == "snapshot":
+            physical_path = DocumentSnapshotService().resolve_snapshot_path(source.snapshot)
+            if not physical_path or not os.path.isfile(physical_path):
+                abort(404)
+            return send_file(
+                physical_path,
+                as_attachment=request.args.get("inline") != "1",
+                download_name=source.filename,
+                mimetype=source.mime_type or None,
+                conditional=True,
+            )
+    except DocumentSnapshotError:
+        current_app.logger.warning("Snapshot documental invalido para la version %s", version_doc.id)
+        abort(404)
 
     try:
         if version_doc.archivo_storage_path:
@@ -856,6 +879,8 @@ def enviar_revision(item_id):
             version_doc=version_actual,
             usuario=current_user,
             comentario=request.form.get("comentario", ""),
+            resumen_cambios=request.form.get("resumen_cambios") or request.form.get("comentario", ""),
+            hojas_modificadas=request.form.get("hojas_modificadas") or "No aplica",
             **workflow_request_metadata(),
         )
         db.session.commit()
