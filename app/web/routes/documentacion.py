@@ -50,6 +50,11 @@ from app.services.storage_service import (
 )
 from app.services.document_pending_service import get_pending_documents_for_user
 from app.services.document_dashboard_service import get_document_dashboard_stats
+from app.services.onlyoffice_document_view_service import (
+    OnlyOfficeDocumentViewError,
+    OnlyOfficeDocumentViewService,
+    is_docx_version,
+)
 
 bp = Blueprint("documentacion", __name__, url_prefix="/documentacion")
 
@@ -418,7 +423,46 @@ def detalle(item_id):
         can_view_history=can_view_history,
         preview_url=preview_url,
         preview_tipo=preview_tipo,
+        onlyoffice_enabled=bool(current_app.config.get("ONLYOFFICE_ENABLED")),
+        is_docx_version=is_docx_version,
     )
+
+
+@bp.route("/<int:item_id>/versiones/<int:version_id>/onlyoffice/ver")
+@login_required
+@require_permission("documentos.ver")
+def ver_onlyoffice(item_id, version_id):
+    try:
+        context = OnlyOfficeDocumentViewService().build_context(
+            documento_id=item_id,
+            version_id=version_id,
+            user=current_user,
+        )
+    except LookupError:
+        abort(404)
+    except FileNotFoundError:
+        abort(404)
+    except OnlyOfficeDocumentViewError as exc:
+        abort(exc.status_code, description=str(exc))
+
+    response = current_app.make_response(render_template(
+        "documentacion/onlyoffice_viewer.html",
+        item=context.documento,
+        version=context.version,
+        editor_config=context.editor_config,
+        public_api_url=context.public_api_url,
+    ))
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        f"script-src 'self' 'unsafe-inline' {context.csp_origin}; "
+        f"frame-src 'self' {context.csp_origin}; "
+        f"connect-src 'self' {context.csp_origin}; "
+        f"img-src 'self' data: {context.csp_origin}; "
+        f"style-src 'self' 'unsafe-inline' {context.csp_origin}; "
+        f"font-src 'self' data: {context.csp_origin}; "
+        "object-src 'none'; base-uri 'self'"
+    )
+    return response
 
 
 @bp.route("/version/<int:version_id>/descargar")

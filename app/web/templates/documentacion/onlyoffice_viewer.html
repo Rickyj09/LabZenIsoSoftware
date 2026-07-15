@@ -1,0 +1,190 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Ver documento en ONLYOFFICE{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+    <div>
+        <h2 class="mb-1">{{ item.titulo }}</h2>
+        <div class="text-muted">{{ item.codigo }} · Versión {{ version.version }}</div>
+    </div>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+        <span class="badge bg-secondary">Modo lectura</span>
+        <a href="{{ url_for('documentacion.detalle', item_id=item.id) }}" class="btn btn-outline-secondary">
+            Volver al detalle
+        </a>
+    </div>
+</div>
+
+<div class="alert alert-info">
+    Visualización integrada con ONLYOFFICE en modo lectura. No se habilita edición, descarga, impresión ni guardado.
+</div>
+
+<div class="page-card p-0 overflow-hidden">
+    <div id="onlyoffice-loading" class="alert alert-info m-3" role="status" aria-live="polite">
+        Cargando ONLYOFFICE…
+    </div>
+    <div id="onlyoffice-ready" class="alert alert-success m-3" role="status" aria-live="polite" hidden>
+        Documento disponible en modo lectura.
+    </div>
+    <div id="onlyoffice-error" class="alert alert-danger m-3" role="alert" aria-live="assertive" hidden>
+        No se pudo cargar ONLYOFFICE. Verifica que Document Server esté disponible.
+    </div>
+    <div id="onlyoffice-editor" style="width: 100%; height: 78vh; min-height: 640px;"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ public_api_url }}" onerror="window.labzenOnlyOfficeApiLoadFailed = true;"></script>
+<script>
+    const onlyOfficeConfig = {{ editor_config|tojson }};
+    const VIEWER_STATE = Object.freeze({
+        LOADING: "LOADING",
+        READY: "READY",
+        ERROR: "ERROR"
+    });
+    const ONLYOFFICE_LOAD_TIMEOUT_MS = 30000;
+    const ONLYOFFICE_FATAL_ERROR_CODES = new Set([-1, -2, -3, -4]);
+
+    let onlyOfficeEditor = null;
+    let editorReady = false;
+    let onlyOfficeLoadTimeout = null;
+
+    function onlyOfficeElement(id) {
+        return document.getElementById(id);
+    }
+
+    function setOnlyOfficeElementVisible(id, isVisible) {
+        const element = onlyOfficeElement(id);
+        if (!element) {
+            return;
+        }
+
+        element.hidden = !isVisible;
+        element.style.display = isVisible ? "" : "none";
+        element.classList.toggle("d-none", !isVisible);
+    }
+
+    function clearOnlyOfficeLoadTimeout() {
+        if (onlyOfficeLoadTimeout) {
+            window.clearTimeout(onlyOfficeLoadTimeout);
+            onlyOfficeLoadTimeout = null;
+        }
+    }
+
+    function setViewerState(state, message) {
+        if (state === VIEWER_STATE.READY) {
+            editorReady = true;
+            clearOnlyOfficeLoadTimeout();
+        }
+
+        if (state === VIEWER_STATE.ERROR) {
+            const errorElement = onlyOfficeElement("onlyoffice-error");
+            if (errorElement && message) {
+                errorElement.textContent = message;
+            }
+        }
+
+        setOnlyOfficeElementVisible("onlyoffice-loading", state === VIEWER_STATE.LOADING);
+        setOnlyOfficeElementVisible("onlyoffice-ready", state === VIEWER_STATE.READY);
+        setOnlyOfficeElementVisible("onlyoffice-error", state === VIEWER_STATE.ERROR);
+    }
+
+    function markOnlyOfficeReady() {
+        setViewerState(VIEWER_STATE.READY);
+    }
+
+    function getOnlyOfficeErrorCode(event) {
+        if (!event) {
+            return null;
+        }
+
+        return Number(event.data || event.code || event.errorCode);
+    }
+
+    function getOnlyOfficeErrorDescription(event) {
+        if (!event) {
+            return "";
+        }
+
+        return String(event.description || event.message || event.error || "");
+    }
+
+    function isOnlyOfficeFatalError(event) {
+        if (!event) {
+            return true;
+        }
+
+        const code = getOnlyOfficeErrorCode(event);
+
+        return event.fatal === true || ONLYOFFICE_FATAL_ERROR_CODES.has(code);
+    }
+
+    function showOnlyOfficeFatalError(message) {
+        if (editorReady) {
+            return;
+        }
+
+        clearOnlyOfficeLoadTimeout();
+        setViewerState(
+            VIEWER_STATE.ERROR,
+            message || "No se pudo cargar ONLYOFFICE. Verifica que Document Server esté disponible."
+        );
+    }
+
+    function logOnlyOfficeError(event) {
+        if (!window.console || typeof window.console.warn !== "function") {
+            return;
+        }
+
+        window.console.warn("ONLYOFFICE viewer event", {
+            code: getOnlyOfficeErrorCode(event),
+            description: getOnlyOfficeErrorDescription(event)
+        });
+    }
+
+    window.addEventListener("load", function () {
+        setViewerState(VIEWER_STATE.LOADING);
+
+        if (window.labzenOnlyOfficeApiLoadFailed) {
+            showOnlyOfficeFatalError();
+            return;
+        }
+
+        if (!window.DocsAPI || !window.DocsAPI.DocEditor) {
+            showOnlyOfficeFatalError();
+            return;
+        }
+
+        try {
+            onlyOfficeConfig.events = Object.assign({}, onlyOfficeConfig.events || {}, {
+                onAppReady: markOnlyOfficeReady,
+                onDocumentReady: markOnlyOfficeReady,
+                onError: function (event) {
+                    logOnlyOfficeError(event);
+                    if (!editorReady && isOnlyOfficeFatalError(event)) {
+                        showOnlyOfficeFatalError();
+                    }
+                }
+            });
+
+            onlyOfficeLoadTimeout = window.setTimeout(function () {
+                if (!editorReady) {
+                    showOnlyOfficeFatalError();
+                }
+            }, ONLYOFFICE_LOAD_TIMEOUT_MS);
+
+            onlyOfficeEditor = new window.DocsAPI.DocEditor("onlyoffice-editor", onlyOfficeConfig);
+        } catch (error) {
+            showOnlyOfficeFatalError();
+        }
+    });
+
+    window.addEventListener("beforeunload", function () {
+        clearOnlyOfficeLoadTimeout();
+        if (onlyOfficeEditor && typeof onlyOfficeEditor.destroyEditor === "function") {
+            onlyOfficeEditor.destroyEditor();
+        }
+    });
+</script>
+{% endblock %}

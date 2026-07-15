@@ -1,11 +1,18 @@
-from flask import Blueprint, current_app, jsonify, render_template, request
+from flask import Blueprint, abort, current_app, jsonify, render_template, request, send_file
 from flask_login import login_required
 
+from app.models.documentos import Documento, DocumentoVersion
 from app.security.permissions import require_permission
+from app.services.onlyoffice_document_view_service import (
+    DOCX_MIME,
+    is_docx_version,
+    resolve_viewable_docx_path,
+)
 from app.services.onlyoffice_health_service import OnlyOfficeHealthService
 from app.services.onlyoffice_jwt_service import (
     OnlyOfficeTokenError,
     generate_onlyoffice_ping_token,
+    validate_onlyoffice_document_token,
     validate_onlyoffice_ping_token,
 )
 
@@ -86,3 +93,53 @@ def ping():
         "message": "Ping ONLYOFFICE recibido por LabZenISO",
         "scope": payload.get("scope"),
     })
+
+
+@bp.route("/versiones/<int:version_id>/archivo", methods=["GET"])
+def document_file(version_id):
+    try:
+        payload = validate_onlyoffice_document_token(request.args.get("token", ""))
+    except OnlyOfficeTokenError:
+        abort(401)
+
+    if int(payload.get("version_id", 0)) != int(version_id):
+        abort(401)
+
+    version = (
+        DocumentoVersion.query
+        .join(Documento, DocumentoVersion.documento_id == Documento.id)
+        .filter(
+            DocumentoVersion.id == int(payload["version_id"]),
+            DocumentoVersion.documento_id == int(payload["documento_id"]),
+            DocumentoVersion.empresa_id == int(payload["empresa_id"]),
+            Documento.id == int(payload["documento_id"]),
+            Documento.empresa_id == int(payload["empresa_id"]),
+        )
+        .first()
+    )
+    if not version:
+        abort(404)
+    if version.archivo_sha256 != payload.get("archivo_sha256"):
+        abort(401)
+    if not is_docx_version(version):
+        abort(422)
+
+    try:
+        physical_path = resolve_viewable_docx_path(version)
+    except FileNotFoundError:
+        abort(404)
+    except ValueError:
+        abort(422)
+
+    response = send_file(
+        physical_path,
+        as_attachment=False,
+        download_name=version.archivo_nombre_original or "documento.docx",
+        mimetype=version.archivo_mime or DOCX_MIME,
+        conditional=True,
+    )
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    if version.archivo_size:
+        response.headers["Content-Length"] = str(version.archivo_size)
+    return response

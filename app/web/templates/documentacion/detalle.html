@@ -214,6 +214,11 @@
                             Descargar
                         </a>
                         {% endif %}
+                        {% if onlyoffice_enabled and is_docx_version(version_vigente) and can('documentos.ver') %}
+                        <a href="{{ url_for('documentacion.ver_onlyoffice', item_id=item.id, version_id=version_vigente.id) }}" class="btn btn-sm btn-outline-info">
+                            Ver en ONLYOFFICE
+                        </a>
+                        {% endif %}
                     </div>
                     <div class="small text-muted mt-2">
                         {{ version_vigente.archivo_nombre_original or version_vigente.archivo_nombre_guardado or (version_vigente.archivo_url.split('/')[-1] if version_vigente.archivo_url else 'Archivo documental') }}
@@ -278,6 +283,13 @@
     <p class="mb-1"><strong>Enviada a revisión:</strong> {{ version_preparacion.fecha_envio_revision or '-' }}</p>
     <p class="mb-1"><strong>Comentario de revisión:</strong> {{ version_preparacion.comentario_revision or '-' }}</p>
     <p class="mb-0"><strong>Cambios:</strong> {{ version_preparacion.cambios or '-' }}</p>
+    {% if onlyoffice_enabled and is_docx_version(version_preparacion) and can('documentos.ver') %}
+    <div class="mt-3">
+        <a href="{{ url_for('documentacion.ver_onlyoffice', item_id=item.id, version_id=version_preparacion.id) }}" class="btn btn-sm btn-outline-info">
+            Ver en ONLYOFFICE
+        </a>
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 
@@ -342,6 +354,11 @@
                             {% if can('documentos.descargar') %}
                             <a href="{{ url_for('documentacion.descargar_version', version_id=v.id) }}" class="btn btn-sm btn-outline-primary">
                                 Descargar
+                            </a>
+                            {% endif %}
+                            {% if onlyoffice_enabled and is_docx_version(v) and can('documentos.ver') %}
+                            <a href="{{ url_for('documentacion.ver_onlyoffice', item_id=item.id, version_id=v.id) }}" class="btn btn-sm btn-outline-info">
+                                Ver en ONLYOFFICE
                             </a>
                             {% endif %}
                             <div class="small text-muted mt-1">

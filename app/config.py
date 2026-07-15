@@ -53,6 +53,8 @@ def validate_onlyoffice_config(config):
 
     if int(config.get("ONLYOFFICE_REQUEST_TIMEOUT_SECONDS", 0)) <= 0:
         raise RuntimeError("ONLYOFFICE_REQUEST_TIMEOUT_SECONDS debe ser mayor que cero.")
+    if int(config.get("ONLYOFFICE_DOCUMENT_TOKEN_TTL_SECONDS", 0)) <= 0:
+        raise RuntimeError("ONLYOFFICE_DOCUMENT_TOKEN_TTL_SECONDS debe ser mayor que cero.")
 
 
 class Config:
@@ -103,6 +105,7 @@ class Config:
         "labzeniso",
     )
     ONLYOFFICE_PING_TOKEN_TTL_SECONDS = _env_int("ONLYOFFICE_PING_TOKEN_TTL_SECONDS", 120)
+    ONLYOFFICE_DOCUMENT_TOKEN_TTL_SECONDS = _env_int("ONLYOFFICE_DOCUMENT_TOKEN_TTL_SECONDS", 300)
 
     # Opcional: mejora el comportamiento del engine
     SQLALCHEMY_ENGINE_OPTIONS = {
