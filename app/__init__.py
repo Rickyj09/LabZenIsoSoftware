@@ -1,7 +1,7 @@
 from flask import Flask
 from flask_login import current_user
 
-from app.config import get_config
+from app.config import get_config, validate_onlyoffice_config
 from app.extensions import db, migrate, login_manager
 
 
@@ -15,6 +15,7 @@ def create_app(config_overrides=None):
     app.config.from_object(get_config())
     if config_overrides:
         app.config.update(config_overrides)
+    validate_onlyoffice_config(app.config)
 
     db.init_app(app)
     migrate.init_app(app, db)
@@ -111,6 +112,9 @@ def register_blueprints(app: Flask) -> None:
 
     from app.web.routes.documentacion import bp as documentacion_bp
     app.register_blueprint(documentacion_bp)
+
+    from app.web.routes.onlyoffice_integration import bp as onlyoffice_integration_bp
+    app.register_blueprint(onlyoffice_integration_bp)
 
     from app.web.routes.ofertas import bp as ofertas_bp
     app.register_blueprint(ofertas_bp)

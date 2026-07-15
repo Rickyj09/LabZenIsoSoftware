@@ -1,0 +1,83 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Diagnóstico ONLYOFFICE{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+    <div>
+        <h2 class="mb-1">Diagnóstico ONLYOFFICE</h2>
+        <div class="text-muted">
+            Infraestructura local de conectividad. La edición documental todavía no está habilitada.
+        </div>
+    </div>
+    <a href="{{ url_for('documentacion.dashboard') }}" class="btn btn-outline-secondary">Volver al dashboard documental</a>
+</div>
+
+<div class="alert alert-warning">
+    Esta página no abre documentos, no guarda archivos y no modifica el workflow documental.
+</div>
+
+<div class="row g-4 mb-4">
+    <div class="col-lg-6">
+        <div class="page-card h-100">
+            <h5 class="mb-3">Configuración</h5>
+            <table class="table table-sm align-middle">
+                <tbody>
+                    <tr><td>Integración habilitada</td><td>{{ 'Sí' if onlyoffice.enabled else 'No' }}</td></tr>
+                    <tr><td>URL pública</td><td><code>{{ onlyoffice.public_url }}</code></td></tr>
+                    <tr><td>URL interna</td><td><code>{{ onlyoffice.internal_url }}</code></td></tr>
+                    <tr><td>URL base callback</td><td><code>{{ onlyoffice.callback_base_url }}</code></td></tr>
+                    <tr><td>Healthcheck path</td><td><code>{{ onlyoffice.healthcheck_path }}</code></td></tr>
+                    <tr><td>Verificar SSL</td><td>{{ 'Sí' if onlyoffice.verify_ssl else 'No' }}</td></tr>
+                    <tr><td>Timeout</td><td>{{ onlyoffice.timeout_seconds }} s</td></tr>
+                    <tr><td>Hosts permitidos</td><td>{{ onlyoffice.allowed_hosts|join(', ') }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="page-card h-100">
+            <h5 class="mb-3">Health check</h5>
+            <div class="mb-3">
+                {% if health.available %}
+                    <span class="badge bg-success">Disponible</span>
+                {% elif health.enabled %}
+                    <span class="badge bg-danger">No disponible</span>
+                {% else %}
+                    <span class="badge bg-secondary">Deshabilitado</span>
+                {% endif %}
+            </div>
+            <table class="table table-sm align-middle">
+                <tbody>
+                    <tr><td>Estado HTTP</td><td>{{ health.status_code or '-' }}</td></tr>
+                    <tr><td>URL consultada</td><td><code>{{ health.url or '-' }}</code></td></tr>
+                    <tr><td>Mensaje</td><td>{{ health.message }}</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="page-card">
+    <h5 class="mb-3">Prueba de conectividad desde ONLYOFFICE hacia LabZenISO</h5>
+    <p>
+        Desde un contenedor Docker, LabZenISO en Windows debe alcanzarse mediante
+        <code>{{ onlyoffice.callback_base_url }}</code>, no mediante <code>127.0.0.1</code>.
+    </p>
+    <p class="mb-2">Endpoint técnico:</p>
+    <pre class="bg-light border rounded p-3 mb-3">{{ onlyoffice.callback_base_url }}/documentacion/integraciones/onlyoffice/ping</pre>
+    {% if ping_token %}
+    <p class="text-muted">
+        El token JWT de prueba se genera solo para la petición actual y no contiene secretos.
+        No se muestra el secret de firma.
+    </p>
+    <pre class="bg-light border rounded p-3 mb-0">curl -X POST "{{ onlyoffice.callback_base_url }}/documentacion/integraciones/onlyoffice/ping" ^
+  -H "Authorization: Bearer {{ ping_token }}" ^
+  -H "Content-Type: application/json" ^
+  -d "{}"</pre>
+    {% else %}
+    <div class="text-muted">La integración está deshabilitada; habilita ONLYOFFICE_ENABLED=true para generar un JWT de ping.</div>
+    {% endif %}
+</div>
+{% endblock %}
