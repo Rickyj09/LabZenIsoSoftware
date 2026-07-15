@@ -55,6 +55,13 @@ from app.services.onlyoffice_document_view_service import (
     OnlyOfficeDocumentViewService,
     is_docx_version,
 )
+from app.services.onlyoffice_document_edit_service import (
+    OnlyOfficeDocumentEditService,
+    OnlyOfficeEditConflictError,
+    OnlyOfficeEditError,
+    OnlyOfficeEditSessionService,
+    get_active_edit_info,
+)
 
 bp = Blueprint("documentacion", __name__, url_prefix="/documentacion")
 
@@ -390,6 +397,7 @@ def detalle(item_id):
     version_preparacion = get_preparation_version(item)
     version_rechazada = get_latest_rejected_version(item)
     version_mostrada = version_vigente or version_preparacion or (versiones[0] if versiones else None)
+    active_edit_info = get_active_edit_info(version_preparacion, current_user) if version_preparacion else None
 
     preview_url = None
     preview_tipo = None
@@ -424,7 +432,9 @@ def detalle(item_id):
         preview_url=preview_url,
         preview_tipo=preview_tipo,
         onlyoffice_enabled=bool(current_app.config.get("ONLYOFFICE_ENABLED")),
+        onlyoffice_edit_enabled=bool(current_app.config.get("ONLYOFFICE_EDIT_ENABLED")),
         is_docx_version=is_docx_version,
+        active_edit_info=active_edit_info,
     )
 
 
@@ -463,6 +473,133 @@ def ver_onlyoffice(item_id, version_id):
         "object-src 'none'; base-uri 'self'"
     )
     return response
+
+
+@bp.route("/<int:item_id>/versiones/<int:version_id>/onlyoffice/editar")
+@login_required
+@require_permission("documentos.editar")
+def editar_onlyoffice(item_id, version_id):
+    try:
+        context = OnlyOfficeDocumentEditService().build_context(
+            documento_id=item_id,
+            version_id=version_id,
+            user=current_user,
+        )
+    except LookupError:
+        abort(404)
+    except FileNotFoundError:
+        abort(404)
+    except OnlyOfficeEditConflictError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("documentacion.detalle", item_id=item_id))
+    except OnlyOfficeEditError as exc:
+        abort(exc.status_code, description=str(exc))
+    except OnlyOfficeDocumentViewError as exc:
+        abort(exc.status_code, description=str(exc))
+
+    response = current_app.make_response(render_template(
+        "documentacion/onlyoffice_editor.html",
+        item=context.documento,
+        version=context.version,
+        edicion=context.edicion,
+        editor_config=context.editor_config,
+        public_api_url=context.public_api_url,
+        heartbeat_seconds=context.heartbeat_seconds,
+        force_save_debounce_seconds=context.force_save_debounce_seconds,
+    ))
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        f"script-src 'self' 'unsafe-inline' {context.csp_origin}; "
+        f"frame-src 'self' {context.csp_origin}; "
+        f"connect-src 'self' {context.csp_origin}; "
+        f"img-src 'self' data: {context.csp_origin}; "
+        f"style-src 'self' 'unsafe-inline' {context.csp_origin}; "
+        f"font-src 'self' data: {context.csp_origin}; "
+        "object-src 'none'; base-uri 'self'"
+    )
+    return response
+
+
+@bp.route("/ediciones/<public_id>/heartbeat", methods=["POST"])
+@login_required
+def heartbeat_edicion(public_id):
+    try:
+        edicion = OnlyOfficeEditSessionService().heartbeat(public_id=public_id, user=current_user)
+    except LookupError:
+        abort(404)
+    except OnlyOfficeEditError as exc:
+        return {"ok": False, "message": str(exc)}, exc.status_code
+    return {
+        "ok": True,
+        "estado": edicion.estado,
+        "fecha_expiracion": edicion.fecha_expiracion.isoformat(),
+    }
+
+
+@bp.route("/ediciones/<public_id>/forcesave", methods=["POST"])
+@login_required
+def forcesave_edicion(public_id):
+    try:
+        result = OnlyOfficeEditSessionService().force_save(public_id=public_id, user=current_user)
+    except LookupError:
+        abort(404)
+    except OnlyOfficeEditError as exc:
+        return {"ok": False, "message": str(exc)}, exc.status_code
+    return {"ok": True, "result": result}
+
+
+@bp.route("/ediciones/<public_id>/estado", methods=["GET"])
+@login_required
+def estado_edicion(public_id):
+    try:
+        edicion = OnlyOfficeEditSessionService().get_owned_active_session(public_id=public_id, user=current_user)
+    except LookupError:
+        abort(404)
+    except OnlyOfficeEditError as exc:
+        return {"ok": False, "message": str(exc)}, exc.status_code
+    return {
+        "ok": True,
+        "estado": edicion.estado,
+        "ultimo_guardado_en": edicion.ultimo_guardado_en.isoformat() if edicion.ultimo_guardado_en else None,
+        "error_ultimo_guardado": edicion.error_ultimo_guardado,
+    }
+
+
+@bp.route("/ediciones/<public_id>/liberar", methods=["POST"])
+@login_required
+def liberar_edicion(public_id):
+    try:
+        edicion = OnlyOfficeEditSessionService().release(
+            public_id=public_id,
+            user=current_user,
+            reason=request.form.get("motivo") or "LiberaciÃ³n voluntaria desde editor.",
+            administrative=False,
+        )
+    except LookupError:
+        abort(404)
+    flash("SesiÃ³n de ediciÃ³n liberada.", "success")
+    return redirect(url_for("documentacion.detalle", item_id=edicion.documento_id))
+
+
+@bp.route("/ediciones/<public_id>/liberar-admin", methods=["POST"])
+@login_required
+@require_permission("documentos.ver_historial")
+def liberar_edicion_admin(public_id):
+    motivo = (request.form.get("motivo") or "").strip()
+    if not motivo:
+        flash("El motivo de liberaciÃ³n administrativa es obligatorio.", "warning")
+        return redirect(request.referrer or url_for("documentacion.index"))
+    try:
+        edicion = OnlyOfficeEditSessionService().release(
+            public_id=public_id,
+            user=current_user,
+            reason=motivo,
+            administrative=True,
+        )
+    except LookupError:
+        abort(404)
+    flash("Bloqueo de ediciÃ³n liberado administrativamente.", "success")
+    return redirect(url_for("documentacion.detalle", item_id=edicion.documento_id))
 
 
 @bp.route("/version/<int:version_id>/descargar")

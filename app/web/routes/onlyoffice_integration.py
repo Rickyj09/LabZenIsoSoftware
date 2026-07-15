@@ -12,8 +12,13 @@ from app.services.onlyoffice_health_service import OnlyOfficeHealthService
 from app.services.onlyoffice_jwt_service import (
     OnlyOfficeTokenError,
     generate_onlyoffice_ping_token,
+    validate_onlyoffice_callback_token,
     validate_onlyoffice_document_token,
     validate_onlyoffice_ping_token,
+)
+from app.services.onlyoffice_document_edit_service import (
+    OnlyOfficeCallbackService,
+    OnlyOfficeEditCallbackError,
 )
 
 
@@ -143,3 +148,36 @@ def document_file(version_id):
     if version.archivo_size:
         response.headers["Content-Length"] = str(version.archivo_size)
     return response
+
+
+@bp.route("/ediciones/<public_id>/callback", methods=["POST"])
+def edit_callback(public_id):
+    token = request.args.get("token", "").strip()
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        token = auth_header.removeprefix("Bearer ").strip()
+
+    try:
+        token_payload = validate_onlyoffice_callback_token(token)
+    except OnlyOfficeTokenError:
+        return jsonify({"error": 1}), 401
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        OnlyOfficeCallbackService().process(
+            public_id=public_id,
+            payload=payload,
+            token_payload=token_payload,
+        )
+    except OnlyOfficeEditCallbackError:
+        current_app.logger.warning(
+            "Callback ONLYOFFICE rechazado para sesiÃ³n %s con status %s",
+            public_id,
+            payload.get("status"),
+        )
+        return jsonify({"error": 1}), 400
+    except Exception:
+        current_app.logger.exception("Error procesando callback ONLYOFFICE de ediciÃ³n")
+        return jsonify({"error": 1}), 500
+
+    return jsonify({"error": 0})

@@ -12,7 +12,13 @@ from app.models.laboratorio import (
     CadenaCustodia,
 )
 from app.models.equipos import Equipo, EquipoCalibracion, EquipoMantenimiento, EquipoDocumento
-from app.models.documentos import Documento, DocumentoVersion, DocumentoAprobacion
+from app.models.documentos import (
+    Documento,
+    DocumentoVersion,
+    DocumentoAprobacion,
+    DocumentoEdicion,
+    DocumentoEdicionEvento,
+)
 from app.models.calidad import NoConformidad, AccionCorrectiva, Riesgo, PersonalCompetencia
 from app.models.auditoria import Auditoria, AuditoriaHallazgo, AuditoriaLog
 from app.models.organigrama import Cargo, Personal

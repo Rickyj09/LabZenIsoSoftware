@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 import subprocess
+import zipfile
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
@@ -11,24 +12,34 @@ import jwt
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
-from app import create_app
+from app import create_app, redact_sensitive_request_tokens
 from app.extensions import db
 from app.models.base import BaseModel
-from app.models.documentos import Documento, DocumentoVersion
+from app.models.documentos import Documento, DocumentoEdicion, DocumentoEdicionEvento, DocumentoVersion
 from app.models.empresa import Empresa
 from app.models.seguridad import Permiso, Rol, RolPermiso, Usuario, UsuarioRol
 from app.services.onlyoffice_health_service import OnlyOfficeHealthService
 from app.services.onlyoffice_jwt_service import (
+    generate_onlyoffice_callback_token,
     generate_onlyoffice_document_token,
     generate_onlyoffice_ping_token,
 )
+from app.services.onlyoffice_document_edit_service import (
+    OnlyOfficeDocumentEditService,
+    OnlyOfficeEditConflictError,
+    OnlyOfficeEditSessionService,
+)
 from app.services.storage_service import apply_stored_file_metadata, store_document_file
+from app.services.storage_service import file_digest_and_size, resolve_document_path
 from werkzeug.datastructures import FileStorage
 
 
 class FakeHttpResponse:
-    def __init__(self, status_code=200):
+    def __init__(self, status_code=200, body=b"", url="http://localhost:8082/result.docx"):
         self.status_code = status_code
+        self.body = body
+        self.url = url
+        self.offset = 0
 
     def __enter__(self):
         return self
@@ -38,6 +49,16 @@ class FakeHttpResponse:
 
     def getcode(self):
         return self.status_code
+
+    def geturl(self):
+        return self.url
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            size = len(self.body) - self.offset
+        chunk = self.body[self.offset:self.offset + size]
+        self.offset += len(chunk)
+        return chunk
 
 
 class ElementByIdParser(HTMLParser):
@@ -76,6 +97,12 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
             "ONLYOFFICE_HEALTHCHECK_PATH": "/healthcheck",
             "ONLYOFFICE_PING_TOKEN_TTL_SECONDS": 120,
             "ONLYOFFICE_DOCUMENT_TOKEN_TTL_SECONDS": 300,
+            "ONLYOFFICE_EDIT_ENABLED": True,
+            "ONLYOFFICE_EDIT_LOCK_TTL_SECONDS": 300,
+            "ONLYOFFICE_EDIT_HEARTBEAT_SECONDS": 30,
+            "ONLYOFFICE_FORCE_SAVE_DEBOUNCE_SECONDS": 45,
+            "ONLYOFFICE_CALLBACK_TOKEN_TTL_SECONDS": 3600,
+            "ONLYOFFICE_CALLBACK_DOWNLOAD_MAX_BYTES": 25 * 1024 * 1024,
         })
         self.context = self.app.app_context()
         self.context.push()
@@ -123,6 +150,16 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
                 password_hash="x",
                 activo=True,
             ),
+            Usuario(
+                id=204,
+                empresa_id=101,
+                nombre="Calidad",
+                apellido="Alterna",
+                email="quality-alt@onlyoffice",
+                username="quality-alt-onlyoffice",
+                password_hash="x",
+                activo=True,
+            ),
             Empresa(id=102, nombre="Empresa dos"),
             Usuario(
                 id=203,
@@ -136,6 +173,13 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
             ),
         ])
         view_permission = Permiso(id=1001, codigo="documentos.ver", nombre="Ver documentos", modulo="documentos")
+        edit_permission = Permiso(id=1003, codigo="documentos.editar", nombre="Editar documentos", modulo="documentos")
+        review_permission = Permiso(
+            id=1004,
+            codigo="documentos.enviar_revision",
+            nombre="Enviar a revisiÃ³n",
+            modulo="documentos",
+        )
         history_permission = Permiso(
             id=1002,
             codigo="documentos.ver_historial",
@@ -144,14 +188,24 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         )
         quality_role = Rol(id=2001, nombre="CALIDAD", es_sistema=True)
         consultation_role = Rol(id=2002, nombre="CONSULTA", es_sistema=True)
-        db.session.add_all([view_permission, history_permission, quality_role, consultation_role])
+        db.session.add_all([
+            view_permission,
+            history_permission,
+            edit_permission,
+            review_permission,
+            quality_role,
+            consultation_role,
+        ])
         db.session.flush()
         db.session.add_all([
             RolPermiso(id=3001, rol_id=quality_role.id, permiso_id=view_permission.id),
             RolPermiso(id=3002, rol_id=quality_role.id, permiso_id=history_permission.id),
+            RolPermiso(id=3003, rol_id=quality_role.id, permiso_id=edit_permission.id),
+            RolPermiso(id=3004, rol_id=quality_role.id, permiso_id=review_permission.id),
             UsuarioRol(id=4001, usuario_id=201, rol_id=quality_role.id),
             UsuarioRol(id=4002, usuario_id=202, rol_id=consultation_role.id),
             UsuarioRol(id=4003, usuario_id=203, rol_id=quality_role.id),
+            UsuarioRol(id=4004, usuario_id=204, rol_id=quality_role.id),
         ])
 
     def login(self, user_id):
@@ -170,6 +224,27 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         self.assertIn(element_id, elements_by_id)
         self.assertEqual(len(elements_by_id[element_id]), 1)
         return elements_by_id[element_id][0]
+
+    def minimal_docx(self, text="LabZenISO"):
+        stream = BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr(
+                "[Content_Types].xml",
+                """<?xml version="1.0" encoding="UTF-8"?>
+                <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+                  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+                  <Default Extension="xml" ContentType="application/xml"/>
+                  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+                </Types>""",
+            )
+            archive.writestr(
+                "word/document.xml",
+                f"""<?xml version="1.0" encoding="UTF-8"?>
+                <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+                  <w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body>
+                </w:document>""",
+            )
+        return stream.getvalue()
 
     def add_document_with_file(
         self,
@@ -744,6 +819,408 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("http://localhost:8082", response.headers["Content-Security-Policy"])
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_edit_button_appears_for_editable_docx_only(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, _version = self.add_document_with_file(content=self.minimal_docx())
+
+        response = self.login(201).get(f"/documentacion/{document.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Abrir y editar", response.get_data(as_text=True))
+
+    def test_sensitive_request_tokens_are_redacted_from_http_logs(self):
+        request_line = (
+            'POST /documentacion/integraciones/onlyoffice/ediciones/abc/callback?'
+            'token=eyJhbGciOiJIUzI1NiJ9.payload.signature&x=1 HTTP/1.1'
+        )
+
+        redacted = redact_sensitive_request_tokens(request_line)
+
+        self.assertIn("token=<redacted>", redacted)
+        self.assertNotIn("eyJhbGciOiJIUzI1NiJ9.payload.signature", redacted)
+        self.assertIn("&x=1 HTTP/1.1", redacted)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_authorized_user_opens_edit_session_and_config_is_controlled(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx())
+
+        response = self.login(201).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+        body = response.get_data(as_text=True)
+        edicion = DocumentoEdicion.query.filter_by(documento_version_id=version.id).one()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(edicion.estado, "ACTIVA")
+        self.assertEqual(edicion.hash_inicial, version.archivo_sha256)
+        self.assertIn('"mode": "edit"', body)
+        self.assertIn('"edit": true', body)
+        self.assertIn('"download": false', body)
+        self.assertIn('"print": false', body)
+        self.assertIn("callbackUrl", body)
+        self.assertIn(edicion.editor_key, body)
+        self.assertNotIn("unit-test-onlyoffice-secret", body)
+        self.assertNotIn(version.archivo_storage_path, body)
+        self.assertIn("onlyoffice-editor-frame", body)
+        self.assertIn(".onlyoffice-editor-frame > iframe", body)
+        self.assertIn("height: 78vh", body)
+        self.assertIn('new window.DocsAPI.DocEditor("onlyoffice-editor", onlyOfficeConfig)', body)
+        self.assertIn("Math.ceil((FORCE_SAVE_DEBOUNCE_SECONDS + 30) / 1.5)", body)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_edit_reuses_same_user_session_and_blocks_second_user(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx())
+
+        first = self.login(201).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+        same_user_session = OnlyOfficeDocumentEditService().acquire_lock(
+            documento=document,
+            version=version,
+            user=db.session.get(Usuario, 201),
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(same_user_session.usuario_id, 201)
+        self.assertEqual(DocumentoEdicion.query.filter_by(documento_version_id=version.id, estado="ACTIVA").count(), 1)
+        with self.assertRaises(OnlyOfficeEditConflictError):
+            OnlyOfficeDocumentEditService().acquire_lock(
+                documento=document,
+                version=version,
+                user=db.session.get(Usuario, 204),
+            )
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_user_without_edit_permission_gets_403(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx())
+
+        response = self.login(202).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+
+        self.assertEqual(response.status_code, 403)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_non_editable_states_are_rejected_for_editing(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        for offset, state in enumerate(["EN_REVISION", "APROBADO", "RECHAZADO", "SUSTITUIDO", "OBSOLETO"], start=1):
+            document, version = self.add_document_with_file(
+                document_id=600 + offset,
+                version_id=1600 + offset,
+                content=self.minimal_docx(state),
+            )
+            version.estado = state
+            db.session.commit()
+
+            response = self.login(201).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+            self.assertEqual(response.status_code, 302 if state in {"EN_REVISION", "APROBADO", "RECHAZADO", "SUSTITUIDO", "OBSOLETO"} else 409)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_heartbeat_renews_owned_session_only(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx())
+        self.login(201).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+        edicion = DocumentoEdicion.query.filter_by(documento_version_id=version.id).one()
+        old_expiration = edicion.fecha_expiracion
+
+        response = self.login(201).post(f"/documentacion/ediciones/{edicion.public_id}/heartbeat")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(db.session.get(DocumentoEdicion, edicion.id).fecha_expiracion, old_expiration)
+        with self.assertRaises(LookupError):
+            OnlyOfficeEditSessionService().get_owned_active_session(
+                public_id=edicion.public_id,
+                user=db.session.get(Usuario, 203),
+            )
+
+    @patch("app.services.onlyoffice_document_edit_service.urlopen")
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_forcesave_command_is_backend_signed(self, health_mock, command_mock):
+        health_mock.return_value = FakeHttpResponse(200)
+        command_mock.return_value = FakeHttpResponse(200, body=b'{"error":0}')
+        document, version = self.add_document_with_file(content=self.minimal_docx())
+        self.login(201).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+        edicion = DocumentoEdicion.query.filter_by(documento_version_id=version.id).one()
+
+        response = self.login(201).post(f"/documentacion/ediciones/{edicion.public_id}/forcesave")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(command_mock.called)
+        self.assertEqual(DocumentoEdicionEvento.query.filter_by(tipo="GUARDADO_FORZADO_SOLICITADO").count(), 1)
+
+    def test_callback_requires_valid_callback_jwt(self):
+        document, version = self.add_document_with_file(content=self.minimal_docx())
+        edicion = DocumentoEdicion(
+            empresa_id=document.empresa_id,
+            public_id="public-callback",
+            documento_id=document.id,
+            documento_version_id=version.id,
+            usuario_id=201,
+            editor_key="editor-callback",
+            estado="ACTIVA",
+            fecha_inicio=datetime.now(timezone.utc),
+            ultima_actividad=datetime.now(timezone.utc),
+            fecha_expiracion=datetime.now(timezone.utc) + timedelta(minutes=5),
+            hash_inicial=version.archivo_sha256,
+            hash_ultimo_guardado=version.archivo_sha256,
+        )
+        db.session.add(edicion)
+        db.session.commit()
+
+        missing = self.app.test_client().post(f"/documentacion/integraciones/onlyoffice/ediciones/{edicion.public_id}/callback", json={"status": 1})
+        invalid = self.app.test_client().post(f"/documentacion/integraciones/onlyoffice/ediciones/{edicion.public_id}/callback?token=bad", json={"status": 1})
+
+        self.assertEqual(missing.status_code, 401)
+        self.assertEqual(invalid.status_code, 401)
+
+    def test_callback_status_4_releases_without_modifying_file(self):
+        document, version = self.add_document_with_file(content=self.minimal_docx())
+        edicion = DocumentoEdicion(
+            empresa_id=document.empresa_id,
+            public_id="public-close",
+            documento_id=document.id,
+            documento_version_id=version.id,
+            usuario_id=201,
+            editor_key="editor-close",
+            estado="ACTIVA",
+            fecha_inicio=datetime.now(timezone.utc),
+            ultima_actividad=datetime.now(timezone.utc),
+            fecha_expiracion=datetime.now(timezone.utc) + timedelta(minutes=5),
+            hash_inicial=version.archivo_sha256,
+            hash_ultimo_guardado=version.archivo_sha256,
+        )
+        db.session.add(edicion)
+        db.session.commit()
+        token = generate_onlyoffice_callback_token(public_id=edicion.public_id, editor_key=edicion.editor_key)
+
+        response = self.app.test_client().post(
+            f"/documentacion/integraciones/onlyoffice/ediciones/{edicion.public_id}/callback?token={token}",
+            json={"status": 4, "key": edicion.editor_key},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["error"], 0)
+        self.assertEqual(db.session.get(DocumentoEdicion, edicion.id).estado, "LIBERADA")
+        self.assertEqual(db.session.get(DocumentoVersion, version.id).archivo_sha256, version.archivo_sha256)
+
+    def test_save_and_close_release_marks_session_as_liberated(self):
+        document, version = self.add_document_with_file(content=self.minimal_docx())
+        edicion = DocumentoEdicion(
+            empresa_id=document.empresa_id,
+            public_id="public-save-close-release",
+            documento_id=document.id,
+            documento_version_id=version.id,
+            usuario_id=201,
+            editor_key="editor-save-close-release",
+            estado="ACTIVA",
+            fecha_inicio=datetime.now(timezone.utc),
+            ultima_actividad=datetime.now(timezone.utc),
+            fecha_expiracion=datetime.now(timezone.utc) + timedelta(minutes=5),
+            hash_inicial=version.archivo_sha256,
+            hash_ultimo_guardado=version.archivo_sha256,
+        )
+        db.session.add(edicion)
+        db.session.commit()
+
+        self.login(201).post(
+            f"/documentacion/ediciones/{edicion.public_id}/liberar",
+            data={"motivo": "Guardar y cerrar desde editor."},
+        )
+
+        saved = db.session.get(DocumentoEdicion, edicion.id)
+        self.assertEqual(saved.estado, "LIBERADA")
+        self.assertIsNotNone(saved.fecha_liberacion)
+
+    def test_late_status_2_after_save_and_close_is_accepted(self):
+        document, version = self.add_document_with_file(content=self.minimal_docx())
+        edicion = DocumentoEdicion(
+            empresa_id=document.empresa_id,
+            public_id="public-late-final",
+            documento_id=document.id,
+            documento_version_id=version.id,
+            usuario_id=201,
+            editor_key="editor-late-final",
+            estado="LIBERADA",
+            fecha_inicio=datetime.now(timezone.utc),
+            ultima_actividad=datetime.now(timezone.utc),
+            fecha_expiracion=datetime.now(timezone.utc) + timedelta(minutes=5),
+            fecha_liberacion=datetime.now(timezone.utc),
+            hash_inicial=version.archivo_sha256,
+            hash_ultimo_guardado=version.archivo_sha256,
+        )
+        db.session.add(edicion)
+        db.session.commit()
+        token = generate_onlyoffice_callback_token(public_id=edicion.public_id, editor_key=edicion.editor_key)
+
+        response = self.app.test_client().post(
+            f"/documentacion/integraciones/onlyoffice/ediciones/{edicion.public_id}/callback?token={token}",
+            json={"status": 2, "key": edicion.editor_key},
+        )
+
+        saved = db.session.get(DocumentoEdicion, edicion.id)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["error"], 0)
+        self.assertEqual(saved.estado, "LIBERADA")
+        self.assertEqual(saved.ultimo_callback_status, 2)
+        self.assertEqual(
+            DocumentoEdicionEvento.query.filter_by(
+                edicion_id=edicion.id,
+                tipo="GUARDADO_FINAL_CONFIRMADO",
+            ).count(),
+            1,
+        )
+
+    @patch("app.services.onlyoffice_document_edit_service.urlopen")
+    def test_callback_status_6_saves_and_keeps_session_active_without_duplication(self, urlopen_mock):
+        original = self.minimal_docx("original")
+        updated = self.minimal_docx("updated")
+        document, version = self.add_document_with_file(content=original)
+        before_documents = Documento.query.count()
+        before_versions = DocumentoVersion.query.count()
+        old_hash = version.archivo_sha256
+        edicion = DocumentoEdicion(
+            empresa_id=document.empresa_id,
+            public_id="public-force",
+            documento_id=document.id,
+            documento_version_id=version.id,
+            usuario_id=201,
+            editor_key="editor-force",
+            estado="ACTIVA",
+            fecha_inicio=datetime.now(timezone.utc),
+            ultima_actividad=datetime.now(timezone.utc),
+            fecha_expiracion=datetime.now(timezone.utc) + timedelta(minutes=5),
+            hash_inicial=version.archivo_sha256,
+            hash_ultimo_guardado=version.archivo_sha256,
+        )
+        db.session.add(edicion)
+        db.session.commit()
+        token = generate_onlyoffice_callback_token(public_id=edicion.public_id, editor_key=edicion.editor_key)
+        urlopen_mock.return_value = FakeHttpResponse(200, body=updated, url="http://localhost:8082/cache/result.docx")
+
+        response = self.app.test_client().post(
+            f"/documentacion/integraciones/onlyoffice/ediciones/{edicion.public_id}/callback?token={token}",
+            json={"status": 6, "key": edicion.editor_key, "url": "http://localhost:8082/cache/result.docx"},
+        )
+
+        saved_version = db.session.get(DocumentoVersion, version.id)
+        saved_edit = db.session.get(DocumentoEdicion, edicion.id)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(saved_edit.estado, "ACTIVA")
+        self.assertNotEqual(saved_version.archivo_sha256, old_hash)
+        self.assertEqual(saved_version.archivo_size, len(updated))
+        self.assertEqual(Documento.query.count(), before_documents)
+        self.assertEqual(DocumentoVersion.query.count(), before_versions)
+        self.assertEqual(saved_version.version, "1")
+        self.assertEqual(saved_version.estado, "EN_ELABORACION")
+
+    @patch("app.services.onlyoffice_document_edit_service.urlopen")
+    def test_callback_repeated_is_idempotent(self, urlopen_mock):
+        document, version = self.add_document_with_file(content=self.minimal_docx("original"))
+        edicion = DocumentoEdicion(
+            empresa_id=document.empresa_id,
+            public_id="public-repeat",
+            documento_id=document.id,
+            documento_version_id=version.id,
+            usuario_id=201,
+            editor_key="editor-repeat",
+            estado="ACTIVA",
+            fecha_inicio=datetime.now(timezone.utc),
+            ultima_actividad=datetime.now(timezone.utc),
+            fecha_expiracion=datetime.now(timezone.utc) + timedelta(minutes=5),
+            hash_inicial=version.archivo_sha256,
+            hash_ultimo_guardado=version.archivo_sha256,
+        )
+        db.session.add(edicion)
+        db.session.commit()
+        token = generate_onlyoffice_callback_token(public_id=edicion.public_id, editor_key=edicion.editor_key)
+        urlopen_mock.return_value = FakeHttpResponse(200, body=self.minimal_docx("updated"), url="http://localhost:8082/cache/result.docx")
+        url = f"/documentacion/integraciones/onlyoffice/ediciones/{edicion.public_id}/callback?token={token}"
+        payload = {"status": 6, "key": edicion.editor_key, "url": "http://localhost:8082/cache/result.docx"}
+
+        first = self.app.test_client().post(url, json=payload)
+        second = self.app.test_client().post(url, json=payload)
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(urlopen_mock.call_count, 1)
+        self.assertEqual(DocumentoEdicionEvento.query.filter_by(tipo="GUARDADO_FORZADO_COMPLETADO").count(), 1)
+
+    @patch("app.services.onlyoffice_document_edit_service.urlopen")
+    def test_callback_rejects_ssrf_and_invalid_docx_without_replacing_file(self, urlopen_mock):
+        document, version = self.add_document_with_file(content=self.minimal_docx("original"))
+        old_hash = version.archivo_sha256
+        edicion = DocumentoEdicion(
+            empresa_id=document.empresa_id,
+            public_id="public-ssrf",
+            documento_id=document.id,
+            documento_version_id=version.id,
+            usuario_id=201,
+            editor_key="editor-ssrf",
+            estado="ACTIVA",
+            fecha_inicio=datetime.now(timezone.utc),
+            ultima_actividad=datetime.now(timezone.utc),
+            fecha_expiracion=datetime.now(timezone.utc) + timedelta(minutes=5),
+            hash_inicial=version.archivo_sha256,
+            hash_ultimo_guardado=version.archivo_sha256,
+        )
+        db.session.add(edicion)
+        db.session.commit()
+        token = generate_onlyoffice_callback_token(public_id=edicion.public_id, editor_key=edicion.editor_key)
+
+        response = self.app.test_client().post(
+            f"/documentacion/integraciones/onlyoffice/ediciones/{edicion.public_id}/callback?token={token}",
+            json={"status": 6, "key": edicion.editor_key, "url": "file:///tmp/result.docx"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(db.session.get(DocumentoVersion, version.id).archivo_sha256, old_hash)
+        self.assertFalse(urlopen_mock.called)
+
+    @patch("app.services.onlyoffice_document_edit_service.urlopen")
+    def test_callback_restores_file_if_database_commit_fails(self, urlopen_mock):
+        original = self.minimal_docx("original")
+        updated = self.minimal_docx("updated-after-db-failure")
+        document, version = self.add_document_with_file(content=original)
+        old_hash = version.archivo_sha256
+        physical_path = resolve_document_path(version.archivo_storage_path)
+        edicion = DocumentoEdicion(
+            empresa_id=document.empresa_id,
+            public_id="public-db-fail",
+            documento_id=document.id,
+            documento_version_id=version.id,
+            usuario_id=201,
+            editor_key="editor-db-fail",
+            estado="ACTIVA",
+            fecha_inicio=datetime.now(timezone.utc),
+            ultima_actividad=datetime.now(timezone.utc),
+            fecha_expiracion=datetime.now(timezone.utc) + timedelta(minutes=5),
+            hash_inicial=version.archivo_sha256,
+            hash_ultimo_guardado=version.archivo_sha256,
+        )
+        db.session.add(edicion)
+        db.session.commit()
+        token = generate_onlyoffice_callback_token(public_id=edicion.public_id, editor_key=edicion.editor_key)
+        urlopen_mock.return_value = FakeHttpResponse(200, body=updated, url="http://localhost:8082/cache/result.docx")
+
+        with patch("app.services.onlyoffice_document_edit_service.db.session.commit", side_effect=RuntimeError("db down")):
+            response = self.app.test_client().post(
+                f"/documentacion/integraciones/onlyoffice/ediciones/{edicion.public_id}/callback?token={token}",
+                json={"status": 6, "key": edicion.editor_key, "url": "http://localhost:8082/cache/result.docx"},
+            )
+
+        restored_hash, _size = file_digest_and_size(physical_path)
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(restored_hash, old_hash)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_workflow_send_to_review_is_blocked_while_editing(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx())
+        self.login(201).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+
+        response = self.login(201).post(f"/documentacion/{document.id}/enviar-revision", data={"comentario": ""})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(db.session.get(DocumentoVersion, version.id).estado, "EN_ELABORACION")
 
 
 if __name__ == "__main__":

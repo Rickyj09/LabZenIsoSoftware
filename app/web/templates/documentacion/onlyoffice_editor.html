@@ -1,0 +1,289 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Editar documento en ONLYOFFICE{% endblock %}
+
+{% block content %}
+<style>
+    .onlyoffice-editor-frame {
+        width: 100%;
+        height: 78vh;
+        min-height: 640px;
+    }
+
+    .onlyoffice-editor-frame > iframe,
+    .onlyoffice-editor-frame > #onlyoffice-editor {
+        width: 100% !important;
+        height: 100% !important;
+        min-height: 640px;
+        border: 0;
+        display: block;
+    }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+    <div>
+        <h2 class="mb-1">{{ item.titulo }}</h2>
+        <div class="text-muted">{{ item.codigo }} Â· VersiÃ³n {{ version.version }}</div>
+    </div>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+        <span class="badge bg-warning text-dark">Modo ediciÃ³n controlada</span>
+        <span id="onlyoffice-save-state" class="badge bg-secondary">Sin cambios</span>
+        <button id="onlyoffice-save-now" type="button" class="btn btn-outline-primary">
+            Guardar ahora
+        </button>
+        <button id="onlyoffice-save-close" type="button" class="btn btn-primary">
+            Guardar y cerrar
+        </button>
+        <a href="{{ url_for('documentacion.detalle', item_id=item.id) }}" class="btn btn-outline-secondary">
+            Volver al detalle
+        </a>
+    </div>
+</div>
+
+<div id="onlyoffice-session-warning" class="alert alert-warning d-none" role="alert"></div>
+
+<div class="alert alert-info">
+    EdiciÃ³n controlada con bloqueo exclusivo. La descarga e impresiÃ³n permanecen deshabilitadas.
+</div>
+
+<div class="page-card p-0 overflow-hidden">
+    <div id="onlyoffice-loading" class="alert alert-info m-3" role="status" aria-live="polite">
+        Cargando ONLYOFFICEâ€¦
+    </div>
+    <div id="onlyoffice-ready" class="alert alert-success m-3" role="status" aria-live="polite" hidden>
+        Documento disponible para ediciÃ³n controlada.
+    </div>
+    <div id="onlyoffice-error" class="alert alert-danger m-3" role="alert" aria-live="assertive" hidden>
+        No se pudo cargar ONLYOFFICE. Verifica que Document Server estÃ© disponible.
+    </div>
+    <div class="onlyoffice-editor-frame">
+        <div id="onlyoffice-editor"></div>
+    </div>
+</div>
+
+<form id="onlyoffice-release-form" method="post" action="{{ url_for('documentacion.liberar_edicion', public_id=edicion.public_id) }}" class="d-none">
+    <input type="hidden" name="motivo" value="Guardar y cerrar desde editor.">
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ public_api_url }}" onerror="window.labzenOnlyOfficeApiLoadFailed = true;"></script>
+<script>
+    const onlyOfficeConfig = {{ editor_config|tojson }};
+    const editSessionPublicId = {{ edicion.public_id|tojson }};
+    const heartbeatUrl = {{ url_for('documentacion.heartbeat_edicion', public_id=edicion.public_id)|tojson }};
+    const forceSaveUrl = {{ url_for('documentacion.forcesave_edicion', public_id=edicion.public_id)|tojson }};
+    const editStatusUrl = {{ url_for('documentacion.estado_edicion', public_id=edicion.public_id)|tojson }};
+    const detailUrl = {{ url_for('documentacion.detalle', item_id=item.id)|tojson }};
+    const HEARTBEAT_SECONDS = {{ heartbeat_seconds|int }};
+    const FORCE_SAVE_DEBOUNCE_SECONDS = {{ force_save_debounce_seconds|int }};
+    const VIEWER_STATE = Object.freeze({ LOADING: "LOADING", READY: "READY", ERROR: "ERROR" });
+    const ONLYOFFICE_LOAD_TIMEOUT_MS = 30000;
+
+    let onlyOfficeEditor = null;
+    let editorReady = false;
+    let loadTimeout = null;
+    let heartbeatTimer = null;
+    let forceSaveTimer = null;
+    let pendingChanges = false;
+    let forceSaveInProgress = false;
+    let lastSavedAt = null;
+
+    function byId(id) {
+        return document.getElementById(id);
+    }
+
+    function setVisible(id, visible) {
+        const element = byId(id);
+        if (!element) return;
+        element.hidden = !visible;
+        element.style.display = visible ? "" : "none";
+        element.classList.toggle("d-none", !visible);
+    }
+
+    function clearLoadTimeout() {
+        if (loadTimeout) {
+            window.clearTimeout(loadTimeout);
+            loadTimeout = null;
+        }
+    }
+
+    function setViewerState(state) {
+        if (state === VIEWER_STATE.READY) {
+            editorReady = true;
+            clearLoadTimeout();
+        }
+        setVisible("onlyoffice-loading", state === VIEWER_STATE.LOADING);
+        setVisible("onlyoffice-ready", state === VIEWER_STATE.READY);
+        setVisible("onlyoffice-error", state === VIEWER_STATE.ERROR);
+    }
+
+    function setSaveState(text, cssClass) {
+        const badge = byId("onlyoffice-save-state");
+        if (!badge) return;
+        badge.textContent = text;
+        badge.className = "badge " + cssClass;
+    }
+
+    function showSessionWarning(message) {
+        const warning = byId("onlyoffice-session-warning");
+        if (!warning) return;
+        warning.textContent = message;
+        warning.classList.remove("d-none");
+    }
+
+    async function postJson(url) {
+        const response = await fetch(url, {
+            method: "POST",
+            headers: { "Accept": "application/json" },
+            credentials: "same-origin"
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || body.ok === false) {
+            throw new Error(body.message || "OperaciÃ³n no disponible.");
+        }
+        return body;
+    }
+
+    async function refreshEditStatus() {
+        const response = await fetch(editStatusUrl, {
+            method: "GET",
+            headers: { "Accept": "application/json" },
+            credentials: "same-origin"
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || body.ok === false) {
+            throw new Error(body.message || "No se pudo consultar la sesiÃ³n.");
+        }
+        if (body.error_ultimo_guardado) {
+            setSaveState("Error al guardar", "bg-danger");
+            return body;
+        }
+        if (body.ultimo_guardado_en && body.ultimo_guardado_en !== lastSavedAt) {
+            lastSavedAt = body.ultimo_guardado_en;
+            pendingChanges = false;
+            setSaveState("Guardado " + new Date(lastSavedAt).toLocaleTimeString(), "bg-success");
+        }
+        return body;
+    }
+
+    async function sendHeartbeat() {
+        try {
+            await postJson(heartbeatUrl);
+            await refreshEditStatus();
+        } catch (error) {
+            showSessionWarning("No se pudo renovar la sesiÃ³n de ediciÃ³n. Guarda y cierra si el aviso persiste.");
+            setSaveState("Bloqueo perdido", "bg-warning text-dark");
+        }
+    }
+
+    async function requestForceSave() {
+        if (forceSaveInProgress) return;
+        forceSaveInProgress = true;
+        setSaveState("Guardandoâ€¦", "bg-info text-dark");
+        try {
+            await postJson(forceSaveUrl);
+            window.setTimeout(refreshEditStatus, 1500);
+        } catch (error) {
+            setSaveState("Error al guardar", "bg-danger");
+            showSessionWarning(error.message);
+        } finally {
+            forceSaveInProgress = false;
+        }
+    }
+
+    async function waitForSavedConfirmation(maxAttempts) {
+        const previousSavedAt = lastSavedAt;
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+            await new Promise(resolve => window.setTimeout(resolve, 1500));
+            const status = await refreshEditStatus();
+            if (status.ultimo_guardado_en && status.ultimo_guardado_en !== previousSavedAt) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function scheduleForceSave() {
+        if (forceSaveTimer) {
+            window.clearTimeout(forceSaveTimer);
+        }
+        forceSaveTimer = window.setTimeout(requestForceSave, FORCE_SAVE_DEBOUNCE_SECONDS * 1000);
+    }
+
+    function markReady() {
+        setViewerState(VIEWER_STATE.READY);
+        if (!heartbeatTimer) {
+            heartbeatTimer = window.setInterval(sendHeartbeat, HEARTBEAT_SECONDS * 1000);
+        }
+    }
+
+    window.addEventListener("load", function () {
+        setViewerState(VIEWER_STATE.LOADING);
+        if (window.labzenOnlyOfficeApiLoadFailed || !window.DocsAPI || !window.DocsAPI.DocEditor) {
+            setViewerState(VIEWER_STATE.ERROR);
+            return;
+        }
+
+        try {
+            onlyOfficeConfig.events = Object.assign({}, onlyOfficeConfig.events || {}, {
+                onAppReady: markReady,
+                onDocumentReady: markReady,
+                onDocumentStateChange: function (event) {
+                    pendingChanges = !!(event && event.data);
+                    if (pendingChanges) {
+                        setSaveState("Cambios pendientes", "bg-warning text-dark");
+                        scheduleForceSave();
+                    } else {
+                        setSaveState("Sin cambios", "bg-secondary");
+                    }
+                },
+                onError: function (event) {
+                    if (!editorReady) {
+                        setViewerState(VIEWER_STATE.ERROR);
+                    } else if (window.console && window.console.warn) {
+                        window.console.warn("ONLYOFFICE edit event", {
+                            code: event && (event.data || event.code || event.errorCode),
+                            description: event && (event.description || event.message || "")
+                        });
+                    }
+                }
+            });
+            loadTimeout = window.setTimeout(function () {
+                if (!editorReady) {
+                    setViewerState(VIEWER_STATE.ERROR);
+                }
+            }, ONLYOFFICE_LOAD_TIMEOUT_MS);
+            onlyOfficeEditor = new window.DocsAPI.DocEditor("onlyoffice-editor", onlyOfficeConfig);
+        } catch (error) {
+            setViewerState(VIEWER_STATE.ERROR);
+        }
+    });
+
+    byId("onlyoffice-save-now").addEventListener("click", requestForceSave);
+    byId("onlyoffice-save-close").addEventListener("click", async function () {
+        await requestForceSave();
+        const maxAttempts = Math.ceil((FORCE_SAVE_DEBOUNCE_SECONDS + 30) / 1.5);
+        const confirmed = await waitForSavedConfirmation(maxAttempts);
+        if (confirmed) {
+            byId("onlyoffice-release-form").submit();
+        } else {
+            setSaveState("Error al guardar", "bg-danger");
+            showSessionWarning("No se recibiÃ³ confirmaciÃ³n de guardado. No cierres el editor hasta resolverlo.");
+        }
+    });
+
+    window.addEventListener("beforeunload", function () {
+        clearLoadTimeout();
+        if (heartbeatTimer) {
+            window.clearInterval(heartbeatTimer);
+        }
+        if (forceSaveTimer) {
+            window.clearTimeout(forceSaveTimer);
+        }
+        if (onlyOfficeEditor && typeof onlyOfficeEditor.destroyEditor === "function") {
+            onlyOfficeEditor.destroyEditor();
+        }
+    });
+</script>
+{% endblock %}

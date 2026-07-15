@@ -2,7 +2,9 @@ import hashlib
 import mimetypes
 import os
 import re
+import shutil
 import unicodedata
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -29,6 +31,14 @@ class StoredDocumentFile:
     mime_type: str
     size: int
     sha256: str
+
+
+@dataclass(frozen=True)
+class AtomicDocumentReplacement:
+    destination_path: Path
+    backup_path: Path
+    sha256: str
+    size: int
 
 
 def validate_document_file(file_storage) -> None:
@@ -171,6 +181,85 @@ def apply_stored_file_metadata(version_doc, stored_file: StoredDocumentFile | No
     version_doc.archivo_mime = stored_file.mime_type
     version_doc.archivo_size = stored_file.size
     version_doc.archivo_sha256 = stored_file.sha256
+
+
+def validate_docx_file_path(path: Path) -> None:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = set(archive.namelist())
+            if "word/document.xml" not in names:
+                raise DocumentStorageError("El archivo DOCX no contiene word/document.xml.")
+            if "[Content_Types].xml" not in names:
+                raise DocumentStorageError("El archivo DOCX no contiene tipos de contenido OOXML.")
+    except zipfile.BadZipFile as exc:
+        raise DocumentStorageError("El archivo DOCX recibido no es un ZIP OOXML vÃ¡lido.") from exc
+
+
+def file_digest_and_size(path: Path) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as input_file:
+        while True:
+            chunk = input_file.read(1024 * 1024)
+            if not chunk:
+                break
+            size += len(chunk)
+            digest.update(chunk)
+    return digest.hexdigest(), size
+
+
+def prepare_document_file_replacement(version_doc, source_path: Path) -> AtomicDocumentReplacement:
+    if not version_doc.archivo_storage_path:
+        raise DocumentStorageError("La versiÃ³n no tiene ruta privada para reemplazo.")
+
+    validate_docx_file_path(source_path)
+    new_sha256, new_size = file_digest_and_size(source_path)
+    destination = resolve_document_path(version_doc.archivo_storage_path)
+    if not destination.is_file():
+        raise DocumentStorageError("La copia de trabajo actual no existe.")
+
+    backup = destination.with_name(f".backup-{uuid4().hex}-{destination.name}")
+    replacement = destination.with_name(f".replace-{uuid4().hex}-{destination.name}")
+    try:
+        shutil.copyfile(source_path, replacement)
+        os.replace(destination, backup)
+        try:
+            os.replace(replacement, destination)
+        except Exception:
+            if destination.exists():
+                destination.unlink(missing_ok=True)
+            os.replace(backup, destination)
+            raise
+    except Exception:
+        replacement.unlink(missing_ok=True)
+        backup.unlink(missing_ok=True)
+        raise
+
+    replacement.unlink(missing_ok=True)
+    return AtomicDocumentReplacement(
+        destination_path=destination,
+        backup_path=backup,
+        sha256=new_sha256,
+        size=new_size,
+    )
+
+
+def finalize_document_file_replacement(replacement: AtomicDocumentReplacement | None) -> None:
+    if replacement:
+        replacement.backup_path.unlink(missing_ok=True)
+
+
+def restore_document_file_replacement(replacement: AtomicDocumentReplacement | None) -> None:
+    if not replacement or not replacement.backup_path.exists():
+        return
+    replacement.destination_path.unlink(missing_ok=True)
+    os.replace(replacement.backup_path, replacement.destination_path)
+
+
+def replace_document_file_atomically(version_doc, source_path: Path) -> tuple[str, int]:
+    replacement = prepare_document_file_replacement(version_doc, source_path)
+    finalize_document_file_replacement(replacement)
+    return replacement.sha256, replacement.size
 
 
 def resolve_document_path(storage_path: str) -> Path:

@@ -36,6 +36,20 @@ ACCIONES_EVENTO_DOCUMENTO = (
     "SUSTITUIR_VERSION",
 )
 
+ESTADO_EDICION_ACTIVA = "ACTIVA"
+ESTADO_EDICION_LIBERADA = "LIBERADA"
+ESTADO_EDICION_EXPIRADA = "EXPIRADA"
+ESTADO_EDICION_ERROR = "ERROR"
+ESTADO_EDICION_CANCELADA = "CANCELADA"
+
+ESTADOS_EDICION_DOCUMENTO = (
+    ESTADO_EDICION_ACTIVA,
+    ESTADO_EDICION_LIBERADA,
+    ESTADO_EDICION_EXPIRADA,
+    ESTADO_EDICION_ERROR,
+    ESTADO_EDICION_CANCELADA,
+)
+
 ESTADO_DOCUMENTO_LABELS = {
     ESTADO_EN_ELABORACION: "EN ELABORACIÓN",
     ESTADO_EN_REVISION: "EN REVISIÓN",
@@ -211,3 +225,91 @@ class DocumentoAprobacion(TenantMixin, BaseModel):
         back_populates="eventos",
     )
     documento_version = db.relationship("DocumentoVersion", back_populates="aprobaciones")
+
+
+class DocumentoEdicion(TenantMixin, BaseModel):
+    __tablename__ = "documento_ediciones"
+    __table_args__ = (
+        db.CheckConstraint(
+            "estado IN ('ACTIVA', 'LIBERADA', 'EXPIRADA', 'ERROR', 'CANCELADA')",
+            name="ck_documento_ediciones_estado_valido",
+        ),
+        db.CheckConstraint(
+            "fecha_expiracion > fecha_inicio",
+            name="ck_documento_ediciones_expiracion_posterior_inicio",
+        ),
+        db.UniqueConstraint("public_id", name="uq_documento_ediciones_public_id"),
+        db.UniqueConstraint("editor_key", name="uq_documento_ediciones_editor_key"),
+        db.Index("ix_documento_ediciones_documento_id", "documento_id"),
+        db.Index("ix_documento_ediciones_documento_version_id", "documento_version_id"),
+        db.Index("ix_documento_ediciones_usuario_id", "usuario_id"),
+        db.Index("ix_documento_ediciones_estado", "estado"),
+        db.Index("ix_documento_ediciones_fecha_expiracion", "fecha_expiracion"),
+        db.Index(
+            "uq_documento_ediciones_version_activa",
+            "documento_version_id",
+            unique=True,
+            postgresql_where=db.text("estado = 'ACTIVA'"),
+            sqlite_where=db.text("estado = 'ACTIVA'"),
+        ),
+    )
+
+    public_id = db.Column(db.String(64), nullable=False)
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
+    documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
+    usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
+    editor_key = db.Column(db.String(128), nullable=False)
+    estado = db.Column(db.String(30), default=ESTADO_EDICION_ACTIVA, nullable=False)
+    fecha_inicio = db.Column(db.DateTime(timezone=True), nullable=False)
+    ultima_actividad = db.Column(db.DateTime(timezone=True), nullable=False)
+    fecha_expiracion = db.Column(db.DateTime(timezone=True), nullable=False)
+    fecha_liberacion = db.Column(db.DateTime(timezone=True))
+    liberado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    motivo_liberacion = db.Column(db.Text)
+    hash_inicial = db.Column(db.String(64), nullable=False)
+    hash_ultimo_guardado = db.Column(db.String(64))
+    ultimo_guardado_en = db.Column(db.DateTime(timezone=True))
+    ultimo_callback_en = db.Column(db.DateTime(timezone=True))
+    ultimo_callback_status = db.Column(db.Integer)
+    ultimo_callback_fingerprint = db.Column(db.String(128))
+    error_ultimo_guardado = db.Column(db.Text)
+
+    empresa = db.relationship("Empresa")
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    usuario = db.relationship("Usuario", foreign_keys=[usuario_id])
+    liberado_por = db.relationship("Usuario", foreign_keys=[liberado_por_id])
+    eventos = db.relationship(
+        "DocumentoEdicionEvento",
+        back_populates="edicion",
+        lazy=True,
+        cascade="all, delete-orphan",
+    )
+
+
+class DocumentoEdicionEvento(TenantMixin, BaseModel):
+    __tablename__ = "documento_edicion_eventos"
+    __table_args__ = (
+        db.UniqueConstraint("fingerprint", name="uq_documento_edicion_eventos_fingerprint"),
+        db.Index("ix_documento_edicion_eventos_edicion_id", "edicion_id"),
+        db.Index("ix_documento_edicion_eventos_tipo", "tipo"),
+        db.Index("ix_documento_edicion_eventos_fecha_evento", "fecha_evento"),
+    )
+
+    edicion_id = db.Column(db.BigInteger, db.ForeignKey("documento_ediciones.id"), nullable=False)
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
+    documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
+    usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    tipo = db.Column(db.String(50), nullable=False)
+    fecha_evento = db.Column(db.DateTime(timezone=True), nullable=False)
+    status_callback = db.Column(db.Integer)
+    fingerprint = db.Column(db.String(128))
+    detalle = db.Column(db.Text)
+    ip = db.Column(db.String(50))
+    user_agent = db.Column(db.Text)
+
+    empresa = db.relationship("Empresa")
+    edicion = db.relationship("DocumentoEdicion", back_populates="eventos")
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    usuario = db.relationship("Usuario", foreign_keys=[usuario_id])

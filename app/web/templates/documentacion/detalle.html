@@ -288,6 +288,29 @@
         <a href="{{ url_for('documentacion.ver_onlyoffice', item_id=item.id, version_id=version_preparacion.id) }}" class="btn btn-sm btn-outline-info">
             Ver en ONLYOFFICE
         </a>
+        {% if onlyoffice_edit_enabled and version_preparacion.estado == 'EN_ELABORACION' and can('documentos.editar') %}
+            {% if active_edit_info and active_edit_info.blocked_by_other_user %}
+                <span class="badge bg-warning text-dark ms-2">
+                    En ediciÃ³n por {{ active_edit_info.edicion.usuario.nombre }} {{ active_edit_info.edicion.usuario.apellido or '' }}
+                    desde {{ active_edit_info.edicion.fecha_inicio }}
+                </span>
+                {% if can('documentos.ver_historial') %}
+                <form method="post"
+                      action="{{ url_for('documentacion.liberar_edicion_admin', public_id=active_edit_info.edicion.public_id) }}"
+                      class="d-inline-flex gap-1 ms-2">
+                    <input type="text" name="motivo" class="form-control form-control-sm"
+                           placeholder="Motivo liberaciÃ³n" required>
+                    <button type="submit" class="btn btn-sm btn-outline-danger">
+                        Liberar bloqueo
+                    </button>
+                </form>
+                {% endif %}
+            {% else %}
+                <a href="{{ url_for('documentacion.editar_onlyoffice', item_id=item.id, version_id=version_preparacion.id) }}" class="btn btn-sm btn-primary ms-2">
+                    Abrir y editar
+                </a>
+            {% endif %}
+        {% endif %}
     </div>
     {% endif %}
 </div>

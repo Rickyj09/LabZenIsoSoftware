@@ -8,6 +8,7 @@ from app.services.document_versioning_service import (
     get_current_version,
     get_preparation_version,
 )
+from app.services.onlyoffice_document_edit_service import has_blocking_edit
 
 
 class DocumentWorkflowError(DocumentVersioningError):
@@ -85,6 +86,11 @@ def send_for_review(*, documento, version_doc, usuario, comentario=None, ip=None
         raise DocumentWorkflowError("Solo una versión en elaboración puede enviarse a revisión.")
     if version_doc.id != getattr(get_preparation_version(documento), "id", None):
         raise DocumentWorkflowError("La versión seleccionada no es la preparación activa.")
+
+    if has_blocking_edit(version_doc):
+        raise DocumentWorkflowError(
+            "El documento estÃ¡ abierto para ediciÃ³n. Guarda y cierra la sesiÃ³n antes de enviarlo a revisiÃ³n."
+        )
 
     previous_state = version_doc.estado
     version_doc.estado = "EN_REVISION"

@@ -55,6 +55,25 @@ def validate_onlyoffice_config(config):
         raise RuntimeError("ONLYOFFICE_REQUEST_TIMEOUT_SECONDS debe ser mayor que cero.")
     if int(config.get("ONLYOFFICE_DOCUMENT_TOKEN_TTL_SECONDS", 0)) <= 0:
         raise RuntimeError("ONLYOFFICE_DOCUMENT_TOKEN_TTL_SECONDS debe ser mayor que cero.")
+    if int(config.get("ONLYOFFICE_CALLBACK_TOKEN_TTL_SECONDS", 0)) <= 0:
+        raise RuntimeError("ONLYOFFICE_CALLBACK_TOKEN_TTL_SECONDS debe ser mayor que cero.")
+
+    if config.get("ONLYOFFICE_EDIT_ENABLED"):
+        edit_ttl = int(config.get("ONLYOFFICE_EDIT_LOCK_TTL_SECONDS", 0))
+        heartbeat = int(config.get("ONLYOFFICE_EDIT_HEARTBEAT_SECONDS", 0))
+        debounce = int(config.get("ONLYOFFICE_FORCE_SAVE_DEBOUNCE_SECONDS", 0))
+        download_max = int(config.get("ONLYOFFICE_CALLBACK_DOWNLOAD_MAX_BYTES", 0))
+        document_max = int(config.get("DOCUMENT_MAX_FILE_SIZE", 0))
+        if edit_ttl <= 0:
+            raise RuntimeError("ONLYOFFICE_EDIT_LOCK_TTL_SECONDS debe ser mayor que cero.")
+        if heartbeat <= 0 or heartbeat >= edit_ttl:
+            raise RuntimeError("ONLYOFFICE_EDIT_HEARTBEAT_SECONDS debe ser mayor que cero y menor que el TTL.")
+        if debounce <= 0:
+            raise RuntimeError("ONLYOFFICE_FORCE_SAVE_DEBOUNCE_SECONDS debe ser mayor que cero.")
+        if download_max <= 0 or download_max > document_max:
+            raise RuntimeError(
+                "ONLYOFFICE_CALLBACK_DOWNLOAD_MAX_BYTES debe ser positivo y no superar DOCUMENT_MAX_FILE_SIZE."
+            )
 
 
 class Config:
@@ -106,6 +125,15 @@ class Config:
     )
     ONLYOFFICE_PING_TOKEN_TTL_SECONDS = _env_int("ONLYOFFICE_PING_TOKEN_TTL_SECONDS", 120)
     ONLYOFFICE_DOCUMENT_TOKEN_TTL_SECONDS = _env_int("ONLYOFFICE_DOCUMENT_TOKEN_TTL_SECONDS", 300)
+    ONLYOFFICE_EDIT_ENABLED = _env_bool("ONLYOFFICE_EDIT_ENABLED", False)
+    ONLYOFFICE_EDIT_LOCK_TTL_SECONDS = _env_int("ONLYOFFICE_EDIT_LOCK_TTL_SECONDS", 300)
+    ONLYOFFICE_EDIT_HEARTBEAT_SECONDS = _env_int("ONLYOFFICE_EDIT_HEARTBEAT_SECONDS", 30)
+    ONLYOFFICE_FORCE_SAVE_DEBOUNCE_SECONDS = _env_int("ONLYOFFICE_FORCE_SAVE_DEBOUNCE_SECONDS", 45)
+    ONLYOFFICE_CALLBACK_TOKEN_TTL_SECONDS = _env_int("ONLYOFFICE_CALLBACK_TOKEN_TTL_SECONDS", 3600)
+    ONLYOFFICE_CALLBACK_DOWNLOAD_MAX_BYTES = _env_int(
+        "ONLYOFFICE_CALLBACK_DOWNLOAD_MAX_BYTES",
+        min(DOCUMENT_MAX_FILE_SIZE, 25 * 1024 * 1024),
+    )
 
     # Opcional: mejora el comportamiento del engine
     SQLALCHEMY_ENGINE_OPTIONS = {

@@ -1,8 +1,39 @@
+import logging
+import re
+
 from flask import Flask
 from flask_login import current_user
 
 from app.config import get_config, validate_onlyoffice_config
 from app.extensions import db, migrate, login_manager
+
+
+_TOKEN_QUERY_RE = re.compile(r"(?i)([?&]token=)[^&\s]+")
+
+
+def redact_sensitive_request_tokens(value):
+    if not isinstance(value, str):
+        return value
+    return _TOKEN_QUERY_RE.sub(r"\1<redacted>", value)
+
+
+class SensitiveRequestTokenFilter(logging.Filter):
+    def filter(self, record):
+        record.msg = redact_sensitive_request_tokens(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(redact_sensitive_request_tokens(arg) for arg in record.args)
+        elif isinstance(record.args, dict):
+            record.args = {
+                key: redact_sensitive_request_tokens(value)
+                for key, value in record.args.items()
+            }
+        return True
+
+
+def configure_sensitive_logging_redaction():
+    logger = logging.getLogger("werkzeug")
+    if not any(isinstance(item, SensitiveRequestTokenFilter) for item in logger.filters):
+        logger.addFilter(SensitiveRequestTokenFilter())
 
 
 def create_app(config_overrides=None):
@@ -16,6 +47,7 @@ def create_app(config_overrides=None):
     if config_overrides:
         app.config.update(config_overrides)
     validate_onlyoffice_config(app.config)
+    configure_sensitive_logging_redaction()
 
     db.init_app(app)
     migrate.init_app(app, db)
