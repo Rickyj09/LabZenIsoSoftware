@@ -3,7 +3,9 @@ import unittest
 import subprocess
 import zipfile
 import re
+import os
 from io import BytesIO
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 from unittest.mock import patch
@@ -16,7 +18,15 @@ from sqlalchemy.orm import Session
 from app import create_app, redact_sensitive_request_tokens
 from app.extensions import db
 from app.models.base import BaseModel
-from app.models.documentos import Documento, DocumentoEdicion, DocumentoEdicionEvento, DocumentoSnapshot, DocumentoVersion
+from app.models.documentos import (
+    Documento,
+    DocumentoArtefacto,
+    DocumentoConversion,
+    DocumentoEdicion,
+    DocumentoEdicionEvento,
+    DocumentoSnapshot,
+    DocumentoVersion,
+)
 from app.models.empresa import Empresa
 from app.models.seguridad import Permiso, Rol, RolPermiso, Usuario, UsuarioRol
 from app.services.onlyoffice_health_service import OnlyOfficeHealthService
@@ -29,6 +39,12 @@ from app.services.onlyoffice_document_edit_service import (
     OnlyOfficeDocumentEditService,
     OnlyOfficeEditConflictError,
     OnlyOfficeEditSessionService,
+)
+from app.services.document_pdf_service import (
+    ConversionProviderResult,
+    DocumentPdfError,
+    DocumentPdfService,
+    conversion_key_for_snapshot,
 )
 from app.services.document_workflow_service import (
     approve_version as workflow_approve_version,
@@ -253,6 +269,44 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
             )
         return stream.getvalue()
 
+    def minimal_pdf(self, text="LabZenISO"):
+        body = (
+            b"%PDF-1.4\n"
+            b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+            b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
+            b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >> endobj\n"
+            b"4 0 obj << /Length 44 >> stream\nBT /F1 12 Tf 72 120 Td ("
+            + text.encode("ascii", "ignore")
+            + b") Tj ET\nendstream endobj\n"
+            b"xref\n0 5\n0000000000 65535 f \n"
+            b"trailer << /Root 1 0 R /Size 5 >>\nstartxref\n0\n%%EOF\n"
+        )
+        return body
+
+    class FakeConversionProvider:
+        provider_name = "onlyoffice"
+
+        def __init__(self, pdf_path):
+            self.pdf_path = pdf_path
+            self.requests = []
+
+        def request_conversion(self, *, conversion, source_url, source_token):
+            self.requests.append({
+                "conversion_key": conversion.conversion_key,
+                "source_url": source_url,
+                "source_token_present": bool(source_token),
+            })
+            return ConversionProviderResult(
+                end_convert=True,
+                percent=100,
+                file_url="http://localhost:8082/cache/result.pdf",
+                file_type="pdf",
+                raw_fingerprint="fake",
+            )
+
+        def download_result(self, file_url):
+            return self.pdf_path
+
     def add_document_with_file(
         self,
         *,
@@ -300,6 +354,132 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         version.archivo_size = size
         db.session.commit()
         return sha256
+
+    def approve_document_with_snapshot(self, *, document_id=501, version_id=1501):
+        document, version = self.add_document_with_file(
+            document_id=document_id,
+            version_id=version_id,
+            content=self.minimal_docx("aprobado"),
+        )
+        user = db.session.get(Usuario, 201)
+        workflow_send_for_review(
+            documento=document,
+            version_doc=version,
+            usuario=user,
+            comentario="Listo",
+            resumen_cambios="Cambio controlado",
+            hojas_modificadas="No aplica",
+        )
+        db.session.commit()
+        workflow_approve_version(
+            documento=document,
+            version_doc=version,
+            usuario=user,
+            comentario="Aprobado",
+        )
+        db.session.commit()
+        return document, version, user, DocumentoSnapshot.query.filter_by(
+            documento_version_id=version.id,
+            tipo="APROBADO",
+        ).one()
+
+    def test_pdf_conversion_accepts_only_approved_snapshot_source(self):
+        document, version = self.add_document_with_file(content=self.minimal_docx("revision"))
+        user = db.session.get(Usuario, 201)
+        workflow_send_for_review(
+            documento=document,
+            version_doc=version,
+            usuario=user,
+            comentario="Listo",
+            resumen_cambios="Cambio controlado",
+            hojas_modificadas="No aplica",
+        )
+        db.session.commit()
+        review_snapshot = DocumentoSnapshot.query.filter_by(documento_version_id=version.id, tipo="ENVIO_REVISION").one()
+
+        with self.assertRaises(DocumentPdfError):
+            DocumentPdfService()._validate_approved_snapshot(review_snapshot)
+
+        document, version, _user, approved_snapshot = self.approve_document_with_snapshot(
+            document_id=502,
+            version_id=1502,
+        )
+        self.assertEqual(approved_snapshot.tipo, "APROBADO")
+        self.assertEqual(approved_snapshot.workflow_evento.accion, "APROBAR")
+        DocumentPdfService()._validate_approved_snapshot(approved_snapshot)
+
+    def test_conversion_key_is_stable_and_bound_to_snapshot_hash(self):
+        _document, _version, _user, snapshot = self.approve_document_with_snapshot()
+        first = conversion_key_for_snapshot(snapshot)
+        second = conversion_key_for_snapshot(snapshot)
+        self.assertEqual(first, second)
+        snapshot.archivo_sha256 = "0" * 64
+        self.assertNotEqual(first, conversion_key_for_snapshot(snapshot))
+        db.session.rollback()
+
+    def test_approved_snapshot_generates_private_immutable_pdf_once(self):
+        self.app.config["ONLYOFFICE_CONVERSION_ENABLED"] = True
+        document, version, user, snapshot = self.approve_document_with_snapshot()
+        fd, temp_name = tempfile.mkstemp(prefix="test-pdf-", suffix=".pdf")
+        os.close(fd)
+        pdf_path = Path(temp_name)
+        pdf_path.write_bytes(self.minimal_pdf())
+        provider = self.FakeConversionProvider(pdf_path)
+        service = DocumentPdfService(provider=provider)
+
+        artifact = service.ensure_conversion_for_approved_version(
+            documento=document,
+            version_doc=version,
+            usuario=user,
+            start=True,
+        )
+
+        self.assertEqual(artifact.estado, "DISPONIBLE")
+        self.assertTrue(artifact.inmutable)
+        self.assertEqual(artifact.tipo, "PDF_APROBADO")
+        self.assertEqual(artifact.source_snapshot_id, snapshot.id)
+        self.assertEqual(artifact.source_snapshot_sha256, snapshot.archivo_sha256)
+        self.assertEqual(artifact.archivo_mime, "application/pdf")
+        self.assertEqual(artifact.page_count, 1)
+        self.assertIn("/pdf/", f"/{artifact.storage_path}")
+        self.assertTrue(resolve_document_path(artifact.storage_path).is_file())
+        self.assertEqual(DocumentoArtefacto.query.count(), 1)
+        self.assertEqual(DocumentoConversion.query.count(), 1)
+        self.assertEqual(Documento.query.count(), 1)
+        self.assertEqual(DocumentoVersion.query.count(), 1)
+
+        same = service.ensure_conversion_for_approved_version(
+            documento=document,
+            version_doc=version,
+            usuario=user,
+            start=True,
+        )
+        self.assertEqual(same.id, artifact.id)
+        self.assertEqual(DocumentoArtefacto.query.count(), 1)
+        self.assertEqual(DocumentoConversion.query.count(), 1)
+
+    def test_pdf_validation_rejects_active_content(self):
+        fd, temp_name = tempfile.mkstemp(prefix="test-active-pdf-", suffix=".pdf")
+        os.close(fd)
+        path = Path(temp_name)
+        try:
+            path.write_bytes(self.minimal_pdf() + b"\n/JavaScript")
+            with self.assertRaises(DocumentPdfError):
+                DocumentPdfService().validate_pdf_file(path)
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_pdf_validation_counts_pages_with_flexible_type_spacing(self):
+        fd, temp_name = tempfile.mkstemp(prefix="test-flex-pdf-", suffix=".pdf")
+        os.close(fd)
+        path = Path(temp_name)
+        try:
+            data = self.minimal_pdf().replace(b"/Type /Page ", b"/Type\n/Page ")
+            path.write_bytes(data)
+            result = DocumentPdfService().validate_pdf_file(path)
+            self.assertEqual(result.page_count, 1)
+        finally:
+            path.unlink(missing_ok=True)
 
     def test_workflow_send_for_review_creates_immutable_snapshot_without_new_version(self):
         document, version = self.add_document_with_file(content=self.minimal_docx("ciclo uno"))

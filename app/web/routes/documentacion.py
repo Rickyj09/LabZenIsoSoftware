@@ -51,6 +51,7 @@ from app.services.storage_service import (
 from app.services.document_pending_service import get_pending_documents_for_user
 from app.services.document_dashboard_service import get_document_dashboard_stats
 from app.services.document_snapshot_service import DocumentSnapshotError, DocumentSnapshotService
+from app.services.document_pdf_service import DocumentPdfError, DocumentPdfService
 from app.services.onlyoffice_document_view_service import (
     OnlyOfficeDocumentViewError,
     OnlyOfficeDocumentViewService,
@@ -400,6 +401,8 @@ def detalle(item_id):
     version_mostrada = version_vigente or version_preparacion or (versiones[0] if versiones else None)
     active_edit_info = get_active_edit_info(version_preparacion, current_user) if version_preparacion else None
     snapshots = DocumentSnapshotService().list_snapshots(documento=item) if can_view_history else []
+    pdf_artifact = DocumentPdfService().latest_artifact_for_version(version_vigente) if version_vigente else None
+    pdf_conversion = DocumentPdfService().latest_conversion_for_version(version_vigente) if version_vigente else None
 
     preview_url = None
     preview_tipo = None
@@ -438,6 +441,8 @@ def detalle(item_id):
         is_docx_version=is_docx_version,
         active_edit_info=active_edit_info,
         snapshots=snapshots,
+        pdf_artifact=pdf_artifact,
+        pdf_conversion=pdf_conversion,
     )
 
 
@@ -840,6 +845,7 @@ def aprobar_version(item_id, version_id):
         empresa_id=current_user.empresa_id
     ).first_or_404()
 
+    conversion_message = None
     try:
         approve_workflow_version(
             documento=item,
@@ -854,8 +860,107 @@ def aprobar_version(item_id, version_id):
         flash(str(exc), "warning")
         return redirect(url_for("documentacion.detalle", item_id=item.id))
 
+    try:
+        artifact = DocumentPdfService().ensure_conversion_for_approved_version(
+            documento=item,
+            version_doc=version,
+            usuario=current_user,
+            start=True,
+        )
+        if artifact and artifact.estado == "DISPONIBLE":
+            conversion_message = " PDF aprobado sin firmas generado correctamente."
+        elif artifact:
+            conversion_message = " La conversión PDF quedó en proceso o requiere revisión."
+    except DocumentPdfError as exc:
+        current_app.logger.warning("Conversion PDF posterior a aprobacion fallida: %s", exc)
+        conversion_message = " La aprobación se mantuvo, pero la conversión PDF no pudo completarse."
+
+    if conversion_message:
+        flash(conversion_message.strip(), "info")
+
     flash("Versión aprobada correctamente.", "success")
     return redirect(url_for("documentacion.detalle", item_id=item.id))
+
+
+@bp.route("/<int:item_id>/versiones/<int:version_id>/pdf-aprobado/ver")
+@login_required
+@require_permission("documentos.ver")
+def ver_pdf_aprobado(item_id, version_id):
+    item = Documento.query.filter_by(id=item_id, empresa_id=current_user.empresa_id).first_or_404()
+    version = DocumentoVersion.query.filter_by(
+        id=version_id,
+        documento_id=item.id,
+        empresa_id=current_user.empresa_id,
+    ).first_or_404()
+    artifact = DocumentPdfService().available_artifact_for_version(version)
+    if not artifact or artifact.documento_id != item.id or artifact.empresa_id != current_user.empresa_id:
+        abort(404)
+    try:
+        physical_path = DocumentPdfService().validate_artifact_file(artifact)
+    except DocumentPdfError:
+        abort(404)
+    filename = artifact.archivo_nombre_visible or "pdf-aprobado-sin-firmas.pdf"
+    response = send_file(
+        physical_path,
+        as_attachment=False,
+        download_name=filename,
+        mimetype="application/pdf",
+        conditional=True,
+    )
+    response.headers["Content-Disposition"] = f'inline; filename="{filename}"'
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; object-src 'none'; frame-ancestors 'self'; base-uri 'self'"
+    )
+    return response
+
+
+@bp.route("/<int:item_id>/versiones/<int:version_id>/pdf-aprobado/descargar")
+@login_required
+@require_permission("documentos.descargar")
+def descargar_pdf_aprobado(item_id, version_id):
+    item = Documento.query.filter_by(id=item_id, empresa_id=current_user.empresa_id).first_or_404()
+    version = DocumentoVersion.query.filter_by(
+        id=version_id,
+        documento_id=item.id,
+        empresa_id=current_user.empresa_id,
+    ).first_or_404()
+    artifact = DocumentPdfService().available_artifact_for_version(version)
+    if not artifact or artifact.documento_id != item.id or artifact.empresa_id != current_user.empresa_id:
+        abort(404)
+    try:
+        physical_path = DocumentPdfService().validate_artifact_file(artifact)
+    except DocumentPdfError:
+        abort(404)
+    return send_file(
+        physical_path,
+        as_attachment=True,
+        download_name=artifact.archivo_nombre_visible or "pdf-aprobado-sin-firmas.pdf",
+        mimetype="application/pdf",
+        conditional=True,
+    )
+
+
+@bp.route("/conversiones/<public_id>/actualizar", methods=["POST"])
+@login_required
+@require_permission("documentos.aprobar")
+def actualizar_conversion(public_id):
+    from app.models.documentos import DocumentoConversion
+
+    conversion = DocumentoConversion.query.filter_by(
+        public_id=public_id,
+        empresa_id=current_user.empresa_id,
+    ).first_or_404()
+    try:
+        if conversion.estado == "ERROR":
+            DocumentPdfService().retry_conversion(conversion_public_id=public_id, usuario=current_user)
+        else:
+            DocumentPdfService().process_conversion(conversion=conversion)
+    except DocumentPdfError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("documentacion.detalle", item_id=conversion.documento_id))
+    flash("Conversión PDF actualizada.", "success")
+    return redirect(url_for("documentacion.detalle", item_id=conversion.documento_id))
 
 
 @bp.route("/<int:item_id>/enviar-revision", methods=["POST"])

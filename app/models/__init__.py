@@ -17,6 +17,8 @@ from app.models.documentos import (
     DocumentoVersion,
     DocumentoAprobacion,
     DocumentoSnapshot,
+    DocumentoArtefacto,
+    DocumentoConversion,
     DocumentoEdicion,
     DocumentoEdicionEvento,
 )

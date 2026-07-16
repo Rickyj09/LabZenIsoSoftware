@@ -75,6 +75,29 @@ def validate_onlyoffice_config(config):
                 "ONLYOFFICE_CALLBACK_DOWNLOAD_MAX_BYTES debe ser positivo y no superar DOCUMENT_MAX_FILE_SIZE."
             )
 
+    if config.get("ONLYOFFICE_CONVERSION_ENABLED"):
+        converter_path = (config.get("ONLYOFFICE_CONVERTER_PATH") or "").strip()
+        if not converter_path.startswith("/") or "://" in converter_path or "\\" in converter_path or ".." in converter_path:
+            raise RuntimeError("ONLYOFFICE_CONVERTER_PATH debe ser una ruta relativa absoluta segura, por ejemplo /converter.")
+        source_ttl = int(config.get("ONLYOFFICE_CONVERSION_SOURCE_TOKEN_TTL_SECONDS", 0))
+        request_timeout = int(config.get("ONLYOFFICE_CONVERSION_REQUEST_TIMEOUT_SECONDS", 0))
+        poll_interval = int(config.get("ONLYOFFICE_CONVERSION_POLL_INTERVAL_SECONDS", 0))
+        max_wait = int(config.get("ONLYOFFICE_CONVERSION_MAX_WAIT_SECONDS", 0))
+        max_attempts = int(config.get("ONLYOFFICE_CONVERSION_MAX_ATTEMPTS", 0))
+        backoff = int(config.get("ONLYOFFICE_CONVERSION_RETRY_BACKOFF_SECONDS", 0))
+        download_max = int(config.get("ONLYOFFICE_CONVERSION_DOWNLOAD_MAX_BYTES", 0))
+        pdf_max = int(config.get("ONLYOFFICE_PDF_MAX_BYTES", 0))
+        if source_ttl <= 0 or request_timeout <= 0 or poll_interval <= 0 or max_wait <= 0:
+            raise RuntimeError("Los tiempos de conversiÃ³n ONLYOFFICE deben ser mayores que cero.")
+        if max_wait <= poll_interval:
+            raise RuntimeError("ONLYOFFICE_CONVERSION_MAX_WAIT_SECONDS debe ser mayor al intervalo de polling.")
+        if max_attempts <= 0 or max_attempts > 10:
+            raise RuntimeError("ONLYOFFICE_CONVERSION_MAX_ATTEMPTS debe estar entre 1 y 10.")
+        if backoff < 0:
+            raise RuntimeError("ONLYOFFICE_CONVERSION_RETRY_BACKOFF_SECONDS no puede ser negativo.")
+        if download_max <= 0 or pdf_max <= 0 or download_max > pdf_max:
+            raise RuntimeError("Los limites de descarga/PDF deben ser positivos y consistentes.")
+
 
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "labzeniso-dev-secret-key")
@@ -134,6 +157,33 @@ class Config:
         "ONLYOFFICE_CALLBACK_DOWNLOAD_MAX_BYTES",
         min(DOCUMENT_MAX_FILE_SIZE, 25 * 1024 * 1024),
     )
+    ONLYOFFICE_CONVERSION_ENABLED = _env_bool("ONLYOFFICE_CONVERSION_ENABLED", False)
+    ONLYOFFICE_CONVERTER_PATH = os.getenv("ONLYOFFICE_CONVERTER_PATH", "/converter")
+    ONLYOFFICE_CONVERSION_ASYNC = _env_bool("ONLYOFFICE_CONVERSION_ASYNC", True)
+    ONLYOFFICE_CONVERSION_SOURCE_TOKEN_TTL_SECONDS = _env_int(
+        "ONLYOFFICE_CONVERSION_SOURCE_TOKEN_TTL_SECONDS",
+        600,
+    )
+    ONLYOFFICE_CONVERSION_REQUEST_TIMEOUT_SECONDS = _env_int(
+        "ONLYOFFICE_CONVERSION_REQUEST_TIMEOUT_SECONDS",
+        20,
+    )
+    ONLYOFFICE_CONVERSION_POLL_INTERVAL_SECONDS = _env_int(
+        "ONLYOFFICE_CONVERSION_POLL_INTERVAL_SECONDS",
+        2,
+    )
+    ONLYOFFICE_CONVERSION_MAX_WAIT_SECONDS = _env_int("ONLYOFFICE_CONVERSION_MAX_WAIT_SECONDS", 120)
+    ONLYOFFICE_CONVERSION_MAX_ATTEMPTS = _env_int("ONLYOFFICE_CONVERSION_MAX_ATTEMPTS", 3)
+    ONLYOFFICE_CONVERSION_RETRY_BACKOFF_SECONDS = _env_int(
+        "ONLYOFFICE_CONVERSION_RETRY_BACKOFF_SECONDS",
+        5,
+    )
+    ONLYOFFICE_CONVERSION_DOWNLOAD_MAX_BYTES = _env_int(
+        "ONLYOFFICE_CONVERSION_DOWNLOAD_MAX_BYTES",
+        50 * 1024 * 1024,
+    )
+    ONLYOFFICE_PDF_MAX_BYTES = _env_int("ONLYOFFICE_PDF_MAX_BYTES", 50 * 1024 * 1024)
+    ONLYOFFICE_PDF_VALIDATE_PAGE_COUNT = _env_bool("ONLYOFFICE_PDF_VALIDATE_PAGE_COUNT", True)
 
     # Opcional: mejora el comportamiento del engine
     SQLALCHEMY_ENGINE_OPTIONS = {

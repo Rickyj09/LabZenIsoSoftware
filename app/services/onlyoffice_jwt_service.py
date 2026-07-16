@@ -36,6 +36,15 @@ def _callback_jwt_settings():
     }
 
 
+def _conversion_source_jwt_settings():
+    return {
+        "secret": current_app.config["ONLYOFFICE_JWT_SECRET"],
+        "issuer": current_app.config["ONLYOFFICE_PING_JWT_ISSUER"],
+        "audience": "labzeniso-onlyoffice-conversion-source",
+        "ttl": int(current_app.config["ONLYOFFICE_CONVERSION_SOURCE_TOKEN_TTL_SECONDS"]),
+    }
+
+
 def generate_onlyoffice_ping_token():
     settings = _jwt_settings()
     now = datetime.now(timezone.utc)
@@ -162,6 +171,58 @@ def validate_onlyoffice_callback_token(token):
 
     if payload.get("scope") != "onlyoffice:document:callback":
         raise OnlyOfficeTokenError("Token JWT sin alcance de callback documental.")
+    return payload
+
+
+def generate_onlyoffice_conversion_source_token(
+    *,
+    snapshot_public_id,
+    empresa_id,
+    documento_id,
+    version_id,
+    snapshot_sha256,
+    conversion_key,
+):
+    settings = _conversion_source_jwt_settings()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "iss": settings["issuer"],
+        "aud": settings["audience"],
+        "iat": now,
+        "nbf": now,
+        "exp": now + timedelta(seconds=settings["ttl"]),
+        "jti": uuid4().hex,
+        "scope": "onlyoffice:conversion:source",
+        "snapshot_public_id": str(snapshot_public_id),
+        "empresa_id": int(empresa_id),
+        "documento_id": int(documento_id),
+        "documento_version_id": int(version_id),
+        "snapshot_sha256": snapshot_sha256,
+        "conversion_key": conversion_key,
+    }
+    return jwt.encode(payload, settings["secret"], algorithm="HS256")
+
+
+def validate_onlyoffice_conversion_source_token(token):
+    if not token:
+        raise OnlyOfficeTokenError("Token JWT ausente.")
+
+    settings = _conversion_source_jwt_settings()
+    try:
+        payload = jwt.decode(
+            token,
+            settings["secret"],
+            algorithms=["HS256"],
+            audience=settings["audience"],
+            issuer=settings["issuer"],
+        )
+    except jwt.ExpiredSignatureError as exc:
+        raise OnlyOfficeTokenError("Token JWT vencido.") from exc
+    except jwt.InvalidTokenError as exc:
+        raise OnlyOfficeTokenError("Token JWT invalido.") from exc
+
+    if payload.get("scope") != "onlyoffice:conversion:source":
+        raise OnlyOfficeTokenError("Token JWT sin alcance de fuente de conversion.")
     return payload
 
 

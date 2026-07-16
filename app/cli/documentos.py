@@ -1,5 +1,7 @@
 import click
 
+from app.models.documentos import CONVERSION_EN_PROCESO, CONVERSION_PENDIENTE, CONVERSION_SOLICITADA, DocumentoConversion
+from app.services.document_pdf_service import DocumentPdfError, DocumentPdfService
 from app.services.document_demo_seed_service import seed_demo_documents
 from app.services.document_migration_service import migrate_historical_document_files
 
@@ -38,6 +40,37 @@ def migrar_archivos_historicos(dry_run, apply_changes):
         click.echo("Simulación finalizada: no se copiaron archivos ni se modificó la base de datos.")
     if summary.errores:
         raise click.ClickException("La migración terminó con errores; revisa el detalle anterior.")
+@documentos_cli.command(name="conversiones-pendientes")
+@click.option("--procesar", is_flag=True, help="Reanuda conversiones pendientes/en proceso.")
+def conversiones_pendientes(procesar):
+    """Lista o reanuda conversiones PDF aprobadas pendientes."""
+    conversiones = (
+        DocumentoConversion.query
+        .filter(DocumentoConversion.estado.in_((CONVERSION_PENDIENTE, CONVERSION_SOLICITADA, CONVERSION_EN_PROCESO)))
+        .order_by(DocumentoConversion.solicitado_en.asc(), DocumentoConversion.id.asc())
+        .all()
+    )
+    if not conversiones:
+        click.echo("No existen conversiones pendientes.")
+        return
+    service = DocumentPdfService()
+    for conversion in conversiones:
+        click.echo(
+            f"{conversion.public_id} estado={conversion.estado} "
+            f"documento={conversion.documento_id} version={conversion.documento_version_id} "
+            f"attempt={conversion.attempt_number} percent={conversion.percent or 0}"
+        )
+        if procesar:
+            try:
+                artifact = service.process_conversion(conversion=conversion)
+                click.echo(
+                    f"  procesada: artefacto={artifact.public_id if artifact else '-'} "
+                    f"estado={artifact.estado if artifact else '-'}"
+                )
+            except DocumentPdfError as exc:
+                click.echo(f"  error controlado: {exc}")
+
+
 @documentos_cli.command(name="seed-demo")
 @click.option("--empresa-id", default=1, show_default=True, type=int, help="Empresa donde se crearán los datos demo.")
 def seed_demo(empresa_id):

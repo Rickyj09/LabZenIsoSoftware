@@ -14,9 +14,11 @@ from app.services.onlyoffice_jwt_service import (
     OnlyOfficeTokenError,
     generate_onlyoffice_ping_token,
     validate_onlyoffice_callback_token,
+    validate_onlyoffice_conversion_source_token,
     validate_onlyoffice_document_token,
     validate_onlyoffice_ping_token,
 )
+from app.services.document_pdf_service import DocumentPdfError, DocumentPdfService
 from app.services.onlyoffice_document_edit_service import (
     OnlyOfficeCallbackService,
     OnlyOfficeEditCallbackError,
@@ -172,6 +174,35 @@ def document_file(version_id):
     response.headers["X-Content-Type-Options"] = "nosniff"
     if content_length:
         response.headers["Content-Length"] = str(content_length)
+    return response
+
+
+@bp.route("/snapshots/<public_id>/conversion-source", methods=["GET"])
+def conversion_source_snapshot(public_id):
+    try:
+        payload = validate_onlyoffice_conversion_source_token(request.args.get("token", ""))
+        if payload.get("snapshot_public_id") != public_id:
+            abort(401)
+        snapshot = DocumentPdfService().validate_source_token_snapshot(payload)
+        physical_path = DocumentSnapshotService().resolve_snapshot_path(snapshot)
+    except OnlyOfficeTokenError:
+        abort(401)
+    except DocumentPdfError:
+        abort(401)
+    except DocumentSnapshotError:
+        abort(422)
+
+    response = send_file(
+        physical_path,
+        as_attachment=False,
+        download_name=snapshot.archivo_nombre_original or "snapshot-aprobado.docx",
+        mimetype=snapshot.archivo_mime or DOCX_MIME,
+        conditional=True,
+    )
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    if snapshot.archivo_size:
+        response.headers["Content-Length"] = str(snapshot.archivo_size)
     return response
 
 

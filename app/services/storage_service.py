@@ -50,6 +50,15 @@ class StoredSnapshotFile:
     sha256: str
 
 
+@dataclass(frozen=True)
+class StoredPdfArtifactFile:
+    stored_name: str
+    storage_path: str
+    mime_type: str
+    size: int
+    sha256: str
+
+
 def validate_document_file(file_storage) -> None:
     if not file_storage or not file_storage.filename:
         return
@@ -73,6 +82,13 @@ def _safe_snapshot_type(value) -> str:
     normalized = secure_filename(str(value or "snapshot")).replace("_", "-").lower()
     normalized = re.sub(r"[^a-z0-9-]+", "-", normalized).strip("-")
     return normalized or "snapshot"
+
+
+def _safe_hash_part(value) -> str:
+    normalized = re.sub(r"[^a-fA-F0-9]", "", str(value or "")).lower()
+    if len(normalized) < 12:
+        raise DocumentStorageError("Hash documental insuficiente para construir la ruta.")
+    return normalized
 
 
 def slugify_filename_part(texto, *, max_length=100) -> str:
@@ -348,6 +364,83 @@ def delete_snapshot_file(storage_path: str | None) -> None:
         path.chmod(0o666)
     except OSError:
         current_app.logger.debug("No se pudo ajustar permisos antes de eliminar snapshot: %s", storage_path)
+    path.unlink(missing_ok=True)
+
+
+def store_pdf_artifact_copy(
+    *,
+    source_path: Path,
+    documento,
+    version_doc,
+    source_snapshot,
+    expected_sha256: str | None = None,
+) -> StoredPdfArtifactFile:
+    """Guarda un PDF definitivo como archivo privado independiente e inmutable."""
+    if source_path.is_symlink():
+        raise DocumentStorageError("No se permite almacenar un PDF desde un enlace simbolico.")
+    if not source_path.is_file():
+        raise DocumentStorageError("El PDF temporal no existe.")
+    source_sha256, source_size = file_digest_and_size(source_path)
+    if expected_sha256 and source_sha256 != expected_sha256:
+        raise DocumentStorageError("El hash del PDF no coincide con la validacion previa.")
+
+    relative_directory = Path(
+        f"empresa_{int(documento.empresa_id)}",
+        f"documento_{int(documento.id)}",
+        f"v{_safe_version(getattr(version_doc, 'version', version_doc.id))}",
+        "pdf",
+    )
+    destination_directory = (_storage_root() / relative_directory).resolve()
+    destination_directory.mkdir(parents=True, exist_ok=True)
+    if os.path.commonpath([str(_storage_root()), str(destination_directory)]) != str(_storage_root()):
+        raise DocumentStorageError("La ruta de artefactos PDF no es valida.")
+
+    snapshot_hash = _safe_hash_part(getattr(source_snapshot, "archivo_sha256", ""))[:12]
+    pdf_hash = _safe_hash_part(source_sha256)[:12]
+    stored_name = f"aprobado-{snapshot_hash}-{pdf_hash}.pdf"
+    destination = (destination_directory / stored_name).resolve()
+    if os.path.commonpath([str(_storage_root()), str(destination)]) != str(_storage_root()):
+        raise DocumentStorageError("La ruta del PDF aprobado no es valida.")
+    if destination.exists():
+        raise DocumentStorageError("Ya existe un PDF aprobado en la ruta destino.")
+    if destination.is_symlink():
+        raise DocumentStorageError("No se permite sobrescribir enlaces simbolicos.")
+
+    temporary = (destination_directory / f".pdf-{uuid4().hex}.tmp").resolve()
+    try:
+        shutil.copyfile(source_path, temporary, follow_symlinks=False)
+        copied_sha256, copied_size = file_digest_and_size(temporary)
+        if copied_sha256 != source_sha256 or copied_size != source_size:
+            raise DocumentStorageError("El hash del PDF copiado no coincide con el origen.")
+        os.replace(temporary, destination)
+        try:
+            destination.chmod(0o444)
+        except OSError:
+            current_app.logger.debug("No se pudo marcar PDF como solo lectura: %s", stored_name)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
+        raise
+
+    return StoredPdfArtifactFile(
+        stored_name=stored_name,
+        storage_path=(relative_directory / stored_name).as_posix(),
+        mime_type="application/pdf",
+        size=source_size,
+        sha256=source_sha256,
+    )
+
+
+def delete_pdf_artifact_file(storage_path: str | None) -> None:
+    if not storage_path:
+        return
+    path = resolve_document_path(storage_path)
+    if "pdf" not in path.parts:
+        raise DocumentStorageError("La ruta no pertenece al area de PDF.")
+    try:
+        path.chmod(0o666)
+    except OSError:
+        current_app.logger.debug("No se pudo ajustar permisos antes de eliminar PDF: %s", storage_path)
     path.unlink(missing_ok=True)
 
 

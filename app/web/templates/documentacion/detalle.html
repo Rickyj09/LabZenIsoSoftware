@@ -279,6 +279,75 @@
 <div class="alert alert-secondary mb-4">Sin versión aprobada vigente.</div>
 {% endif %}
 
+{% if version_vigente %}
+<div class="page-card mb-4">
+    <div class="d-flex justify-content-between align-items-start gap-3">
+        <div>
+            <h5 class="mb-2">PDF aprobado</h5>
+            <p class="text-muted mb-0">PDF aprobado sin firmas digitales. El documento permanece APROBADO.</p>
+        </div>
+        {% if pdf_artifact and pdf_artifact.estado == 'DISPONIBLE' %}
+            <span class="badge bg-success">PDF disponible</span>
+        {% elif pdf_conversion and pdf_conversion.estado == 'EN_PROCESO' %}
+            <span class="badge bg-info text-dark">Convirtiendo â€” {{ pdf_conversion.percent or 0 }} %</span>
+        {% elif pdf_artifact and pdf_artifact.estado == 'ERROR' %}
+            <span class="badge bg-danger">Error de conversiÃ³n</span>
+        {% elif pdf_conversion %}
+            <span class="badge bg-secondary">Pendiente de conversiÃ³n</span>
+        {% else %}
+            <span class="badge bg-secondary">Pendiente de conversiÃ³n</span>
+        {% endif %}
+    </div>
+
+    {% if pdf_artifact and pdf_artifact.estado == 'DISPONIBLE' %}
+        <div class="row mt-3 g-3">
+            <div class="col-md-3"><strong>Fecha:</strong><br>{{ pdf_artifact.disponible_en or '-' }}</div>
+            <div class="col-md-2"><strong>PÃ¡ginas:</strong><br>{{ pdf_artifact.page_count or '-' }}</div>
+            <div class="col-md-2"><strong>TamaÃ±o:</strong><br>{{ pdf_artifact.archivo_size or '-' }} bytes</div>
+            <div class="col-md-3"><strong>Hash:</strong><br><code>{{ (pdf_artifact.archivo_sha256 or '')[:12] }}</code></div>
+            <div class="col-md-2"><strong>Proveedor:</strong><br>{{ pdf_artifact.provider }}</div>
+        </div>
+        <p class="mt-3 mb-2"><strong>Snapshot fuente:</strong> <code>{{ pdf_artifact.source_snapshot.public_id[:12] }}</code></p>
+        <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-sm btn-outline-primary"
+               href="{{ url_for('documentacion.ver_pdf_aprobado', item_id=item.id, version_id=version_vigente.id) }}">
+                Ver PDF
+            </a>
+            {% if can('documentos.descargar') %}
+            <a class="btn btn-sm btn-outline-secondary"
+               href="{{ url_for('documentacion.descargar_pdf_aprobado', item_id=item.id, version_id=version_vigente.id) }}">
+                Descargar PDF
+            </a>
+            {% endif %}
+            <a class="btn btn-sm btn-outline-info"
+               href="{{ url_for('documentacion.ver_onlyoffice', item_id=item.id, version_id=version_vigente.id) }}">
+                Ver snapshot fuente
+            </a>
+        </div>
+    {% elif pdf_artifact and pdf_artifact.estado == 'ERROR' %}
+        <div class="alert alert-danger mt-3 mb-2">
+            No se pudo generar el PDF aprobado. {{ pdf_artifact.error_mensaje or 'Error controlado de conversiÃ³n.' }}
+        </div>
+        {% if pdf_conversion and can('documentos.aprobar') %}
+        <form method="post" action="{{ url_for('documentacion.actualizar_conversion', public_id=pdf_conversion.public_id) }}">
+            <button type="submit" class="btn btn-sm btn-outline-danger">Reintentar conversiÃ³n</button>
+        </form>
+        {% endif %}
+    {% elif pdf_conversion %}
+        <p class="mt-3 mb-2">
+            Estado del proceso: {{ pdf_conversion.estado }}{% if pdf_conversion.percent is not none %} â€” {{ pdf_conversion.percent }} %{% endif %}
+        </p>
+        {% if can('documentos.aprobar') %}
+        <form method="post" action="{{ url_for('documentacion.actualizar_conversion', public_id=pdf_conversion.public_id) }}">
+            <button type="submit" class="btn btn-sm btn-outline-primary">Actualizar conversiÃ³n</button>
+        </form>
+        {% endif %}
+    {% else %}
+        <p class="mt-3 mb-0">La conversiÃ³n automÃ¡tica se iniciarÃ¡ cuando estÃ© habilitada y la versiÃ³n aprobada tenga snapshot APROBADO.</p>
+    {% endif %}
+</div>
+{% endif %}
+
 {% if version_preparacion %}
 <div class="page-card mb-4">
     <h5>Versión en preparación</h5>

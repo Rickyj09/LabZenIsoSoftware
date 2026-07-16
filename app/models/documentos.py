@@ -72,6 +72,42 @@ ESTADOS_DOCUMENTO_SNAPSHOT = (
     SNAPSHOT_INVALIDADO,
 )
 
+ARTEFACTO_PDF_APROBADO = "PDF_APROBADO"
+
+TIPOS_DOCUMENTO_ARTEFACTO = (
+    ARTEFACTO_PDF_APROBADO,
+)
+
+ARTEFACTO_PENDIENTE = "PENDIENTE"
+ARTEFACTO_CONVIRTIENDO = "CONVIRTIENDO"
+ARTEFACTO_DISPONIBLE = "DISPONIBLE"
+ARTEFACTO_ERROR = "ERROR"
+ARTEFACTO_CANCELADO = "CANCELADO"
+
+ESTADOS_DOCUMENTO_ARTEFACTO = (
+    ARTEFACTO_PENDIENTE,
+    ARTEFACTO_CONVIRTIENDO,
+    ARTEFACTO_DISPONIBLE,
+    ARTEFACTO_ERROR,
+    ARTEFACTO_CANCELADO,
+)
+
+CONVERSION_PENDIENTE = "PENDIENTE"
+CONVERSION_SOLICITADA = "SOLICITADA"
+CONVERSION_EN_PROCESO = "EN_PROCESO"
+CONVERSION_COMPLETADA = "COMPLETADA"
+CONVERSION_ERROR = "ERROR"
+CONVERSION_CANCELADA = "CANCELADA"
+
+ESTADOS_DOCUMENTO_CONVERSION = (
+    CONVERSION_PENDIENTE,
+    CONVERSION_SOLICITADA,
+    CONVERSION_EN_PROCESO,
+    CONVERSION_COMPLETADA,
+    CONVERSION_ERROR,
+    CONVERSION_CANCELADA,
+)
+
 ESTADO_DOCUMENTO_LABELS = {
     ESTADO_EN_ELABORACION: "EN ELABORACIÓN",
     ESTADO_EN_REVISION: "EN REVISIÓN",
@@ -331,6 +367,138 @@ class DocumentoSnapshot(TenantMixin, BaseModel):
     creado_por = db.relationship("Usuario", foreign_keys=[creado_por_id])
     workflow_evento = db.relationship("DocumentoAprobacion", foreign_keys=[workflow_evento_id])
     snapshot_origen = db.relationship("DocumentoSnapshot", remote_side="DocumentoSnapshot.id")
+
+
+class DocumentoArtefacto(TenantMixin, BaseModel):
+    __tablename__ = "documento_artefactos"
+    __table_args__ = (
+        db.CheckConstraint("tipo IN ('PDF_APROBADO')", name="ck_documento_artefactos_tipo_valido"),
+        db.CheckConstraint(
+            "estado IN ('PENDIENTE', 'CONVIRTIENDO', 'DISPONIBLE', 'ERROR', 'CANCELADO')",
+            name="ck_documento_artefactos_estado_valido",
+        ),
+        db.CheckConstraint("archivo_size IS NULL OR archivo_size > 0", name="ck_documento_artefactos_size_positivo"),
+        db.CheckConstraint("page_count IS NULL OR page_count > 0", name="ck_documento_artefactos_page_count_positivo"),
+        db.CheckConstraint(
+            "archivo_sha256 IS NULL OR length(archivo_sha256) = 64",
+            name="ck_documento_artefactos_sha256_valido",
+        ),
+        db.CheckConstraint(
+            "source_snapshot_sha256 IS NULL OR length(source_snapshot_sha256) = 64",
+            name="ck_documento_artefactos_source_sha256_valido",
+        ),
+        db.CheckConstraint(
+            "estado <> 'DISPONIBLE' OR inmutable = true",
+            name="ck_documento_artefactos_disponible_inmutable",
+        ),
+        db.CheckConstraint(
+            "estado <> 'DISPONIBLE' OR page_count > 0",
+            name="ck_documento_artefactos_disponible_page_count",
+        ),
+        db.CheckConstraint(
+            "estado <> 'DISPONIBLE' OR archivo_size > 0",
+            name="ck_documento_artefactos_disponible_size",
+        ),
+        db.UniqueConstraint("public_id", name="uq_documento_artefactos_public_id"),
+        db.UniqueConstraint("storage_path", name="uq_documento_artefactos_storage_path"),
+        db.Index("ix_documento_artefactos_documento_id", "documento_id"),
+        db.Index("ix_documento_artefactos_documento_version_id", "documento_version_id"),
+        db.Index("ix_documento_artefactos_source_snapshot_id", "source_snapshot_id"),
+        db.Index("ix_documento_artefactos_tipo", "tipo"),
+        db.Index("ix_documento_artefactos_estado", "estado"),
+        db.Index("ix_documento_artefactos_creado_en", "creado_en"),
+        db.Index("ix_documento_artefactos_archivo_sha256", "archivo_sha256"),
+        db.Index("ix_documento_artefactos_provider", "provider"),
+        db.Index(
+            "uq_documento_artefactos_pdf_aprobado_disponible",
+            "source_snapshot_id",
+            "tipo",
+            unique=True,
+            postgresql_where=db.text("tipo = 'PDF_APROBADO' AND estado = 'DISPONIBLE'"),
+            sqlite_where=db.text("tipo = 'PDF_APROBADO' AND estado = 'DISPONIBLE'"),
+        ),
+    )
+
+    public_id = db.Column(db.String(64), nullable=False)
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
+    documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
+    source_snapshot_id = db.Column(db.BigInteger, db.ForeignKey("documento_snapshots.id"), nullable=False)
+    tipo = db.Column(db.String(30), nullable=False, default=ARTEFACTO_PDF_APROBADO)
+    estado = db.Column(db.String(30), nullable=False, default=ARTEFACTO_PENDIENTE)
+    storage_path = db.Column(db.String(500))
+    archivo_nombre_interno = db.Column(db.String(255))
+    archivo_nombre_visible = db.Column(db.String(255))
+    archivo_mime = db.Column(db.String(255))
+    archivo_size = db.Column(db.BigInteger)
+    archivo_sha256 = db.Column(db.String(64))
+    source_snapshot_sha256 = db.Column(db.String(64), nullable=False)
+    page_count = db.Column(db.Integer)
+    provider = db.Column(db.String(50), nullable=False, default="onlyoffice")
+    provider_version = db.Column(db.String(50))
+    creado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
+    creado_en = db.Column(db.DateTime(timezone=True), nullable=False)
+    disponible_en = db.Column(db.DateTime(timezone=True))
+    inmutable = db.Column(db.Boolean, nullable=False, default=False)
+    error_codigo = db.Column(db.String(80))
+    error_mensaje = db.Column(db.Text)
+    metadata_json = db.Column(db.JSON)
+
+    empresa = db.relationship("Empresa")
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    source_snapshot = db.relationship("DocumentoSnapshot", foreign_keys=[source_snapshot_id])
+    creado_por = db.relationship("Usuario", foreign_keys=[creado_por_id])
+
+
+class DocumentoConversion(TenantMixin, BaseModel):
+    __tablename__ = "documento_conversiones"
+    __table_args__ = (
+        db.CheckConstraint(
+            "estado IN ('PENDIENTE', 'SOLICITADA', 'EN_PROCESO', 'COMPLETADA', 'ERROR', 'CANCELADA')",
+            name="ck_documento_conversiones_estado_valido",
+        ),
+        db.CheckConstraint("attempt_number > 0", name="ck_documento_conversiones_attempt_positivo"),
+        db.CheckConstraint("percent IS NULL OR (percent >= 0 AND percent <= 100)", name="ck_documento_conversiones_percent_valido"),
+        db.UniqueConstraint("public_id", name="uq_documento_conversiones_public_id"),
+        db.UniqueConstraint("conversion_key", name="uq_documento_conversiones_conversion_key"),
+        db.Index("ix_documento_conversiones_documento_id", "documento_id"),
+        db.Index("ix_documento_conversiones_documento_version_id", "documento_version_id"),
+        db.Index("ix_documento_conversiones_source_snapshot_id", "source_snapshot_id"),
+        db.Index("ix_documento_conversiones_artefacto_id", "artefacto_id"),
+        db.Index("ix_documento_conversiones_provider", "provider"),
+        db.Index("ix_documento_conversiones_estado", "estado"),
+        db.Index("ix_documento_conversiones_attempt_number", "attempt_number"),
+        db.Index("ix_documento_conversiones_solicitado_en", "solicitado_en"),
+    )
+
+    public_id = db.Column(db.String(64), nullable=False)
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
+    documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
+    source_snapshot_id = db.Column(db.BigInteger, db.ForeignKey("documento_snapshots.id"), nullable=False)
+    artefacto_id = db.Column(db.BigInteger, db.ForeignKey("documento_artefactos.id"), nullable=True)
+    provider = db.Column(db.String(50), nullable=False, default="onlyoffice")
+    conversion_key = db.Column(db.String(128), nullable=False)
+    estado = db.Column(db.String(30), nullable=False, default=CONVERSION_PENDIENTE)
+    attempt_number = db.Column(db.Integer, nullable=False, default=1)
+    percent = db.Column(db.Integer)
+    solicitado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
+    solicitado_en = db.Column(db.DateTime(timezone=True), nullable=False)
+    iniciado_en = db.Column(db.DateTime(timezone=True))
+    ultima_consulta_en = db.Column(db.DateTime(timezone=True))
+    completado_en = db.Column(db.DateTime(timezone=True))
+    error_code = db.Column(db.String(80))
+    error_message = db.Column(db.Text)
+    request_fingerprint = db.Column(db.String(128))
+    response_fingerprint = db.Column(db.String(128))
+    source_url_expires_at = db.Column(db.DateTime(timezone=True))
+    metadata_json = db.Column(db.JSON)
+
+    empresa = db.relationship("Empresa")
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    source_snapshot = db.relationship("DocumentoSnapshot", foreign_keys=[source_snapshot_id])
+    artefacto = db.relationship("DocumentoArtefacto", foreign_keys=[artefacto_id])
+    solicitado_por = db.relationship("Usuario", foreign_keys=[solicitado_por_id])
 
 
 class DocumentoEdicion(TenantMixin, BaseModel):
