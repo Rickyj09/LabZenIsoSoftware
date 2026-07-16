@@ -32,3 +32,9 @@ storage/
 backups/
 *.backup
 docs/cliente/*.docx
+
+# Local digital-signature trust/test material. Do not version keys,
+# private trust stores or synthetic signing fixtures.
+instance/signature-trust/
+instance/signature-test/
+storage/signature-test/

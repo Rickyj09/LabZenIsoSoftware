@@ -20,6 +20,9 @@ from app.models.documentos import (
     DocumentoVersion,
     DocumentoAprobacion,
     ESTADOS_DOCUMENTO,
+    DocumentoFirmaProceso,
+    DocumentoFirmaPaso,
+    FIRMA_PASO_HABILITADO,
 )
 from app.services.document_versioning_service import (
     DocumentVersioningError,
@@ -52,6 +55,7 @@ from app.services.document_pending_service import get_pending_documents_for_user
 from app.services.document_dashboard_service import get_document_dashboard_stats
 from app.services.document_snapshot_service import DocumentSnapshotError, DocumentSnapshotService
 from app.services.document_pdf_service import DocumentPdfError, DocumentPdfService
+from app.services.document_signature_service import DocumentSignatureError, DocumentSignatureService
 from app.services.onlyoffice_document_view_service import (
     OnlyOfficeDocumentViewError,
     OnlyOfficeDocumentViewService,
@@ -403,6 +407,20 @@ def detalle(item_id):
     snapshots = DocumentSnapshotService().list_snapshots(documento=item) if can_view_history else []
     pdf_artifact = DocumentPdfService().latest_artifact_for_version(version_vigente) if version_vigente else None
     pdf_conversion = DocumentPdfService().latest_conversion_for_version(version_vigente) if version_vigente else None
+    signature_service = DocumentSignatureService()
+    signature_process = signature_service.latest_process_for_version(version_vigente) if version_vigente else None
+    signature_enabled_step = None
+    if signature_process:
+        signature_enabled_step = (
+            DocumentoFirmaPaso.query
+            .filter_by(
+                empresa_id=current_user.empresa_id,
+                proceso_id=signature_process.id,
+                usuario_id=current_user.id,
+                estado=FIRMA_PASO_HABILITADO,
+            )
+            .first()
+        )
 
     preview_url = None
     preview_tipo = None
@@ -443,6 +461,9 @@ def detalle(item_id):
         snapshots=snapshots,
         pdf_artifact=pdf_artifact,
         pdf_conversion=pdf_conversion,
+        signatures_enabled=signature_service.signatures_enabled(),
+        signature_process=signature_process,
+        signature_enabled_step=signature_enabled_step,
     )
 
 
@@ -939,6 +960,126 @@ def descargar_pdf_aprobado(item_id, version_id):
         mimetype="application/pdf",
         conditional=True,
     )
+
+
+@bp.route("/<int:item_id>/versiones/<int:version_id>/firmas/iniciar", methods=["POST"])
+@login_required
+@require_permission("documentos.aprobar")
+def iniciar_firma_digital(item_id, version_id):
+    item = Documento.query.filter_by(id=item_id, empresa_id=current_user.empresa_id).first_or_404()
+    version = DocumentoVersion.query.filter_by(
+        id=version_id,
+        documento_id=item.id,
+        empresa_id=current_user.empresa_id,
+    ).first_or_404()
+    try:
+        DocumentSignatureService().start_process(
+            documento=item,
+            version_doc=version,
+            usuario=current_user,
+            ip=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
+        )
+    except DocumentSignatureError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("documentacion.detalle", item_id=item.id))
+    flash("Proceso de firma digital externa iniciado. El documento permanece APROBADO.", "success")
+    return redirect(url_for("documentacion.detalle", item_id=item.id))
+
+
+@bp.route("/firmas/pasos/<public_id>/descargar")
+@login_required
+@require_permission("documentos.ver")
+def descargar_pdf_para_firma(public_id):
+    paso = DocumentoFirmaPaso.query.filter_by(
+        public_id=public_id,
+        empresa_id=current_user.empresa_id,
+    ).first_or_404()
+    try:
+        artifact, physical_path = DocumentSignatureService().downloadable_artifact_for_step(
+            paso=paso,
+            usuario=current_user,
+            ip=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
+        )
+    except DocumentSignatureError:
+        abort(403)
+    return send_file(
+        physical_path,
+        as_attachment=True,
+        download_name=artifact.archivo_nombre_visible or "documento-para-firma.pdf",
+        mimetype="application/pdf",
+        conditional=True,
+    )
+
+
+@bp.route("/firmas/pasos/<public_id>/subir", methods=["POST"])
+@login_required
+@require_permission("documentos.ver")
+def subir_pdf_firmado(public_id):
+    paso = DocumentoFirmaPaso.query.filter_by(
+        public_id=public_id,
+        empresa_id=current_user.empresa_id,
+    ).first_or_404()
+    try:
+        DocumentSignatureService().upload_signed_pdf(
+            paso=paso,
+            usuario=current_user,
+            file_storage=request.files.get("pdf_firmado"),
+            ip=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
+        )
+    except DocumentSignatureError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("documentacion.detalle", item_id=paso.documento_id))
+    flash("PDF firmado validado y conservado como artefacto privado e inmutable.", "success")
+    return redirect(url_for("documentacion.detalle", item_id=paso.documento_id))
+
+
+@bp.route("/firmas/pasos/<public_id>/rechazar", methods=["POST"])
+@login_required
+@require_permission("documentos.ver")
+def rechazar_paso_firma(public_id):
+    paso = DocumentoFirmaPaso.query.filter_by(
+        public_id=public_id,
+        empresa_id=current_user.empresa_id,
+    ).first_or_404()
+    try:
+        DocumentSignatureService().reject_step(
+            paso=paso,
+            usuario=current_user,
+            comentario=request.form.get("comentario", ""),
+            ip=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
+        )
+    except DocumentSignatureError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("documentacion.detalle", item_id=paso.documento_id))
+    flash("Paso de firma rechazado. El documento permanece APROBADO.", "warning")
+    return redirect(url_for("documentacion.detalle", item_id=paso.documento_id))
+
+
+@bp.route("/firmas/procesos/<public_id>/cancelar", methods=["POST"])
+@login_required
+@require_permission("documentos.aprobar")
+def cancelar_proceso_firma(public_id):
+    proceso = DocumentoFirmaProceso.query.filter_by(
+        public_id=public_id,
+        empresa_id=current_user.empresa_id,
+    ).first_or_404()
+    try:
+        DocumentSignatureService().cancel_process(
+            proceso=proceso,
+            usuario=current_user,
+            comentario=request.form.get("comentario", ""),
+            ip=request.remote_addr,
+            user_agent=request.headers.get("User-Agent"),
+        )
+    except DocumentSignatureError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("documentacion.detalle", item_id=proceso.documento_id))
+    flash("Proceso de firma cancelado. El documento permanece APROBADO.", "warning")
+    return redirect(url_for("documentacion.detalle", item_id=proceso.documento_id))
 
 
 @bp.route("/conversiones/<public_id>/actualizar", methods=["POST"])

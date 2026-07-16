@@ -348,6 +348,111 @@
 </div>
 {% endif %}
 
+{% if version_vigente and signatures_enabled %}
+<div class="page-card mb-4">
+    <div class="d-flex justify-content-between align-items-start gap-3">
+        <div>
+            <h5 class="mb-2">Firmas digitales</h5>
+            <p class="text-muted mb-0">
+                Firma externa controlada: LabZenISO entrega el PDF, recibe el PDF firmado y conserva los artefactos privados.
+                El documento permanece APROBADO.
+            </p>
+        </div>
+        {% if not signature_process and pdf_artifact and pdf_artifact.estado == 'DISPONIBLE' and can('documentos.aprobar') %}
+        <form method="post" action="{{ url_for('documentacion.iniciar_firma_digital', item_id=item.id, version_id=version_vigente.id) }}">
+            <button type="submit" class="btn btn-sm btn-outline-success">Iniciar firma externa</button>
+        </form>
+        {% elif signature_process %}
+        <span class="badge bg-info text-dark">{{ signature_process.estado }}</span>
+        {% endif %}
+    </div>
+
+    {% if signature_process %}
+        <div class="row mt-3 g-3">
+            <div class="col-md-3"><strong>Proveedor:</strong><br>{{ signature_process.provider }}</div>
+            <div class="col-md-3"><strong>Inicio:</strong><br>{{ signature_process.iniciado_en or signature_process.solicitado_en }}</div>
+            <div class="col-md-3"><strong>Vence:</strong><br>{{ signature_process.vence_en or '-' }}</div>
+            <div class="col-md-3"><strong>Final:</strong><br>
+                {% if signature_process.pdf_final %}
+                    <code>{{ signature_process.pdf_final.archivo_sha256[:12] }}</code>
+                {% else %}
+                    -
+                {% endif %}
+            </div>
+        </div>
+
+        {% if signature_enabled_step %}
+        <div class="alert alert-primary mt-3">
+            <div class="fw-semibold">Tienes un paso de firma habilitado como {{ signature_enabled_step.rol_firmante }}.</div>
+            <div class="d-flex flex-wrap gap-2 mt-2">
+                <a class="btn btn-sm btn-primary"
+                   href="{{ url_for('documentacion.descargar_pdf_para_firma', public_id=signature_enabled_step.public_id) }}">
+                    Descargar PDF para firma externa
+                </a>
+                <form method="post"
+                      action="{{ url_for('documentacion.subir_pdf_firmado', public_id=signature_enabled_step.public_id) }}"
+                      enctype="multipart/form-data"
+                      class="d-flex flex-wrap gap-2">
+                    <input type="file" name="pdf_firmado" class="form-control form-control-sm" accept="application/pdf,.pdf" required>
+                    <button type="submit" class="btn btn-sm btn-success">Subir PDF firmado</button>
+                </form>
+                <form method="post"
+                      action="{{ url_for('documentacion.rechazar_paso_firma', public_id=signature_enabled_step.public_id) }}"
+                      class="d-flex flex-wrap gap-2">
+                    <input type="text" name="comentario" class="form-control form-control-sm" placeholder="Motivo de rechazo" required>
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Rechazar firma</button>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="table-responsive mt-3">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th>Orden</th>
+                        <th>Rol</th>
+                        <th>Firmante</th>
+                        <th>Estado</th>
+                        <th>Firmado en</th>
+                        <th>Artefacto</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for paso in signature_process.pasos %}
+                    <tr>
+                        <td>{{ paso.orden }}</td>
+                        <td>{{ paso.rol_firmante }}</td>
+                        <td>{{ paso.usuario.nombre }} {{ paso.usuario.apellido or '' }}</td>
+                        <td>{{ paso.estado }}</td>
+                        <td>{{ paso.firmado_en or '-' }}</td>
+                        <td>
+                            {% if paso.artifact_salida %}
+                                {{ paso.artifact_salida.tipo }}
+                                <code>{{ paso.artifact_salida.archivo_sha256[:12] }}</code>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if can('documentos.aprobar') and signature_process.estado == 'EN_FIRMA' %}
+        <form method="post"
+              action="{{ url_for('documentacion.cancelar_proceso_firma', public_id=signature_process.public_id) }}"
+              class="d-flex flex-wrap gap-2 mt-2">
+            <input type="text" name="comentario" class="form-control form-control-sm" placeholder="Motivo de cancelaciÃ³n" required>
+            <button type="submit" class="btn btn-sm btn-outline-danger">Cancelar proceso de firma</button>
+        </form>
+        {% endif %}
+    {% elif not pdf_artifact or pdf_artifact.estado != 'DISPONIBLE' %}
+        <p class="mt-3 mb-0">Genera primero el PDF aprobado sin firmas para habilitar el flujo de firma externa.</p>
+    {% endif %}
+</div>
+{% endif %}
+
 {% if version_preparacion %}
 <div class="page-card mb-4">
     <h5>Versión en preparación</h5>

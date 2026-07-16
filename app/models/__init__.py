@@ -19,8 +19,12 @@ from app.models.documentos import (
     DocumentoSnapshot,
     DocumentoArtefacto,
     DocumentoConversion,
+    DocumentoFirmaEvento,
+    DocumentoFirmaPaso,
+    DocumentoFirmaProceso,
     DocumentoEdicion,
     DocumentoEdicionEvento,
+    UsuarioIdentidadFirma,
 )
 from app.models.calidad import NoConformidad, AccionCorrectiva, Riesgo, PersonalCompetencia
 from app.models.auditoria import Auditoria, AuditoriaHallazgo, AuditoriaLog

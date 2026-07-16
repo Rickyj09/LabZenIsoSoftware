@@ -431,6 +431,74 @@ def store_pdf_artifact_copy(
     )
 
 
+def store_signed_pdf_artifact_copy(
+    *,
+    source_path: Path,
+    documento,
+    version_doc,
+    source_artifact,
+    signed_revision: int,
+    final: bool = False,
+    expected_sha256: str | None = None,
+) -> StoredPdfArtifactFile:
+    """Guarda un PDF firmado parcial/final como artefacto privado e inmutable."""
+    if source_path.is_symlink():
+        raise DocumentStorageError("No se permite almacenar un PDF firmado desde un enlace simbolico.")
+    if not source_path.is_file():
+        raise DocumentStorageError("El PDF firmado temporal no existe.")
+    source_sha256, source_size = file_digest_and_size(source_path)
+    if expected_sha256 and source_sha256 != expected_sha256:
+        raise DocumentStorageError("El hash del PDF firmado no coincide con la validacion previa.")
+
+    relative_directory = Path(
+        f"empresa_{int(documento.empresa_id)}",
+        f"documento_{int(documento.id)}",
+        f"v{_safe_version(getattr(version_doc, 'version', version_doc.id))}",
+        "pdf",
+        "firmas",
+    )
+    destination_directory = (_storage_root() / relative_directory).resolve()
+    destination_directory.mkdir(parents=True, exist_ok=True)
+    if os.path.commonpath([str(_storage_root()), str(destination_directory)]) != str(_storage_root()):
+        raise DocumentStorageError("La ruta de artefactos PDF firmados no es valida.")
+
+    source_hash = _safe_hash_part(getattr(source_artifact, "archivo_sha256", ""))[:12]
+    pdf_hash = _safe_hash_part(source_sha256)[:12]
+    prefix = "firmado-final" if final else "firmado-parcial"
+    stored_name = f"{prefix}-r{int(signed_revision)}-{source_hash}-{pdf_hash}.pdf"
+    destination = (destination_directory / stored_name).resolve()
+    if os.path.commonpath([str(_storage_root()), str(destination)]) != str(_storage_root()):
+        raise DocumentStorageError("La ruta del PDF firmado no es valida.")
+    if destination.exists():
+        raise DocumentStorageError("Ya existe un PDF firmado en la ruta destino.")
+    if destination.is_symlink():
+        raise DocumentStorageError("No se permite sobrescribir enlaces simbolicos.")
+
+    temporary = (destination_directory / f".signed-pdf-{uuid4().hex}.tmp").resolve()
+    try:
+        shutil.copyfile(source_path, temporary, follow_symlinks=False)
+        copied_sha256, copied_size = file_digest_and_size(temporary)
+        if copied_sha256 != source_sha256 or copied_size != source_size:
+            raise DocumentStorageError("El hash del PDF firmado copiado no coincide con el origen.")
+        os.replace(temporary, destination)
+        try:
+            destination.chmod(0o444)
+        except OSError:
+            current_app.logger.debug("No se pudo marcar PDF firmado como solo lectura: %s", stored_name)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
+        raise
+
+    return StoredPdfArtifactFile(
+        stored_name=stored_name,
+        storage_path=(relative_directory / stored_name).as_posix(),
+        mime_type="application/pdf",
+        size=source_size,
+        sha256=source_sha256,
+    )
+
+
 def delete_pdf_artifact_file(storage_path: str | None) -> None:
     if not storage_path:
         return

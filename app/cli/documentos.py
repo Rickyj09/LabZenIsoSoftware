@@ -2,6 +2,7 @@ import click
 
 from app.models.documentos import CONVERSION_EN_PROCESO, CONVERSION_PENDIENTE, CONVERSION_SOLICITADA, DocumentoConversion
 from app.services.document_pdf_service import DocumentPdfError, DocumentPdfService
+from app.services.document_signature_service import DocumentSignatureService
 from app.services.document_demo_seed_service import seed_demo_documents
 from app.services.document_migration_service import migrate_historical_document_files
 
@@ -69,6 +70,13 @@ def conversiones_pendientes(procesar):
                 )
             except DocumentPdfError as exc:
                 click.echo(f"  error controlado: {exc}")
+
+
+@documentos_cli.command(name="firmas-vencidas")
+def firmas_vencidas():
+    """Marca procesos de firma digital externa vencidos."""
+    total = DocumentSignatureService().expire_due_processes(reporter=click.echo)
+    click.echo(f"Procesos de firma vencidos actualizados: {total}.")
 
 
 @documentos_cli.command(name="seed-demo")

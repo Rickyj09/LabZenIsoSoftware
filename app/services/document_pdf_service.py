@@ -375,7 +375,7 @@ class DocumentPdfService:
         self._validate_approved_snapshot(snapshot)
         return snapshot
 
-    def validate_pdf_file(self, path):
+    def validate_pdf_file(self, path, *, allow_signature_forms=False):
         if path.is_symlink() or not path.is_file():
             raise DocumentPdfError("PDF no disponible para validacion.")
         sha256, size = file_digest_and_size(path)
@@ -395,7 +395,7 @@ class DocumentPdfService:
             "javascript": b"/JavaScript" in data or b"/JS" in data,
             "open_action": b"/OpenAction" in data or b"/AA" in data,
             "embedded_files": b"/EmbeddedFile" in data,
-            "forms": b"/AcroForm" in data,
+            "forms": (not allow_signature_forms) and b"/AcroForm" in data,
         }
         if any(active_markers.values()):
             raise DocumentPdfError("PDF con contenido activo inesperado.")

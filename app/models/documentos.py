@@ -73,9 +73,13 @@ ESTADOS_DOCUMENTO_SNAPSHOT = (
 )
 
 ARTEFACTO_PDF_APROBADO = "PDF_APROBADO"
+ARTEFACTO_PDF_FIRMADO_PARCIAL = "PDF_FIRMADO_PARCIAL"
+ARTEFACTO_PDF_FIRMADO_FINAL = "PDF_FIRMADO_FINAL"
 
 TIPOS_DOCUMENTO_ARTEFACTO = (
     ARTEFACTO_PDF_APROBADO,
+    ARTEFACTO_PDF_FIRMADO_PARCIAL,
+    ARTEFACTO_PDF_FIRMADO_FINAL,
 )
 
 ARTEFACTO_PENDIENTE = "PENDIENTE"
@@ -106,6 +110,94 @@ ESTADOS_DOCUMENTO_CONVERSION = (
     CONVERSION_COMPLETADA,
     CONVERSION_ERROR,
     CONVERSION_CANCELADA,
+)
+
+FIRMA_PROVEEDOR_EXTERNO_CONTROLADO = "external_controlled"
+
+FIRMA_PROCESO_PENDIENTE = "PENDIENTE"
+FIRMA_PROCESO_EN_FIRMA = "EN_FIRMA"
+FIRMA_PROCESO_COMPLETADO = "COMPLETADO"
+FIRMA_PROCESO_RECHAZADO = "RECHAZADO"
+FIRMA_PROCESO_CANCELADO = "CANCELADO"
+FIRMA_PROCESO_ERROR = "ERROR"
+FIRMA_PROCESO_VENCIDO = "VENCIDO"
+
+ESTADOS_FIRMA_PROCESO = (
+    FIRMA_PROCESO_PENDIENTE,
+    FIRMA_PROCESO_EN_FIRMA,
+    FIRMA_PROCESO_COMPLETADO,
+    FIRMA_PROCESO_RECHAZADO,
+    FIRMA_PROCESO_CANCELADO,
+    FIRMA_PROCESO_ERROR,
+    FIRMA_PROCESO_VENCIDO,
+)
+
+FIRMA_PASO_PENDIENTE = "PENDIENTE"
+FIRMA_PASO_HABILITADO = "HABILITADO"
+FIRMA_PASO_FIRMADO = "FIRMADO"
+FIRMA_PASO_RECHAZADO = "RECHAZADO"
+FIRMA_PASO_CANCELADO = "CANCELADO"
+FIRMA_PASO_ERROR = "ERROR"
+FIRMA_PASO_VENCIDO = "VENCIDO"
+
+ESTADOS_FIRMA_PASO = (
+    FIRMA_PASO_PENDIENTE,
+    FIRMA_PASO_HABILITADO,
+    FIRMA_PASO_FIRMADO,
+    FIRMA_PASO_RECHAZADO,
+    FIRMA_PASO_CANCELADO,
+    FIRMA_PASO_ERROR,
+    FIRMA_PASO_VENCIDO,
+)
+
+FIRMA_ROL_ELABORADOR = "ELABORADOR"
+FIRMA_ROL_REVISOR = "REVISOR"
+FIRMA_ROL_APROBADOR = "APROBADOR"
+
+ROLES_FIRMA_PASO = (
+    FIRMA_ROL_ELABORADOR,
+    FIRMA_ROL_REVISOR,
+    FIRMA_ROL_APROBADOR,
+)
+
+FIRMA_IDENTIDAD_PENDIENTE = "PENDIENTE"
+FIRMA_IDENTIDAD_VERIFICADA = "VERIFICADA"
+FIRMA_IDENTIDAD_RECHAZADA = "RECHAZADA"
+FIRMA_IDENTIDAD_REVOCADA = "REVOCADA"
+
+ESTADOS_IDENTIDAD_FIRMA = (
+    FIRMA_IDENTIDAD_PENDIENTE,
+    FIRMA_IDENTIDAD_VERIFICADA,
+    FIRMA_IDENTIDAD_RECHAZADA,
+    FIRMA_IDENTIDAD_REVOCADA,
+)
+
+FIRMA_EVENTO_PROCESO_CREADO = "PROCESO_CREADO"
+FIRMA_EVENTO_PASO_HABILITADO = "PASO_HABILITADO"
+FIRMA_EVENTO_PDF_DESCARGADO = "PDF_DESCARGADO"
+FIRMA_EVENTO_PDF_SUBIDO = "PDF_SUBIDO"
+FIRMA_EVENTO_VALIDACION_OK = "VALIDACION_OK"
+FIRMA_EVENTO_VALIDACION_ERROR = "VALIDACION_ERROR"
+FIRMA_EVENTO_PASO_FIRMADO = "PASO_FIRMADO"
+FIRMA_EVENTO_PROCESO_COMPLETADO = "PROCESO_COMPLETADO"
+FIRMA_EVENTO_RECHAZADO = "RECHAZADO"
+FIRMA_EVENTO_CANCELADO = "CANCELADO"
+FIRMA_EVENTO_VENCIDO = "VENCIDO"
+FIRMA_EVENTO_ERROR = "ERROR"
+
+TIPOS_FIRMA_EVENTO = (
+    FIRMA_EVENTO_PROCESO_CREADO,
+    FIRMA_EVENTO_PASO_HABILITADO,
+    FIRMA_EVENTO_PDF_DESCARGADO,
+    FIRMA_EVENTO_PDF_SUBIDO,
+    FIRMA_EVENTO_VALIDACION_OK,
+    FIRMA_EVENTO_VALIDACION_ERROR,
+    FIRMA_EVENTO_PASO_FIRMADO,
+    FIRMA_EVENTO_PROCESO_COMPLETADO,
+    FIRMA_EVENTO_RECHAZADO,
+    FIRMA_EVENTO_CANCELADO,
+    FIRMA_EVENTO_VENCIDO,
+    FIRMA_EVENTO_ERROR,
 )
 
 ESTADO_DOCUMENTO_LABELS = {
@@ -372,7 +464,10 @@ class DocumentoSnapshot(TenantMixin, BaseModel):
 class DocumentoArtefacto(TenantMixin, BaseModel):
     __tablename__ = "documento_artefactos"
     __table_args__ = (
-        db.CheckConstraint("tipo IN ('PDF_APROBADO')", name="ck_documento_artefactos_tipo_valido"),
+        db.CheckConstraint(
+            "tipo IN ('PDF_APROBADO', 'PDF_FIRMADO_PARCIAL', 'PDF_FIRMADO_FINAL')",
+            name="ck_documento_artefactos_tipo_valido",
+        ),
         db.CheckConstraint(
             "estado IN ('PENDIENTE', 'CONVIRTIENDO', 'DISPONIBLE', 'ERROR', 'CANCELADO')",
             name="ck_documento_artefactos_estado_valido",
@@ -387,6 +482,12 @@ class DocumentoArtefacto(TenantMixin, BaseModel):
             "source_snapshot_sha256 IS NULL OR length(source_snapshot_sha256) = 64",
             name="ck_documento_artefactos_source_sha256_valido",
         ),
+        db.CheckConstraint(
+            "source_artifact_sha256 IS NULL OR length(source_artifact_sha256) = 64",
+            name="ck_documento_artefactos_source_artifact_sha256_valido",
+        ),
+        db.CheckConstraint("signature_count IS NULL OR signature_count >= 0", name="ck_documento_artefactos_signature_count_valido"),
+        db.CheckConstraint("signed_revision IS NULL OR signed_revision > 0", name="ck_documento_artefactos_signed_revision_valido"),
         db.CheckConstraint(
             "estado <> 'DISPONIBLE' OR inmutable = true",
             name="ck_documento_artefactos_disponible_inmutable",
@@ -409,6 +510,9 @@ class DocumentoArtefacto(TenantMixin, BaseModel):
         db.Index("ix_documento_artefactos_creado_en", "creado_en"),
         db.Index("ix_documento_artefactos_archivo_sha256", "archivo_sha256"),
         db.Index("ix_documento_artefactos_provider", "provider"),
+        db.Index("ix_documento_artefactos_source_artifact_id", "source_artifact_id"),
+        db.Index("ix_documento_artefactos_firma_proceso_id", "firma_proceso_id"),
+        db.Index("ix_documento_artefactos_firma_paso_id", "firma_paso_id"),
         db.Index(
             "uq_documento_artefactos_pdf_aprobado_disponible",
             "source_snapshot_id",
@@ -423,6 +527,9 @@ class DocumentoArtefacto(TenantMixin, BaseModel):
     documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
     documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
     source_snapshot_id = db.Column(db.BigInteger, db.ForeignKey("documento_snapshots.id"), nullable=False)
+    source_artifact_id = db.Column(db.BigInteger, db.ForeignKey("documento_artefactos.id", use_alter=True), nullable=True)
+    firma_proceso_id = db.Column(db.BigInteger, db.ForeignKey("documento_firma_procesos.id", use_alter=True), nullable=True)
+    firma_paso_id = db.Column(db.BigInteger, db.ForeignKey("documento_firma_pasos.id", use_alter=True), nullable=True)
     tipo = db.Column(db.String(30), nullable=False, default=ARTEFACTO_PDF_APROBADO)
     estado = db.Column(db.String(30), nullable=False, default=ARTEFACTO_PENDIENTE)
     storage_path = db.Column(db.String(500))
@@ -432,7 +539,13 @@ class DocumentoArtefacto(TenantMixin, BaseModel):
     archivo_size = db.Column(db.BigInteger)
     archivo_sha256 = db.Column(db.String(64))
     source_snapshot_sha256 = db.Column(db.String(64), nullable=False)
+    source_artifact_sha256 = db.Column(db.String(64))
     page_count = db.Column(db.Integer)
+    signature_count = db.Column(db.Integer)
+    validation_state = db.Column(db.String(50))
+    signed_revision = db.Column(db.Integer)
+    signed_by_user_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=True)
+    signed_at = db.Column(db.DateTime(timezone=True))
     provider = db.Column(db.String(50), nullable=False, default="onlyoffice")
     provider_version = db.Column(db.String(50))
     creado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
@@ -447,7 +560,11 @@ class DocumentoArtefacto(TenantMixin, BaseModel):
     documento = db.relationship("Documento", foreign_keys=[documento_id])
     documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
     source_snapshot = db.relationship("DocumentoSnapshot", foreign_keys=[source_snapshot_id])
+    source_artifact = db.relationship("DocumentoArtefacto", remote_side="DocumentoArtefacto.id", foreign_keys=[source_artifact_id])
+    firma_proceso = db.relationship("DocumentoFirmaProceso", foreign_keys=[firma_proceso_id])
+    firma_paso = db.relationship("DocumentoFirmaPaso", foreign_keys=[firma_paso_id])
     creado_por = db.relationship("Usuario", foreign_keys=[creado_por_id])
+    signed_by = db.relationship("Usuario", foreign_keys=[signed_by_user_id])
 
 
 class DocumentoConversion(TenantMixin, BaseModel):
@@ -499,6 +616,168 @@ class DocumentoConversion(TenantMixin, BaseModel):
     source_snapshot = db.relationship("DocumentoSnapshot", foreign_keys=[source_snapshot_id])
     artefacto = db.relationship("DocumentoArtefacto", foreign_keys=[artefacto_id])
     solicitado_por = db.relationship("Usuario", foreign_keys=[solicitado_por_id])
+
+
+class UsuarioIdentidadFirma(TenantMixin, BaseModel):
+    __tablename__ = "usuario_identidades_firma"
+    __table_args__ = (
+        db.CheckConstraint(
+            "estado IN ('PENDIENTE', 'VERIFICADA', 'RECHAZADA', 'REVOCADA')",
+            name="ck_usuario_identidades_firma_estado_valido",
+        ),
+        db.CheckConstraint(
+            "certificado_fingerprint_sha256 IS NULL OR length(certificado_fingerprint_sha256) = 64",
+            name="ck_usuario_identidades_firma_fingerprint_valido",
+        ),
+        db.UniqueConstraint("usuario_id", "identificacion", name="uq_usuario_identidad_firma_identificacion"),
+        db.Index("ix_usuario_identidades_firma_usuario_id", "usuario_id"),
+        db.Index("ix_usuario_identidades_firma_estado", "estado"),
+    )
+
+    usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
+    identificacion = db.Column(db.String(50), nullable=False)
+    nombre_certificado = db.Column(db.String(255))
+    emisor_certificado = db.Column(db.String(255))
+    certificado_fingerprint_sha256 = db.Column(db.String(64))
+    estado = db.Column(db.String(30), nullable=False, default=FIRMA_IDENTIDAD_PENDIENTE)
+    verificado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=True)
+    verificado_en = db.Column(db.DateTime(timezone=True))
+    metadata_json = db.Column(db.JSON)
+
+    empresa = db.relationship("Empresa")
+    usuario = db.relationship("Usuario", foreign_keys=[usuario_id])
+    verificado_por = db.relationship("Usuario", foreign_keys=[verificado_por_id])
+
+
+class DocumentoFirmaProceso(TenantMixin, BaseModel):
+    __tablename__ = "documento_firma_procesos"
+    __table_args__ = (
+        db.CheckConstraint(
+            "estado IN ('PENDIENTE', 'EN_FIRMA', 'COMPLETADO', 'RECHAZADO', 'CANCELADO', 'ERROR', 'VENCIDO')",
+            name="ck_documento_firma_procesos_estado_valido",
+        ),
+        db.UniqueConstraint("public_id", name="uq_documento_firma_procesos_public_id"),
+        db.Index("ix_documento_firma_procesos_documento_id", "documento_id"),
+        db.Index("ix_documento_firma_procesos_documento_version_id", "documento_version_id"),
+        db.Index("ix_documento_firma_procesos_pdf_origen_id", "pdf_origen_id"),
+        db.Index("ix_documento_firma_procesos_estado", "estado"),
+        db.Index(
+            "uq_documento_firma_proceso_activo",
+            "documento_version_id",
+            unique=True,
+            postgresql_where=db.text("estado IN ('PENDIENTE', 'EN_FIRMA')"),
+            sqlite_where=db.text("estado IN ('PENDIENTE', 'EN_FIRMA')"),
+        ),
+    )
+
+    public_id = db.Column(db.String(64), nullable=False)
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
+    documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
+    pdf_origen_id = db.Column(db.BigInteger, db.ForeignKey("documento_artefactos.id"), nullable=False)
+    pdf_final_id = db.Column(db.BigInteger, db.ForeignKey("documento_artefactos.id"), nullable=True)
+    provider = db.Column(db.String(50), nullable=False, default=FIRMA_PROVEEDOR_EXTERNO_CONTROLADO)
+    estado = db.Column(db.String(30), nullable=False, default=FIRMA_PROCESO_PENDIENTE)
+    solicitado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
+    solicitado_en = db.Column(db.DateTime(timezone=True), nullable=False)
+    iniciado_en = db.Column(db.DateTime(timezone=True))
+    completado_en = db.Column(db.DateTime(timezone=True))
+    vence_en = db.Column(db.DateTime(timezone=True))
+    error_codigo = db.Column(db.String(80))
+    error_mensaje = db.Column(db.Text)
+    metadata_json = db.Column(db.JSON)
+
+    empresa = db.relationship("Empresa")
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    pdf_origen = db.relationship("DocumentoArtefacto", foreign_keys=[pdf_origen_id])
+    pdf_final = db.relationship("DocumentoArtefacto", foreign_keys=[pdf_final_id])
+    solicitado_por = db.relationship("Usuario", foreign_keys=[solicitado_por_id])
+    pasos = db.relationship("DocumentoFirmaPaso", back_populates="proceso", order_by="DocumentoFirmaPaso.orden", lazy=True)
+    eventos = db.relationship("DocumentoFirmaEvento", back_populates="proceso", order_by="DocumentoFirmaEvento.creado_en", lazy=True)
+
+
+class DocumentoFirmaPaso(TenantMixin, BaseModel):
+    __tablename__ = "documento_firma_pasos"
+    __table_args__ = (
+        db.CheckConstraint(
+            "rol_firmante IN ('ELABORADOR', 'REVISOR', 'APROBADOR')",
+            name="ck_documento_firma_pasos_rol_valido",
+        ),
+        db.CheckConstraint(
+            "estado IN ('PENDIENTE', 'HABILITADO', 'FIRMADO', 'RECHAZADO', 'CANCELADO', 'ERROR', 'VENCIDO')",
+            name="ck_documento_firma_pasos_estado_valido",
+        ),
+        db.CheckConstraint("orden > 0", name="ck_documento_firma_pasos_orden_positivo"),
+        db.CheckConstraint("signature_count_after IS NULL OR signature_count_after >= 0", name="ck_documento_firma_pasos_signature_count_valido"),
+        db.UniqueConstraint("public_id", name="uq_documento_firma_pasos_public_id"),
+        db.UniqueConstraint("proceso_id", "orden", name="uq_documento_firma_pasos_proceso_orden"),
+        db.Index("ix_documento_firma_pasos_proceso_id", "proceso_id"),
+        db.Index("ix_documento_firma_pasos_usuario_id", "usuario_id"),
+        db.Index("ix_documento_firma_pasos_estado", "estado"),
+    )
+
+    public_id = db.Column(db.String(64), nullable=False)
+    proceso_id = db.Column(db.BigInteger, db.ForeignKey("documento_firma_procesos.id"), nullable=False)
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
+    documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
+    orden = db.Column(db.Integer, nullable=False)
+    rol_firmante = db.Column(db.String(30), nullable=False)
+    usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
+    identidad_firma_id = db.Column(db.BigInteger, db.ForeignKey("usuario_identidades_firma.id"), nullable=True)
+    estado = db.Column(db.String(30), nullable=False, default=FIRMA_PASO_PENDIENTE)
+    artifact_entrada_id = db.Column(db.BigInteger, db.ForeignKey("documento_artefactos.id"), nullable=True)
+    artifact_salida_id = db.Column(db.BigInteger, db.ForeignKey("documento_artefactos.id"), nullable=True)
+    habilitado_en = db.Column(db.DateTime(timezone=True))
+    firmado_en = db.Column(db.DateTime(timezone=True))
+    vence_en = db.Column(db.DateTime(timezone=True))
+    signature_count_after = db.Column(db.Integer)
+    validation_state = db.Column(db.String(50))
+    validation_summary = db.Column(db.Text)
+    error_codigo = db.Column(db.String(80))
+    error_mensaje = db.Column(db.Text)
+    metadata_json = db.Column(db.JSON)
+
+    empresa = db.relationship("Empresa")
+    proceso = db.relationship("DocumentoFirmaProceso", back_populates="pasos", foreign_keys=[proceso_id])
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    usuario = db.relationship("Usuario", foreign_keys=[usuario_id])
+    identidad_firma = db.relationship("UsuarioIdentidadFirma", foreign_keys=[identidad_firma_id])
+    artifact_entrada = db.relationship("DocumentoArtefacto", foreign_keys=[artifact_entrada_id])
+    artifact_salida = db.relationship("DocumentoArtefacto", foreign_keys=[artifact_salida_id])
+
+
+class DocumentoFirmaEvento(TenantMixin, BaseModel):
+    __tablename__ = "documento_firma_eventos"
+    __table_args__ = (
+        db.CheckConstraint(
+            "tipo_evento IN ('PROCESO_CREADO', 'PASO_HABILITADO', 'PDF_DESCARGADO', 'PDF_SUBIDO', 'VALIDACION_OK', 'VALIDACION_ERROR', 'PASO_FIRMADO', 'PROCESO_COMPLETADO', 'RECHAZADO', 'CANCELADO', 'VENCIDO', 'ERROR')",
+            name="ck_documento_firma_eventos_tipo_valido",
+        ),
+        db.Index("ix_documento_firma_eventos_proceso_id", "proceso_id"),
+        db.Index("ix_documento_firma_eventos_paso_id", "paso_id"),
+        db.Index("ix_documento_firma_eventos_tipo_evento", "tipo_evento"),
+        db.Index("ix_documento_firma_eventos_creado_en", "creado_en"),
+    )
+
+    proceso_id = db.Column(db.BigInteger, db.ForeignKey("documento_firma_procesos.id"), nullable=False)
+    paso_id = db.Column(db.BigInteger, db.ForeignKey("documento_firma_pasos.id"), nullable=True)
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
+    documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
+    usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=True)
+    tipo_evento = db.Column(db.String(40), nullable=False)
+    creado_en = db.Column(db.DateTime(timezone=True), nullable=False)
+    ip = db.Column(db.String(50))
+    user_agent = db.Column(db.Text)
+    detalle = db.Column(db.Text)
+    metadata_json = db.Column(db.JSON)
+
+    empresa = db.relationship("Empresa")
+    proceso = db.relationship("DocumentoFirmaProceso", back_populates="eventos", foreign_keys=[proceso_id])
+    paso = db.relationship("DocumentoFirmaPaso", foreign_keys=[paso_id])
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    usuario = db.relationship("Usuario", foreign_keys=[usuario_id])
 
 
 class DocumentoEdicion(TenantMixin, BaseModel):
