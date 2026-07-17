@@ -3,12 +3,85 @@
 {% block title %}Ver documento en ONLYOFFICE{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+<style>
+    .onlyoffice-viewer-header {
+        margin-bottom: 0.85rem;
+    }
+
+    .onlyoffice-viewer-title {
+        font-size: clamp(1.25rem, 2vw, 1.75rem);
+        line-height: 1.2;
+    }
+
+    .onlyoffice-viewer-notice {
+        margin-bottom: 0.85rem;
+        padding: 0.7rem 1rem;
+    }
+
+    .onlyoffice-viewer-card {
+        width: 100%;
+        background: #fff;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 0.95rem;
+        box-shadow: 0 0.75rem 1.75rem rgba(15, 23, 42, 0.08);
+        overflow: hidden;
+    }
+
+    .onlyoffice-viewer-container {
+        width: 100%;
+        height: calc(100vh - 220px);
+        min-height: 650px;
+        overflow: hidden;
+        background: #fff;
+    }
+
+    #onlyoffice-editor {
+        width: 100%;
+        height: 100%;
+        min-height: inherit;
+    }
+
+    #onlyoffice-editor iframe,
+    .onlyoffice-viewer-container iframe {
+        width: 100% !important;
+        height: 100% !important;
+        border: 0;
+        display: block;
+    }
+
+    @media (max-width: 991.98px) {
+        .onlyoffice-viewer-container {
+            height: calc(100vh - 250px);
+            min-height: 550px;
+        }
+    }
+
+    @media (max-width: 575.98px) {
+        .onlyoffice-viewer-header {
+            align-items: flex-start !important;
+        }
+
+        .onlyoffice-viewer-actions {
+            width: 100%;
+        }
+
+        .onlyoffice-viewer-actions .btn {
+            width: 100%;
+        }
+
+        .onlyoffice-viewer-container {
+            height: 70vh;
+            min-height: 460px;
+        }
+    }
+</style>
+
+<div class="onlyoffice-viewer-header d-flex justify-content-between align-items-center flex-wrap gap-3">
     <div>
-        <h2 class="mb-1">{{ item.titulo }}</h2>
+        <h2 class="onlyoffice-viewer-title mb-1">{{ item.titulo }}</h2>
         <div class="text-muted">{{ item.codigo }} · Versión {{ version.version }}</div>
     </div>
-    <div class="d-flex gap-2 align-items-center flex-wrap">
+    <div class="onlyoffice-viewer-actions d-flex gap-2 align-items-center flex-wrap">
         <span class="badge bg-secondary">Modo lectura</span>
         <a href="{{ url_for('documentacion.detalle', item_id=item.id) }}" class="btn btn-outline-secondary">
             Volver al detalle
@@ -16,11 +89,11 @@
     </div>
 </div>
 
-<div class="alert alert-info">
+<div class="onlyoffice-viewer-notice alert alert-info">
     Visualización integrada con ONLYOFFICE en modo lectura. No se habilita edición, descarga, impresión ni guardado.
 </div>
 
-<div class="page-card p-0 overflow-hidden">
+<div class="page-card onlyoffice-viewer-card p-0">
     <div id="onlyoffice-loading" class="alert alert-info m-3" role="status" aria-live="polite">
         Cargando ONLYOFFICE…
     </div>
@@ -30,7 +103,9 @@
     <div id="onlyoffice-error" class="alert alert-danger m-3" role="alert" aria-live="assertive" hidden>
         No se pudo cargar ONLYOFFICE. Verifica que Document Server esté disponible.
     </div>
-    <div id="onlyoffice-editor" style="width: 100%; height: 78vh; min-height: 640px;"></div>
+    <div class="onlyoffice-viewer-container">
+        <div id="onlyoffice-editor"></div>
+    </div>
 </div>
 {% endblock %}
 

@@ -856,6 +856,30 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         self.assertNotIn(version.archivo_storage_path, body)
 
     @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_viewer_uses_responsive_large_read_only_frame(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file()
+
+        response = self.login(201).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/ver")
+        body = response.get_data(as_text=True)
+        elements = self.parse_elements_by_id(body)
+        editor = self.assert_single_element_with_id(elements, "onlyoffice-editor")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("onlyoffice-viewer-container", body)
+        self.assertIn("height: calc(100vh - 220px)", body)
+        self.assertIn("min-height: 650px", body)
+        self.assertIn(".onlyoffice-viewer-container iframe", body)
+        self.assertIn("height: 100% !important", body)
+        self.assertNotIn("height: 78vh", body)
+        self.assertNotIn("style", editor["attrs"])
+        self.assertIn('"mode": "view"', body)
+        self.assertIn('"edit": false', body)
+        self.assertIn('"download": false', body)
+        self.assertIn('"print": false', body)
+        self.assertNotIn("callbackUrl", body)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
     def test_viewer_error_is_hidden_initially_and_loading_is_visible(self, urlopen_mock):
         urlopen_mock.return_value = FakeHttpResponse(200)
         document, version = self.add_document_with_file()
