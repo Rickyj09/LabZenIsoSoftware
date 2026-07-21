@@ -54,6 +54,7 @@
     {% for label, value, badge in [
         ('EN ELABORACIÓN', stats.technical_status.EN_ELABORACION, 'bg-secondary'),
         ('EN REVISIÓN', stats.technical_status.EN_REVISION, 'bg-warning text-dark'),
+        ('EN APROBACION', stats.technical_status.EN_APROBACION, 'bg-primary'),
         ('APROBADOS / VIGENTES', stats.technical_status.APROBADO, 'bg-success'),
         ('RECHAZADOS', stats.technical_status.RECHAZADO, 'bg-danger'),
         ('OBSOLETOS', stats.technical_status.OBSOLETO, 'bg-dark'),
@@ -77,6 +78,7 @@
                     <tbody>
                         <tr><td>En elaboración</td><td class="text-end">{{ stats.flow_status.EN_ELABORACION }}</td></tr>
                         <tr><td>En revisión</td><td class="text-end">{{ stats.flow_status.EN_REVISION }}</td></tr>
+                        <tr><td>En aprobacion</td><td class="text-end">{{ stats.flow_status.EN_APROBACION }}</td></tr>
                         <tr><td>Rechazado</td><td class="text-end">{{ stats.flow_status.RECHAZADO }}</td></tr>
                         <tr><td>Vigente</td><td class="text-end">{{ stats.flow_status.VIGENTE }}</td></tr>
                         <tr><td>En actualización</td><td class="text-end">{{ stats.flow_status.EN_ACTUALIZACION }}</td></tr>

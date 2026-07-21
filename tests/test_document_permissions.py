@@ -24,6 +24,8 @@ DOCUMENT_PERMISSIONS = {
     "devolver_borrador",
     "obsoletar",
     "descargar",
+    "firmas.iniciar",
+    "firmas.identidades.gestionar",
     "ver_historial",
     "ver_pendientes",
 }
@@ -176,8 +178,12 @@ class DocumentPermissionTest(unittest.TestCase):
         consultation = db.session.get(Usuario, 203)
 
         self.assertTrue(user_has_permission(quality, "documentos.aprobar"))
+        self.assertTrue(user_has_permission(quality, "documentos.firmas.iniciar"))
+        self.assertTrue(user_has_permission(quality, "documentos.firmas.identidades.gestionar"))
         self.assertTrue(user_has_permission(technician, "documentos.crear"))
         self.assertTrue(user_has_permission(technician, "documentos.enviar_revision"))
+        self.assertFalse(user_has_permission(technician, "documentos.firmas.iniciar"))
+        self.assertFalse(user_has_permission(technician, "documentos.firmas.identidades.gestionar"))
         self.assertFalse(user_has_permission(technician, "documentos.aprobar"))
         self.assertFalse(user_has_permission(technician, "documentos.rechazar"))
         self.assertFalse(user_has_permission(technician, "documentos.obsoletar"))
@@ -199,6 +205,9 @@ class DocumentPermissionTest(unittest.TestCase):
             "tipo_documento": "PROCEDIMIENTO",
             "version": "1",
             "archivo": (self.minimal_docx("Documento tecnico"), "documento-tecnico.docx"),
+            "elaborado_por_id": "202",
+            "revisado_por_id": "201",
+            "aprobado_por_id": "203",
             "cambios": "Versión inicial",
         })
         document = Documento.query.filter_by(codigo="DOC-TECNICO").one()

@@ -3,7 +3,9 @@ from app.models.base import BaseModel, TenantMixin
 
 
 ESTADO_EN_ELABORACION = "EN_ELABORACION"
+ESTADO_EN_ACTUALIZACION = "EN_ACTUALIZACION"
 ESTADO_EN_REVISION = "EN_REVISION"
+ESTADO_EN_APROBACION = "EN_APROBACION"
 ESTADO_APROBADO = "APROBADO"
 ESTADO_RECHAZADO = "RECHAZADO"
 ESTADO_OBSOLETO = "OBSOLETO"
@@ -11,7 +13,9 @@ ESTADO_SUSTITUIDO = "SUSTITUIDO"
 
 ESTADOS_DOCUMENTO = (
     ESTADO_EN_ELABORACION,
+    ESTADO_EN_ACTUALIZACION,
     ESTADO_EN_REVISION,
+    ESTADO_EN_APROBACION,
     ESTADO_APROBADO,
     ESTADO_RECHAZADO,
     ESTADO_OBSOLETO,
@@ -19,7 +23,9 @@ ESTADOS_DOCUMENTO = (
 
 ESTADOS_VERSION_DOCUMENTO = (
     ESTADO_EN_ELABORACION,
+    ESTADO_EN_ACTUALIZACION,
     ESTADO_EN_REVISION,
+    ESTADO_EN_APROBACION,
     ESTADO_APROBADO,
     ESTADO_RECHAZADO,
     ESTADO_OBSOLETO,
@@ -29,8 +35,11 @@ ESTADOS_VERSION_DOCUMENTO = (
 ACCIONES_EVENTO_DOCUMENTO = (
     "CREAR_VERSION",
     "ENVIAR_REVISION",
+    "DAR_CONFORMIDAD",
     "APROBAR",
     "RECHAZAR",
+    "SOLICITAR_CORRECCIONES",
+    "RECHAZAR_APROBACION",
     "DEVOLVER_BORRADOR",
     "OBSOLETAR",
     "SUSTITUIR_VERSION",
@@ -48,6 +57,20 @@ ESTADOS_EDICION_DOCUMENTO = (
     ESTADO_EDICION_EXPIRADA,
     ESTADO_EDICION_ERROR,
     ESTADO_EDICION_CANCELADA,
+)
+
+ANEXO_TIPO_XLSX = "XLSX"
+
+ANEXO_ESTADO_ACTIVO = "ACTIVO"
+ANEXO_ESTADO_APROBADO = "APROBADO"
+ANEXO_ESTADO_ELIMINADO = "ELIMINADO"
+
+TIPOS_DOCUMENTO_ANEXO = (ANEXO_TIPO_XLSX,)
+
+ESTADOS_DOCUMENTO_ANEXO = (
+    ANEXO_ESTADO_ACTIVO,
+    ANEXO_ESTADO_APROBADO,
+    ANEXO_ESTADO_ELIMINADO,
 )
 
 SNAPSHOT_ENVIO_REVISION = "ENVIO_REVISION"
@@ -184,6 +207,9 @@ FIRMA_EVENTO_RECHAZADO = "RECHAZADO"
 FIRMA_EVENTO_CANCELADO = "CANCELADO"
 FIRMA_EVENTO_VENCIDO = "VENCIDO"
 FIRMA_EVENTO_ERROR = "ERROR"
+FIRMA_EVENTO_DEV_SIGNATURE_REQUESTED = "DEV_TEST_SIGNATURE_REQUESTED"
+FIRMA_EVENTO_DEV_SIGNATURE_VALIDATED = "DEV_TEST_SIGNATURE_VALIDATED"
+FIRMA_EVENTO_DEV_SIGNATURE_REJECTED = "DEV_TEST_SIGNATURE_REJECTED"
 
 TIPOS_FIRMA_EVENTO = (
     FIRMA_EVENTO_PROCESO_CREADO,
@@ -198,9 +224,14 @@ TIPOS_FIRMA_EVENTO = (
     FIRMA_EVENTO_CANCELADO,
     FIRMA_EVENTO_VENCIDO,
     FIRMA_EVENTO_ERROR,
+    FIRMA_EVENTO_DEV_SIGNATURE_REQUESTED,
+    FIRMA_EVENTO_DEV_SIGNATURE_VALIDATED,
+    FIRMA_EVENTO_DEV_SIGNATURE_REJECTED,
 )
 
 ESTADO_DOCUMENTO_LABELS = {
+    ESTADO_EN_ACTUALIZACION: "EN ACTUALIZACION",
+    ESTADO_EN_APROBACION: "EN APROBACION",
     ESTADO_EN_ELABORACION: "EN ELABORACIÓN",
     ESTADO_EN_REVISION: "EN REVISIÓN",
     ESTADO_APROBADO: "APROBADO",
@@ -210,6 +241,8 @@ ESTADO_DOCUMENTO_LABELS = {
 }
 
 ESTADO_DOCUMENTO_BADGE_CLASSES = {
+    ESTADO_EN_ACTUALIZACION: "bg-info text-dark",
+    ESTADO_EN_APROBACION: "bg-primary",
     ESTADO_EN_ELABORACION: "bg-secondary",
     ESTADO_EN_REVISION: "bg-warning text-dark",
     ESTADO_APROBADO: "bg-success",
@@ -227,14 +260,49 @@ def clase_badge_estado_documental(estado):
     return ESTADO_DOCUMENTO_BADGE_CLASSES.get(estado, "bg-light text-dark")
 
 
+class CarpetaDocumental(TenantMixin, BaseModel):
+    __tablename__ = "carpetas_documentales"
+    __table_args__ = (
+        db.CheckConstraint("id <> padre_id", name="ck_carpetas_documentales_no_autopadre"),
+        db.UniqueConstraint("public_id", name="uq_carpetas_documentales_public_id"),
+        db.UniqueConstraint("empresa_id", "padre_id", "nombre", name="uq_carpetas_documentales_empresa_padre_nombre"),
+        db.Index("ix_carpetas_documentales_padre_id", "padre_id"),
+        db.Index("ix_carpetas_documentales_empresa_padre", "empresa_id", "padre_id"),
+        db.Index("ix_carpetas_documentales_activa", "activa"),
+        db.Index("ix_carpetas_documentales_orden", "orden"),
+    )
+
+    public_id = db.Column(db.String(64), nullable=False)
+    padre_id = db.Column(db.BigInteger, db.ForeignKey("carpetas_documentales.id"), nullable=True)
+    nombre = db.Column(db.String(150), nullable=False)
+    descripcion = db.Column(db.Text)
+    orden = db.Column(db.Integer, nullable=False, default=0)
+    activa = db.Column(db.Boolean, nullable=False, default=True)
+    creada_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
+    actualizada_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+
+    empresa = db.relationship("Empresa")
+    padre = db.relationship("CarpetaDocumental", remote_side="CarpetaDocumental.id", back_populates="subcarpetas")
+    subcarpetas = db.relationship(
+        "CarpetaDocumental",
+        back_populates="padre",
+        lazy=True,
+        order_by="CarpetaDocumental.orden.asc(), CarpetaDocumental.nombre.asc()",
+    )
+    documentos = db.relationship("Documento", back_populates="carpeta", lazy=True)
+    creada_por = db.relationship("Usuario", foreign_keys=[creada_por_id])
+    actualizada_por = db.relationship("Usuario", foreign_keys=[actualizada_por_id])
+
+
 class Documento(TenantMixin, BaseModel):
     __tablename__ = "documentos"
     __table_args__ = (
         db.UniqueConstraint("empresa_id", "codigo", name="uq_documentos_empresa_codigo"),
         db.CheckConstraint(
-            "estado IN ('EN_ELABORACION', 'EN_REVISION', 'APROBADO', 'RECHAZADO', 'OBSOLETO')",
+            "estado IN ('EN_ELABORACION', 'EN_ACTUALIZACION', 'EN_REVISION', 'EN_APROBACION', 'APROBADO', 'RECHAZADO', 'OBSOLETO')",
             name="ck_documentos_estado_valido",
         ),
+        db.Index("ix_documentos_carpeta_id", "carpeta_id"),
     )
 
     codigo = db.Column(db.String(50), nullable=False)
@@ -248,11 +316,13 @@ class Documento(TenantMixin, BaseModel):
         db.ForeignKey("documento_versiones.id", name="fk_documentos_version_vigente_id", use_alter=True),
         nullable=True,
     )
+    carpeta_id = db.Column(db.BigInteger, db.ForeignKey("carpetas_documentales.id"), nullable=True)
 
     elaborado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
 
     empresa = db.relationship("Empresa", back_populates="documentos")
     elaborado_por = db.relationship("Usuario", foreign_keys=[elaborado_por_id])
+    carpeta = db.relationship("CarpetaDocumental", foreign_keys=[carpeta_id], back_populates="documentos")
 
     versiones = db.relationship(
         "DocumentoVersion",
@@ -279,7 +349,7 @@ class DocumentoVersion(TenantMixin, BaseModel):
     __table_args__ = (
         db.UniqueConstraint("documento_id", "version", name="uq_documento_version_numero"),
         db.CheckConstraint(
-            "estado IN ('EN_ELABORACION', 'EN_REVISION', 'APROBADO', 'RECHAZADO', 'OBSOLETO', 'SUSTITUIDO')",
+            "estado IN ('EN_ELABORACION', 'EN_ACTUALIZACION', 'EN_REVISION', 'EN_APROBACION', 'APROBADO', 'RECHAZADO', 'OBSOLETO', 'SUSTITUIDO')",
             name="ck_documento_versiones_estado_valido",
         ),
         db.Index("ix_documento_versiones_documento_id", "documento_id"),
@@ -288,8 +358,8 @@ class DocumentoVersion(TenantMixin, BaseModel):
             "uq_documento_version_preparacion_activa",
             "documento_id",
             unique=True,
-            postgresql_where=db.text("estado IN ('EN_ELABORACION', 'EN_REVISION')"),
-            sqlite_where=db.text("estado IN ('EN_ELABORACION', 'EN_REVISION')"),
+            postgresql_where=db.text("estado IN ('EN_ELABORACION', 'EN_ACTUALIZACION', 'EN_REVISION', 'EN_APROBACION')"),
+            sqlite_where=db.text("estado IN ('EN_ELABORACION', 'EN_ACTUALIZACION', 'EN_REVISION', 'EN_APROBACION')"),
         ),
     )
 
@@ -314,6 +384,7 @@ class DocumentoVersion(TenantMixin, BaseModel):
     obsoletado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
 
     fecha_aprobacion = db.Column(db.DateTime(timezone=True), nullable=True)
+    fecha_revision = db.Column(db.DateTime(timezone=True), nullable=True)
     fecha_envio_revision = db.Column(db.DateTime(timezone=True), nullable=True)
     fecha_rechazo = db.Column(db.DateTime(timezone=True), nullable=True)
     fecha_obsolescencia = db.Column(db.DateTime(timezone=True), nullable=True)
@@ -342,13 +413,70 @@ class DocumentoVersion(TenantMixin, BaseModel):
         lazy=True,
         cascade="all, delete-orphan"
     )
+    anexos = db.relationship(
+        "DocumentoVersionAnexo",
+        back_populates="documento_version",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="DocumentoVersionAnexo.id",
+    )
+
+
+class DocumentoVersionAnexo(TenantMixin, BaseModel):
+    __tablename__ = "documento_version_anexos"
+    __table_args__ = (
+        db.CheckConstraint("tipo IN ('XLSX')", name="ck_documento_version_anexos_tipo_valido"),
+        db.CheckConstraint(
+            "estado IN ('ACTIVO', 'APROBADO', 'ELIMINADO')",
+            name="ck_documento_version_anexos_estado_valido",
+        ),
+        db.CheckConstraint("archivo_size IS NULL OR archivo_size > 0", name="ck_documento_version_anexos_size_positivo"),
+        db.CheckConstraint(
+            "archivo_sha256 IS NULL OR length(archivo_sha256) = 64",
+            name="ck_documento_version_anexos_sha256_valido",
+        ),
+        db.UniqueConstraint("public_id", name="uq_documento_version_anexos_public_id"),
+        db.Index("ix_documento_version_anexos_documento_id", "documento_id"),
+        db.Index("ix_documento_version_anexos_documento_version_id", "documento_version_id"),
+        db.Index("ix_documento_version_anexos_estado", "estado"),
+        db.Index("ix_documento_version_anexos_archivo_sha256", "archivo_sha256"),
+    )
+
+    public_id = db.Column(db.String(64), nullable=False)
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
+    documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
+    nombre_visible = db.Column(db.String(255), nullable=False)
+    archivo_nombre_original = db.Column(db.String(255), nullable=False)
+    archivo_nombre_guardado = db.Column(db.String(255), nullable=False)
+    archivo_storage_path = db.Column(db.String(500), nullable=False)
+    archivo_mime = db.Column(db.String(255), nullable=False)
+    archivo_size = db.Column(db.BigInteger, nullable=False)
+    archivo_sha256 = db.Column(db.String(64), nullable=False)
+    tipo = db.Column(db.String(30), nullable=False, default=ANEXO_TIPO_XLSX)
+    estado = db.Column(db.String(30), nullable=False, default=ANEXO_ESTADO_ACTIVO)
+    creado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
+    actualizado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    aprobado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    aprobado_en = db.Column(db.DateTime(timezone=True))
+    eliminado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    eliminado_en = db.Column(db.DateTime(timezone=True))
+    inmutable = db.Column(db.Boolean, nullable=False, default=False)
+    metadata_json = db.Column(db.JSON)
+
+    empresa = db.relationship("Empresa")
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id], back_populates="anexos")
+    creado_por = db.relationship("Usuario", foreign_keys=[creado_por_id])
+    actualizado_por = db.relationship("Usuario", foreign_keys=[actualizado_por_id])
+    aprobado_por = db.relationship("Usuario", foreign_keys=[aprobado_por_id])
+    eliminado_por = db.relationship("Usuario", foreign_keys=[eliminado_por_id])
 
 
 class DocumentoAprobacion(TenantMixin, BaseModel):
     __tablename__ = "documento_aprobaciones"
     __table_args__ = (
         db.CheckConstraint(
-            "accion IN ('CREAR_VERSION', 'ENVIAR_REVISION', 'APROBAR', 'RECHAZAR', 'DEVOLVER_BORRADOR', 'OBSOLETAR', 'SUSTITUIR_VERSION')",
+            "accion IN ('CREAR_VERSION', 'ENVIAR_REVISION', 'DAR_CONFORMIDAD', 'APROBAR', 'RECHAZAR', 'SOLICITAR_CORRECCIONES', 'RECHAZAR_APROBACION', 'DEVOLVER_BORRADOR', 'OBSOLETAR', 'SUSTITUIR_VERSION')",
             name="ck_documento_eventos_accion_valida",
         ),
         db.Index("ix_documento_eventos_documento_id", "documento_id"),
@@ -751,7 +879,7 @@ class DocumentoFirmaEvento(TenantMixin, BaseModel):
     __tablename__ = "documento_firma_eventos"
     __table_args__ = (
         db.CheckConstraint(
-            "tipo_evento IN ('PROCESO_CREADO', 'PASO_HABILITADO', 'PDF_DESCARGADO', 'PDF_SUBIDO', 'VALIDACION_OK', 'VALIDACION_ERROR', 'PASO_FIRMADO', 'PROCESO_COMPLETADO', 'RECHAZADO', 'CANCELADO', 'VENCIDO', 'ERROR')",
+            "tipo_evento IN ('PROCESO_CREADO', 'PASO_HABILITADO', 'PDF_DESCARGADO', 'PDF_SUBIDO', 'VALIDACION_OK', 'VALIDACION_ERROR', 'PASO_FIRMADO', 'PROCESO_COMPLETADO', 'RECHAZADO', 'CANCELADO', 'VENCIDO', 'ERROR', 'DEV_TEST_SIGNATURE_REQUESTED', 'DEV_TEST_SIGNATURE_VALIDATED', 'DEV_TEST_SIGNATURE_REJECTED')",
             name="ck_documento_firma_eventos_tipo_valido",
         ),
         db.Index("ix_documento_firma_eventos_proceso_id", "proceso_id"),
@@ -795,6 +923,7 @@ class DocumentoEdicion(TenantMixin, BaseModel):
         db.UniqueConstraint("editor_key", name="uq_documento_ediciones_editor_key"),
         db.Index("ix_documento_ediciones_documento_id", "documento_id"),
         db.Index("ix_documento_ediciones_documento_version_id", "documento_version_id"),
+        db.Index("ix_documento_ediciones_documento_version_anexo_id", "documento_version_anexo_id"),
         db.Index("ix_documento_ediciones_usuario_id", "usuario_id"),
         db.Index("ix_documento_ediciones_estado", "estado"),
         db.Index("ix_documento_ediciones_fecha_expiracion", "fecha_expiracion"),
@@ -802,14 +931,22 @@ class DocumentoEdicion(TenantMixin, BaseModel):
             "uq_documento_ediciones_version_activa",
             "documento_version_id",
             unique=True,
-            postgresql_where=db.text("estado = 'ACTIVA'"),
-            sqlite_where=db.text("estado = 'ACTIVA'"),
+            postgresql_where=db.text("estado = 'ACTIVA' AND documento_version_anexo_id IS NULL"),
+            sqlite_where=db.text("estado = 'ACTIVA' AND documento_version_anexo_id IS NULL"),
+        ),
+        db.Index(
+            "uq_documento_ediciones_anexo_activa",
+            "documento_version_anexo_id",
+            unique=True,
+            postgresql_where=db.text("estado = 'ACTIVA' AND documento_version_anexo_id IS NOT NULL"),
+            sqlite_where=db.text("estado = 'ACTIVA' AND documento_version_anexo_id IS NOT NULL"),
         ),
     )
 
     public_id = db.Column(db.String(64), nullable=False)
     documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
     documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
+    documento_version_anexo_id = db.Column(db.BigInteger, db.ForeignKey("documento_version_anexos.id"), nullable=True)
     usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
     editor_key = db.Column(db.String(128), nullable=False)
     estado = db.Column(db.String(30), default=ESTADO_EDICION_ACTIVA, nullable=False)
@@ -830,6 +967,7 @@ class DocumentoEdicion(TenantMixin, BaseModel):
     empresa = db.relationship("Empresa")
     documento = db.relationship("Documento", foreign_keys=[documento_id])
     documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    documento_version_anexo = db.relationship("DocumentoVersionAnexo", foreign_keys=[documento_version_anexo_id])
     usuario = db.relationship("Usuario", foreign_keys=[usuario_id])
     liberado_por = db.relationship("Usuario", foreign_keys=[liberado_por_id])
     eventos = db.relationship(

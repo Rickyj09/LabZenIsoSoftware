@@ -16,9 +16,15 @@
             {% endif %}
         </div>
     </div>
-    {% if can('documentos.crear') %}
-    <a href="{{ url_for('documentacion.nuevo') }}" class="btn btn-primary">Nuevo documento</a>
-    {% endif %}
+    <div class="d-flex flex-wrap gap-2">
+        <div class="btn-group" role="group" aria-label="Selector de vista documental">
+            <a href="{{ url_for('documentacion.index') }}" class="btn btn-primary">Vista actual</a>
+            <a href="{{ url_for('documentacion.explorador') }}" class="btn btn-outline-secondary">Vista explorador</a>
+        </div>
+        {% if can('documentos.crear') %}
+        <a href="{{ url_for('documentacion.nuevo') }}" class="btn btn-primary">Nuevo documento</a>
+        {% endif %}
+    </div>
 </div>
 
 {% if documental_pending_count and can('documentos.ver_pendientes') %}
@@ -49,6 +55,7 @@
                 <option value="">Todos</option>
                 <option value="EN_ELABORACION" {% if estado == 'EN_ELABORACION' %}selected{% endif %}>EN ELABORACIÓN</option>
                 <option value="EN_REVISION" {% if estado == 'EN_REVISION' %}selected{% endif %}>EN REVISIÓN</option>
+                <option value="EN_APROBACION" {% if estado == 'EN_APROBACION' %}selected{% endif %}>EN APROBACION</option>
                 <option value="APROBADO" {% if estado == 'APROBADO' %}selected{% endif %}>APROBADO</option>
                 <option value="OBSOLETO" {% if estado == 'OBSOLETO' %}selected{% endif %}>OBSOLETO</option>
             </select>

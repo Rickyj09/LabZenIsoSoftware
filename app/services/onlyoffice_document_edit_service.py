@@ -22,18 +22,20 @@ from app.models.documentos import (
     ESTADO_EDICION_ERROR,
     ESTADO_EDICION_EXPIRADA,
     ESTADO_EDICION_LIBERADA,
+    ESTADO_EN_ACTUALIZACION,
     ESTADO_EN_ELABORACION,
 )
+from app.security.permissions import user_has_permission
 from app.services.document_versioning_service import get_preparation_version
 from app.services.onlyoffice_document_view_service import (
-    DOCX_MIME,
     OnlyOfficeDisabledError,
     OnlyOfficeDocumentViewError,
     OnlyOfficeInvalidDocumentError,
     OnlyOfficeUnavailableError,
-    is_docx_version,
-    resolve_viewable_docx_path,
+    is_onlyoffice_supported_version,
+    resolve_onlyoffice_source_path,
 )
+from app.services.office_document_profile import get_onlyoffice_document_profile
 from app.services.onlyoffice_health_service import OnlyOfficeHealthService
 from app.services.onlyoffice_jwt_service import (
     generate_onlyoffice_callback_token,
@@ -45,7 +47,7 @@ from app.services.storage_service import (
     finalize_document_file_replacement,
     prepare_document_file_replacement,
     restore_document_file_replacement,
-    validate_docx_file_path,
+    validate_onlyoffice_file_path,
 )
 
 
@@ -65,6 +67,8 @@ SUPPORTED_CALLBACK_STATUSES = {
     CALLBACK_STATUS_FORCE_SAVE,
     CALLBACK_STATUS_FORCE_SAVE_ERROR,
 }
+EDITABLE_VERSION_STATES = {ESTADO_EN_ELABORACION, ESTADO_EN_ACTUALIZACION}
+ONLYOFFICE_EDIT_ADMIN_PERMISSION = "documentos.ver_historial"
 
 
 class OnlyOfficeEditError(OnlyOfficeDocumentViewError):
@@ -197,6 +201,41 @@ def has_blocking_edit(version_doc):
     return edicion is not None
 
 
+def user_is_assigned_elaborator(documento, version, user):
+    assigned_id = version.elaborado_por_id or documento.elaborado_por_id
+    return bool(assigned_id and user and int(assigned_id) == int(user.id))
+
+
+def user_has_onlyoffice_edit_admin_permission(user):
+    return user_has_permission(user, ONLYOFFICE_EDIT_ADMIN_PERMISSION)
+
+
+def can_user_edit_onlyoffice_version(documento, version, user, *, active_edit_info=None, enforce_lock=True):
+    if not documento or not version or not user:
+        return False
+    if version.empresa_id != documento.empresa_id or version.documento_id != documento.id:
+        return False
+    if int(documento.empresa_id) != int(user.empresa_id):
+        return False
+    if not user_has_permission(user, "documentos.editar"):
+        return False
+    if version.estado not in EDITABLE_VERSION_STATES:
+        return False
+    if not is_onlyoffice_supported_version(version):
+        return False
+    preparation = get_preparation_version(documento)
+    if not preparation or int(preparation.id) != int(version.id):
+        return False
+    if not (user_is_assigned_elaborator(documento, version, user) or user_has_onlyoffice_edit_admin_permission(user)):
+        return False
+    if active_edit_info and active_edit_info.blocked_by_other_user:
+        return False
+    if not enforce_lock:
+        return True
+    active = get_active_edit_for_version(version.id)
+    return not bool(active and int(active.usuario_id) != int(user.id))
+
+
 class OnlyOfficeDocumentEditService:
     def __init__(self, app=None):
         self.app = app or current_app
@@ -239,17 +278,22 @@ class OnlyOfficeDocumentEditService:
         if not version:
             raise LookupError("VersiÃ³n documental no encontrada.")
         self.validate_editable(documento=documento, version=version)
+        self.validate_user_can_edit(documento=documento, version=version, user=user)
         return documento, version
 
     def validate_editable(self, *, documento, version):
         if version.empresa_id != documento.empresa_id or version.documento_id != documento.id:
             raise OnlyOfficeInvalidDocumentError("La versiÃ³n no pertenece al documento indicado.")
-        if version.estado != ESTADO_EN_ELABORACION:
+        if version.estado not in EDITABLE_VERSION_STATES:
             raise OnlyOfficeEditConflictError("Solo una versiÃ³n EN_ELABORACION puede editarse en ONLYOFFICE.")
         preparation = get_preparation_version(documento)
         if not preparation or preparation.id != version.id:
             raise OnlyOfficeEditConflictError("La versiÃ³n seleccionada no es la versiÃ³n activa de trabajo.")
-        resolve_viewable_docx_path(version)
+        resolve_onlyoffice_source_path(version)
+
+    def validate_user_can_edit(self, *, documento, version, user):
+        if not (user_is_assigned_elaborator(documento, version, user) or user_has_onlyoffice_edit_admin_permission(user)):
+            raise OnlyOfficeEditForbiddenError("Solo el elaborador asignado o un usuario administrativo puede editar el contenido.")
 
     def acquire_lock(self, *, documento, version, user):
         now = _now()
@@ -308,10 +352,11 @@ class OnlyOfficeDocumentEditService:
         return self.app.config["ONLYOFFICE_CALLBACK_BASE_URL"].rstrip("/") + path + "?" + urlencode({"token": token})
 
     def _build_editor_config(self, documento, version, edicion, document_url, callback_url, user):
-        title = Path(version.archivo_nombre_original or f"{documento.codigo}_v{version.version}.docx").name
+        profile = get_onlyoffice_document_profile(version)
+        title = Path(version.archivo_nombre_original or f"{documento.codigo}_v{version.version}.{profile.extension}").name
         return {
             "document": {
-                "fileType": "docx",
+                "fileType": profile.file_type,
                 "key": edicion.editor_key,
                 "title": title,
                 "url": document_url,
@@ -326,7 +371,7 @@ class OnlyOfficeDocumentEditService:
                     "review": False,
                 },
             },
-            "documentType": "word",
+            "documentType": profile.document_type,
             "editorConfig": {
                 "mode": "edit",
                 "callbackUrl": callback_url,
@@ -533,6 +578,14 @@ class OnlyOfficeCallbackService:
             edicion.fecha_expiracion = _expiry_from(now)
 
     def _save_callback_file(self, *, edicion, payload, final):
+        if edicion.documento_version_anexo_id:
+            from app.services.document_attachment_service import DocumentAttachmentService
+
+            return DocumentAttachmentService().save_callback_file(
+                edicion=edicion,
+                payload=payload,
+                final=final,
+            )
         if edicion.estado != ESTADO_EDICION_ACTIVA:
             raise OnlyOfficeEditCallbackError("La sesiÃ³n no estÃ¡ activa para guardar.")
         if payload.get("key") != edicion.editor_key:
@@ -546,14 +599,15 @@ class OnlyOfficeCallbackService:
             documento_id=edicion.documento_id,
             empresa_id=edicion.empresa_id,
         ).with_for_update(of=DocumentoVersion).first()
-        if not version or version.estado != ESTADO_EN_ELABORACION:
-            raise OnlyOfficeEditCallbackError("La versiÃ³n ya no estÃ¡ en elaboraciÃ³n.")
-        if not is_docx_version(version):
-            raise OnlyOfficeEditCallbackError("La versiÃ³n ya no es DOCX.")
+        if not version or version.estado not in EDITABLE_VERSION_STATES:
+            raise OnlyOfficeEditCallbackError("La version ya no esta en elaboracion.")
+        profile = get_onlyoffice_document_profile(version)
+        if not profile:
+            raise OnlyOfficeEditCallbackError("La version ya no es compatible con ONLYOFFICE.")
         if version.archivo_sha256 != edicion.hash_ultimo_guardado:
-            raise OnlyOfficeEditCallbackError("La copia de trabajo cambiÃ³ fuera de la sesiÃ³n.")
+            raise OnlyOfficeEditCallbackError("La copia de trabajo cambio fuera de la sesion.")
 
-        temp_path = self._download_result(result_url)
+        temp_path = self._download_result(result_url, profile)
         old_sha = version.archivo_sha256
         old_size = version.archivo_size
         try:
@@ -563,7 +617,7 @@ class OnlyOfficeCallbackService:
             if new_sha != old_sha:
                 version.archivo_sha256 = new_sha
                 version.archivo_size = new_size
-                version.archivo_mime = version.archivo_mime or DOCX_MIME
+                version.archivo_mime = profile.mime_type
             edicion.hash_ultimo_guardado = new_sha
             edicion.ultimo_guardado_en = _now()
             edicion.error_ultimo_guardado = None
@@ -583,11 +637,11 @@ class OnlyOfficeCallbackService:
             except OSError:
                 pass
 
-    def _download_result(self, result_url):
+    def _download_result(self, result_url, profile):
         self._validate_result_url(result_url)
         max_bytes = int(current_app.config["ONLYOFFICE_CALLBACK_DOWNLOAD_MAX_BYTES"])
         request = Request(result_url, headers={"User-Agent": "LabZenISO-ONLYOFFICE-callback"})
-        fd, temp_name = tempfile.mkstemp(prefix="onlyoffice-callback-", suffix=".docx")
+        fd, temp_name = tempfile.mkstemp(prefix="onlyoffice-callback-", suffix=f".{profile.extension}")
         os.close(fd)
         temp_path = Path(temp_name)
         size = 0
@@ -604,10 +658,10 @@ class OnlyOfficeCallbackService:
                         break
                     size += len(chunk)
                     if size > max_bytes:
-                        raise DocumentStorageError("El archivo devuelto por ONLYOFFICE supera el tamaÃ±o permitido.")
+                        raise DocumentStorageError("El archivo devuelto por ONLYOFFICE supera el tamano permitido.")
                     with temp_path.open("ab") as output:
                         output.write(chunk)
-            validate_docx_file_path(temp_path)
+            validate_onlyoffice_file_path(temp_path, profile)
             return temp_path
         except Exception:
             temp_path.unlink(missing_ok=True)

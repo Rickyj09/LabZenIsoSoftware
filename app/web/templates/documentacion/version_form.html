@@ -1,48 +1,85 @@
 {% extends "base_admin.html" %}
 
-{% block title %}Nueva versión{% endblock %}
+{% block title %}Nueva version{% endblock %}
 
 {% block content %}
+{% set fd = form_data|default({}) %}
 <div class="mb-4">
-    <h2>Nueva versión</h2>
-    <div class="text-muted">{{ item.codigo }} · {{ item.titulo }}</div>
+    <h2>Nueva version</h2>
+    <div class="text-muted">{{ item.codigo }} - {{ item.titulo }}</div>
 </div>
 
 <div class="page-card">
     <form method="post" enctype="multipart/form-data">
         <div class="row g-3">
             <div class="col-md-4">
-                <label class="form-label">Versión</label>
-                <input type="text" name="version" class="form-control" placeholder="Ej: 1.1 o 2.0" required>
+                <label class="form-label">Version</label>
+                <input type="text" name="version" class="form-control" placeholder="Ej: 1.1 o 2.0" value="{{ fd.get('version', '') }}" required>
             </div>
 
             <div class="col-md-4">
-                <label class="form-label">Versión vigente aprobada</label>
-                <input type="text" class="form-control" value="{{ item.version_vigente.version if item.version_vigente else 'Sin versión aprobada vigente' }}" disabled>
+                <label class="form-label">Version vigente aprobada</label>
+                <input type="text" class="form-control" value="{{ item.version_vigente.version if item.version_vigente else 'Sin version aprobada vigente' }}" disabled>
             </div>
 
             <div class="col-md-4 d-flex align-items-end">
-                <div class="alert alert-secondary mb-0 w-100 py-2">La nueva versión se creará en EN ELABORACIÓN.</div>
+                <div class="alert alert-secondary mb-0 w-100 py-2">La nueva version se creara en EN ELABORACION.</div>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Elaborado por</label>
+                <select name="elaborado_por_id" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for responsable in responsables_documentales %}
+                    <option value="{{ responsable.id }}" {% if fd.get('elaborado_por_id', current_user.id|string) == responsable.id|string %}selected{% endif %}>
+                        {{ responsable.nombre }} {{ responsable.apellido }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Revisado por</label>
+                <select name="revisado_por_id" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for responsable in responsables_documentales %}
+                    <option value="{{ responsable.id }}" {% if fd.get('revisado_por_id', '') == responsable.id|string %}selected{% endif %}>
+                        {{ responsable.nombre }} {{ responsable.apellido }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Aprobado por</label>
+                <select name="aprobado_por_id" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for responsable in responsables_documentales %}
+                    <option value="{{ responsable.id }}" {% if fd.get('aprobado_por_id', '') == responsable.id|string %}selected{% endif %}>
+                        {{ responsable.nombre }} {{ responsable.apellido }}
+                    </option>
+                    {% endfor %}
+                </select>
             </div>
 
             <div class="col-md-12">
                 <label class="form-label">Archivo del documento</label>
                 <input type="file" name="archivo" class="form-control">
-                <div class="form-text">Sube el archivo correspondiente a esta nueva versión.</div>
+                <div class="form-text">Sube el archivo correspondiente a esta nueva version.</div>
             </div>
 
             <div class="col-md-12">
                 <label class="form-label">Cambios</label>
-                <textarea name="cambios" class="form-control" rows="3" placeholder="Describe claramente qué cambió en esta versión." required></textarea>
+                <textarea name="cambios" class="form-control" rows="3" placeholder="Describe claramente que cambio en esta version." required>{{ fd.get('cambios', '') }}</textarea>
             </div>
 
             <div class="col-md-12">
                 <label class="form-label">Contenido</label>
-                <textarea name="contenido" class="form-control" rows="12"></textarea>
+                <textarea name="contenido" class="form-control" rows="12">{{ fd.get('contenido', '') }}</textarea>
             </div>
 
             <div class="col-12 d-flex gap-2 flex-wrap">
-                <button type="submit" class="btn btn-primary">Guardar versión</button>
+                <button type="submit" class="btn btn-primary">Guardar version</button>
                 <a href="{{ url_for('documentacion.detalle', item_id=item.id) }}" class="btn btn-secondary">Cancelar</a>
             </div>
         </div>

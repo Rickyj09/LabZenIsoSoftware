@@ -7,7 +7,8 @@ from app.security.permissions import user_has_permission
 
 def _can_review_documents(user):
     return (
-        user_has_permission(user, "documentos.aprobar")
+        user_has_permission(user, "documentos.revisar")
+        or user_has_permission(user, "documentos.aprobar")
         or user_has_permission(user, "documentos.rechazar")
     )
 
@@ -19,15 +20,17 @@ def _pending_query(user):
         .filter(
             DocumentoVersion.empresa_id == user.empresa_id,
             Documento.empresa_id == user.empresa_id,
-            DocumentoVersion.estado == "EN_REVISION",
+            DocumentoVersion.estado.in_(("EN_REVISION", "EN_APROBACION")),
             Documento.estado != "OBSOLETO",
             or_(
                 and_(
-                    DocumentoVersion.revisado_por_id.is_(None),
-                    DocumentoVersion.aprobado_por_id.is_(None),
+                    DocumentoVersion.estado == "EN_REVISION",
+                    DocumentoVersion.revisado_por_id == user.id,
                 ),
-                DocumentoVersion.revisado_por_id == user.id,
-                DocumentoVersion.aprobado_por_id == user.id,
+                and_(
+                    DocumentoVersion.estado == "EN_APROBACION",
+                    DocumentoVersion.aprobado_por_id == user.id,
+                ),
             ),
         )
     )

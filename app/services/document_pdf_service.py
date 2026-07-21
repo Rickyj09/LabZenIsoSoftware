@@ -33,7 +33,7 @@ from app.models.documentos import (
     SNAPSHOT_DISPONIBLE,
 )
 from app.services.document_snapshot_service import DocumentSnapshotError, DocumentSnapshotService
-from app.services.onlyoffice_document_view_service import DOCX_MIME
+from app.services.office_document_profile import DOCX_MIME, get_onlyoffice_document_profile
 from app.services.onlyoffice_jwt_service import generate_onlyoffice_conversion_source_token, sign_onlyoffice_config
 from app.services.storage_service import (
     DocumentStorageError,
@@ -41,7 +41,7 @@ from app.services.storage_service import (
     file_digest_and_size,
     resolve_document_path,
     store_pdf_artifact_copy,
-    validate_docx_file_path,
+    validate_onlyoffice_file_path,
 )
 
 
@@ -120,7 +120,7 @@ class OnlyOfficeConversionProvider(DocumentConversionProvider):
     def request_conversion(self, *, conversion, source_url, source_token):
         payload = {
             "async": bool(self.app.config["ONLYOFFICE_CONVERSION_ASYNC"]),
-            "filetype": "docx",
+            "filetype": get_onlyoffice_document_profile(conversion.source_snapshot.archivo_nombre_original or conversion.source_snapshot.archivo_nombre_interno or conversion.source_snapshot.storage_path).file_type,
             "key": conversion.conversion_key,
             "outputtype": "pdf",
             "title": self._controlled_title(conversion),
@@ -190,7 +190,8 @@ class OnlyOfficeConversionProvider(DocumentConversionProvider):
         return f"{base}{path}?{urlencode({'shardkey': conversion_key})}"
 
     def _controlled_title(self, conversion):
-        return f"documento-{conversion.documento_id}-version-{conversion.documento_version_id}.docx"
+        profile = get_onlyoffice_document_profile(conversion.source_snapshot.archivo_nombre_original or conversion.source_snapshot.archivo_nombre_interno or conversion.source_snapshot.storage_path)
+        return f"documento-{conversion.documento_id}-version-{conversion.documento_version_id}.{profile.extension}"
 
     def _parse_response(self, raw):
         try:
@@ -427,11 +428,14 @@ class DocumentPdfService:
             raise DocumentPdfError("Snapshot aprobado sin hash SHA-256 valido.")
         if not snapshot.workflow_evento or snapshot.workflow_evento.accion != "APROBAR":
             raise DocumentPdfError("Snapshot APROBADO sin evento APROBAR asociado.")
-        if (snapshot.archivo_mime or DOCX_MIME) != DOCX_MIME:
-            raise DocumentPdfError("Snapshot aprobado no es DOCX.")
+        profile = get_onlyoffice_document_profile(snapshot.archivo_nombre_original or snapshot.archivo_nombre_interno or snapshot.storage_path)
+        if not profile or profile.extension != "docx":
+            raise DocumentPdfError("Solo el documento principal DOCX aprobado puede convertirse a PDF.")
+        if snapshot.archivo_mime and snapshot.archivo_mime != profile.mime_type:
+            raise DocumentPdfError("Snapshot aprobado tiene MIME incompatible con su extension.")
         try:
             path = self.snapshot_service.resolve_snapshot_path(snapshot)
-            validate_docx_file_path(path)
+            validate_onlyoffice_file_path(path, profile)
         except (DocumentSnapshotError, DocumentStorageError, FileNotFoundError) as exc:
             raise DocumentPdfError(str(exc)) from exc
         return snapshot

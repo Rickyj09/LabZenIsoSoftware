@@ -34,6 +34,7 @@ class HistoricalDocumentMigrationTest(unittest.TestCase):
             "DOCUMENT_STORAGE_ROOT": str(self.private_root),
             "DOCUMENT_LEGACY_STORAGE_ROOT": str(self.legacy_root),
             "DOCUMENT_MAX_FILE_SIZE": 1024 * 1024,
+            "ONLYOFFICE_CALLBACK_DOWNLOAD_MAX_BYTES": 1024 * 1024,
         })
         self.context = self.app.app_context()
         self.context.push()

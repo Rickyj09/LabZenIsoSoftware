@@ -37,6 +37,7 @@ from app.models.documentos import (
     FIRMA_PROCESO_CANCELADO,
     FIRMA_PROCESO_COMPLETADO,
     FIRMA_PROCESO_EN_FIRMA,
+    FIRMA_PROCESO_PENDIENTE,
     FIRMA_PROCESO_RECHAZADO,
     FIRMA_PROVEEDOR_EXTERNO_CONTROLADO,
     FIRMA_ROL_APROBADOR,
@@ -46,9 +47,14 @@ from app.models.documentos import (
     DocumentoFirmaEvento,
     DocumentoFirmaPaso,
     DocumentoFirmaProceso,
+    DocumentoSnapshot,
+    SNAPSHOT_APROBADO,
+    SNAPSHOT_DISPONIBLE,
     UsuarioIdentidadFirma,
 )
+from app.security.permissions import user_has_permission
 from app.services.document_pdf_service import DocumentPdfError, DocumentPdfService, PDF_MIME
+from app.services.office_document_profile import get_onlyoffice_document_profile
 from app.services.storage_service import (
     DocumentStorageError,
     delete_pdf_artifact_file,
@@ -60,6 +66,9 @@ from app.services.storage_service import (
 
 class DocumentSignatureError(ValueError):
     pass
+
+
+START_SIGNATURE_PERMISSION = "documentos.firmas.iniciar"
 
 
 @dataclass(frozen=True)
@@ -293,6 +302,17 @@ class PyHankoPdfSignatureValidator:
     def _load_trust_roots(self):
         from pyhanko.keys import load_cert_from_pemder
 
+        try:
+            from app.services.document_signature_dev_service import dev_signature_mode_enabled, DocumentSignatureDevCertificateService
+
+            if dev_signature_mode_enabled(self.app):
+                ca_path = DocumentSignatureDevCertificateService(self.app).ca_cert_path
+                if not ca_path.exists():
+                    raise DocumentSignatureError("La CA de desarrollo no existe; ejecuta firmas-dev inicializar.")
+                return [load_cert_from_pemder(str(ca_path))]
+        except DocumentSignatureError:
+            raise
+
         paths = self._collect_paths(self.app.config.get("DOCUMENT_SIGNATURE_TRUST_ROOTS_PATH") or self.app.config.get("DOCUMENT_SIGNATURE_TRUST_ROOTS_DIR"))
         if not paths:
             raise DocumentSignatureError("DOCUMENT_SIGNATURE_TRUST_ROOTS_PATH es obligatorio en modo strict.")
@@ -305,11 +325,24 @@ class PyHankoPdfSignatureValidator:
         return certs
 
     def _load_allowed_issuers(self):
+        from pyhanko.keys import load_cert_from_pemder
+
+        try:
+            from app.services.document_signature_dev_service import dev_signature_mode_enabled, DocumentSignatureDevCertificateService
+
+            if dev_signature_mode_enabled(self.app):
+                ca_path = DocumentSignatureDevCertificateService(self.app).ca_cert_path
+                if not ca_path.exists():
+                    raise DocumentSignatureError("La CA de desarrollo no existe; ejecuta firmas-dev inicializar.")
+                cert = load_cert_from_pemder(str(ca_path))
+                return [_normalize_identity_value(cert.subject.human_friendly)]
+        except DocumentSignatureError:
+            raise
+
         configured = self.app.config.get("DOCUMENT_SIGNATURE_ALLOWED_ISSUERS_PATH")
         if not configured:
             return []
         issuers = []
-        from pyhanko.keys import load_cert_from_pemder
         for path in self._collect_paths(configured):
             try:
                 cert = load_cert_from_pemder(str(path))
@@ -485,22 +518,67 @@ class DocumentSignatureService:
             .first()
         )
 
+    def required_identity_statuses(self, version_doc):
+        assignments = [
+            (1, FIRMA_ROL_ELABORADOR, version_doc.elaborado_por),
+            (2, FIRMA_ROL_REVISOR, version_doc.revisado_por),
+            (3, FIRMA_ROL_APROBADOR, version_doc.aprobado_por),
+        ]
+        statuses = []
+        for order, role, user in assignments:
+            identity = self._verified_identity_for_user(user) if user else None
+            statuses.append({
+                "order": order,
+                "role": role,
+                "user": user,
+                "identity": identity,
+                "verified": bool(identity),
+            })
+        return statuses
+
+    def _principal_docx_profile(self, version_doc):
+        profile = get_onlyoffice_document_profile(version_doc)
+        if profile:
+            return profile if profile.extension == "docx" else None
+        snapshot = (
+            DocumentoSnapshot.query
+            .filter_by(
+                empresa_id=version_doc.empresa_id,
+                documento_version_id=version_doc.id,
+                tipo=SNAPSHOT_APROBADO,
+                estado=SNAPSHOT_DISPONIBLE,
+            )
+            .order_by(DocumentoSnapshot.ciclo_revision.desc(), DocumentoSnapshot.id.desc())
+            .first()
+        )
+        snapshot_profile = get_onlyoffice_document_profile(snapshot)
+        return snapshot_profile if snapshot_profile and snapshot_profile.extension == "docx" else None
+
     def start_process(self, *, documento, version_doc, usuario, ip=None, user_agent=None):
         if not self.signatures_enabled():
             raise DocumentSignatureError("Las firmas digitales no estan habilitadas.")
+        if not user_has_permission(usuario, START_SIGNATURE_PERMISSION):
+            raise DocumentSignatureError("No tienes permiso para iniciar firmas digitales externas.")
+        if documento.empresa_id != usuario.empresa_id or version_doc.empresa_id != usuario.empresa_id:
+            raise DocumentSignatureError("No puedes iniciar firmas para documentos de otra empresa.")
+        if version_doc.documento_id != documento.id:
+            raise DocumentSignatureError("La version no corresponde al documento indicado.")
         if version_doc.estado != ESTADO_APROBADO or documento.estado != ESTADO_APROBADO:
             raise DocumentSignatureError("Solo se puede iniciar firma sobre documentos APROBADOS.")
-        active = (
+        if not self._principal_docx_profile(version_doc):
+            raise DocumentSignatureError("La firma corresponde solo al documento principal DOCX aprobado.")
+        existing = (
             DocumentoFirmaProceso.query
             .filter(
                 DocumentoFirmaProceso.empresa_id == documento.empresa_id,
                 DocumentoFirmaProceso.documento_version_id == version_doc.id,
-                DocumentoFirmaProceso.estado.in_((FIRMA_PROCESO_EN_FIRMA,)),
+                DocumentoFirmaProceso.estado.in_((FIRMA_PROCESO_PENDIENTE, FIRMA_PROCESO_EN_FIRMA, FIRMA_PROCESO_COMPLETADO)),
             )
+            .order_by(DocumentoFirmaProceso.solicitado_en.desc(), DocumentoFirmaProceso.id.desc())
             .first()
         )
-        if active:
-            raise DocumentSignatureError("Ya existe un proceso de firma activo para esta version.")
+        if existing:
+            return existing
         pdf_origen = self.pdf_service.available_artifact_for_version(version_doc)
         if not pdf_origen:
             raise DocumentSignatureError("No existe PDF aprobado disponible para iniciar la firma.")
@@ -683,6 +761,90 @@ class DocumentSignatureService:
             raise
         finally:
             temp_path.unlink(missing_ok=True)
+
+    def sign_step_with_dev_certificate(self, *, paso, usuario, ip=None, user_agent=None):
+        from werkzeug.datastructures import FileStorage
+
+        from app.services.document_signature_dev_service import (
+            DEV_TEST_SIGNATURE_REJECTED,
+            DEV_TEST_SIGNATURE_REQUESTED,
+            DEV_TEST_SIGNATURE_VALIDATED,
+            DocumentSignatureDevCertificateService,
+            DocumentSignatureDevError,
+        )
+
+        self._assert_step_owner_enabled(paso, usuario)
+        input_artifact = paso.artifact_entrada or self._input_artifact_for_step(paso)
+        before_count = int(input_artifact.signature_count or 0)
+        metadata_base = {
+            "dev_test_signature": True,
+            "firma_paso_id": paso.id,
+            "rol": paso.rol_firmante,
+            "fingerprint": (paso.identidad_firma.certificado_fingerprint_sha256 if paso.identidad_firma else None),
+            "signature_count_before": before_count,
+        }
+        self._record_event(
+            paso.proceso,
+            paso,
+            usuario,
+            DEV_TEST_SIGNATURE_REQUESTED,
+            "Solicitud de firma PAdES con certificado local de desarrollo.",
+            ip,
+            user_agent,
+            metadata_base,
+        )
+        db.session.commit()
+
+        dev_service = DocumentSignatureDevCertificateService(self.app)
+        signed_path = None
+        try:
+            signed_path = dev_service.sign_step_pdf(paso)
+            with signed_path.open("rb") as stream:
+                artifact = self.upload_signed_pdf(
+                    paso=paso,
+                    usuario=usuario,
+                    file_storage=FileStorage(
+                        stream=stream,
+                        filename=f"{paso.documento.codigo}_dev_signed_{paso.orden}.pdf",
+                        content_type=PDF_MIME,
+                    ),
+                    ip=ip,
+                    user_agent=user_agent,
+                )
+            self._record_event(
+                paso.proceso,
+                paso,
+                usuario,
+                DEV_TEST_SIGNATURE_VALIDATED,
+                "Firma PAdES de desarrollo validada por pyHanko.",
+                ip,
+                user_agent,
+                {
+                    **metadata_base,
+                    "signature_count_after": int(artifact.signature_count or 0),
+                    "artifact_id": artifact.id,
+                    "result": "VALIDA",
+                },
+            )
+            db.session.commit()
+            return artifact
+        except (DocumentSignatureError, DocumentSignatureDevError) as exc:
+            db.session.rollback()
+            self._record_event(
+                paso.proceso,
+                paso,
+                usuario,
+                DEV_TEST_SIGNATURE_REJECTED,
+                str(exc),
+                ip,
+                user_agent,
+                {**metadata_base, "result": "RECHAZADA", "error": str(exc)[:300]},
+            )
+            db.session.commit()
+            raise DocumentSignatureError(str(exc)) from exc
+        finally:
+            if signed_path:
+                signed_path.unlink(missing_ok=True)
 
     def reject_step(self, *, paso, usuario, comentario="", ip=None, user_agent=None):
         self._assert_step_owner_enabled(paso, usuario)

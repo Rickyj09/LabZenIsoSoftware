@@ -16,8 +16,10 @@ from app.services.storage_service import apply_stored_file_metadata, store_docum
 from app.services.document_workflow_service import (
     DocumentWorkflowError,
     approve_version,
+    mark_review_conformity,
     obsolete_document,
     reject_version,
+    request_review_corrections,
     return_to_draft,
     send_for_review,
 )
@@ -75,7 +77,27 @@ class DocumentWorkflowTest(unittest.TestCase):
             password_hash="test",
             activo=True,
         )
-        db.session.add_all([self.company, self.other_company, self.user, self.other_user])
+        self.reviewer = Usuario(
+            id=203,
+            empresa_id=101,
+            nombre="Revisor",
+            apellido="Uno",
+            email="revisor@workflow.test",
+            username="workflow-revisor",
+            password_hash="test",
+            activo=True,
+        )
+        self.approver = Usuario(
+            id=204,
+            empresa_id=101,
+            nombre="Aprobador",
+            apellido="Uno",
+            email="aprobador@workflow.test",
+            username="workflow-aprobador",
+            password_hash="test",
+            activo=True,
+        )
+        db.session.add_all([self.company, self.other_company, self.user, self.other_user, self.reviewer, self.approver])
         db.session.commit()
 
     def tearDown(self):
@@ -158,6 +180,8 @@ class DocumentWorkflowTest(unittest.TestCase):
             cambios="Versión inicial",
             contenido="Contenido",
             user_id=user_id,
+            revisado_por_id=self.reviewer.id,
+            aprobado_por_id=self.approver.id,
         ))
         return self.attach_docx(document, version_doc, f"Version {version}")
 
@@ -179,7 +203,19 @@ class DocumentWorkflowTest(unittest.TestCase):
         event = approve_version(
             documento=document,
             version_doc=version_doc,
-            usuario=user or self.user,
+            usuario=user or self.approver,
+            comentario=comment,
+            ip="127.0.0.1",
+            user_agent="workflow-test",
+        )
+        self.assign_event_ids()
+        return event
+
+    def conform(self, document, version_doc, user=None, comment="Revision conforme"):
+        event = mark_review_conformity(
+            documento=document,
+            version_doc=version_doc,
+            usuario=user or self.reviewer,
             comentario=comment,
             ip="127.0.0.1",
             user_agent="workflow-test",
@@ -190,6 +226,7 @@ class DocumentWorkflowTest(unittest.TestCase):
     def approved_initial(self, document):
         version_doc = self.initial(document)
         self.send(document, version_doc)
+        self.conform(document, version_doc)
         self.approve(document, version_doc)
         return version_doc
 
@@ -200,6 +237,8 @@ class DocumentWorkflowTest(unittest.TestCase):
             cambios="Cambio controlado",
             contenido="Contenido nuevo",
             user_id=self.user.id,
+            revisado_por_id=self.reviewer.id,
+            aprobado_por_id=self.approver.id,
         ))
         return self.attach_docx(document, version_doc, f"Version {version}")
 
@@ -218,11 +257,51 @@ class DocumentWorkflowTest(unittest.TestCase):
         self.assertEqual((event.estado_anterior, event.estado_nuevo), ("EN_ELABORACION", "EN_REVISION"))
         self.assertEqual((event.ip, event.user_agent), ("127.0.0.1", "workflow-test"))
 
+    def test_send_to_review_rejects_missing_reviewer(self):
+        document = self.make_document()
+        draft = self.initial(document)
+        draft.revisado_por_id = None
+
+        with self.assertRaisesRegex(DocumentWorkflowError, "Debe seleccionar un revisor."):
+            self.send(document, draft)
+
+        self.assertEqual(draft.estado, "EN_ELABORACION")
+        self.assertEqual(document.estado, "EN_ELABORACION")
+
+    def test_send_to_review_rejects_missing_approver(self):
+        document = self.make_document()
+        draft = self.initial(document)
+        draft.aprobado_por_id = None
+
+        with self.assertRaisesRegex(DocumentWorkflowError, "Debe seleccionar un aprobador."):
+            self.send(document, draft)
+
+        self.assertEqual(draft.estado, "EN_ELABORACION")
+        self.assertEqual(document.estado, "EN_ELABORACION")
+
+    def test_assigned_reviewer_marks_conformity_before_approval(self):
+        document = self.make_document()
+        draft = self.initial(document)
+        self.send(document, draft)
+
+        event = self.conform(document, draft, comment="Tecnica conforme")
+
+        self.assertEqual(draft.estado, "EN_APROBACION")
+        self.assertEqual(document.estado, "EN_APROBACION")
+        self.assertEqual(draft.revisado_por_id, self.reviewer.id)
+        self.assertIsNotNone(draft.fecha_revision)
+        self.assertEqual(draft.comentario_revision, "Tecnica conforme")
+        self.assertEqual(event.accion, "DAR_CONFORMIDAD")
+
+        with self.assertRaises(DocumentWorkflowError):
+            approve_version(documento=document, version_doc=draft, usuario=self.reviewer)
+
     def test_approval_substitutes_previous_and_records_both_events(self):
         document = self.make_document()
         previous = self.approved_initial(document)
         draft = self.draft(document, "2.0")
         self.send(document, draft)
+        self.conform(document, draft)
 
         self.approve(document, draft)
 
@@ -242,12 +321,12 @@ class DocumentWorkflowTest(unittest.TestCase):
         self.send(document, draft)
 
         with self.assertRaises(DocumentWorkflowError):
-            reject_version(documento=document, version_doc=draft, usuario=self.user, comentario="  ")
+            request_review_corrections(documento=document, version_doc=draft, usuario=self.reviewer, comentario="  ")
 
-        event = reject_version(
+        event = request_review_corrections(
             documento=document,
             version_doc=draft,
-            usuario=self.user,
+            usuario=self.reviewer,
             comentario="Falta evidencia",
         )
         self.assign_event_ids()
@@ -256,17 +335,17 @@ class DocumentWorkflowTest(unittest.TestCase):
         self.assertEqual(draft.comentario_rechazo, "Falta evidencia")
         self.assertEqual(document.estado, "APROBADO")
         self.assertEqual(document.version_vigente_id, current.id)
-        self.assertEqual(event.accion, "RECHAZAR")
+        self.assertEqual(event.accion, "SOLICITAR_CORRECCIONES")
 
     def test_rejection_without_current_marks_document_rejected(self):
         document = self.make_document()
         draft = self.initial(document)
         self.send(document, draft)
 
-        reject_version(
+        request_review_corrections(
             documento=document,
             version_doc=draft,
-            usuario=self.user,
+            usuario=self.reviewer,
             comentario="Debe corregirse",
         )
         self.assign_event_ids()
@@ -278,10 +357,10 @@ class DocumentWorkflowTest(unittest.TestCase):
         document = self.make_document()
         draft = self.initial(document)
         self.send(document, draft)
-        reject_version(
+        request_review_corrections(
             documento=document,
             version_doc=draft,
-            usuario=self.user,
+            usuario=self.reviewer,
             comentario="Corregir alcance",
         )
         self.assign_event_ids()
@@ -336,7 +415,7 @@ class DocumentWorkflowTest(unittest.TestCase):
             reject_version(
                 documento=document,
                 version_doc=draft,
-                usuario=self.user,
+                usuario=self.approver,
                 comentario="No corresponde",
             )
         with self.assertRaises(DocumentWorkflowError):

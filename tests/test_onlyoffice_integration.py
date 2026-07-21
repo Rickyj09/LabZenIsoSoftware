@@ -4,6 +4,7 @@ import subprocess
 import zipfile
 import re
 import os
+import shutil
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -26,6 +27,7 @@ from app.models.documentos import (
     DocumentoEdicionEvento,
     DocumentoSnapshot,
     DocumentoVersion,
+    DocumentoVersionAnexo,
 )
 from app.models.empresa import Empresa
 from app.models.seguridad import Permiso, Rol, RolPermiso, Usuario, UsuarioRol
@@ -40,6 +42,7 @@ from app.services.onlyoffice_document_edit_service import (
     OnlyOfficeEditConflictError,
     OnlyOfficeEditSessionService,
 )
+from app.services.document_attachment_service import DocumentAttachmentService
 from app.services.document_pdf_service import (
     ConversionProviderResult,
     DocumentPdfError,
@@ -48,11 +51,12 @@ from app.services.document_pdf_service import (
 )
 from app.services.document_workflow_service import (
     approve_version as workflow_approve_version,
-    reject_version as workflow_reject_version,
+    mark_review_conformity as workflow_mark_review_conformity,
+    request_review_corrections as workflow_request_review_corrections,
     return_to_draft as workflow_return_to_draft,
     send_for_review as workflow_send_for_review,
 )
-from app.services.storage_service import apply_stored_file_metadata, store_document_file
+from app.services.storage_service import DocumentStorageError, apply_stored_file_metadata, normalize_document_filename, store_document_file
 from app.services.storage_service import file_digest_and_size, resolve_document_path
 from werkzeug.datastructures import FileStorage
 
@@ -197,6 +201,7 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         ])
         view_permission = Permiso(id=1001, codigo="documentos.ver", nombre="Ver documentos", modulo="documentos")
         edit_permission = Permiso(id=1003, codigo="documentos.editar", nombre="Editar documentos", modulo="documentos")
+        download_permission = Permiso(id=1005, codigo="documentos.descargar", nombre="Descargar documentos", modulo="documentos")
         review_permission = Permiso(
             id=1004,
             codigo="documentos.enviar_revision",
@@ -211,13 +216,16 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         )
         quality_role = Rol(id=2001, nombre="CALIDAD", es_sistema=True)
         consultation_role = Rol(id=2002, nombre="CONSULTA", es_sistema=True)
+        editor_role = Rol(id=2003, nombre="EDITOR", es_sistema=True)
         db.session.add_all([
             view_permission,
             history_permission,
             edit_permission,
+            download_permission,
             review_permission,
             quality_role,
             consultation_role,
+            editor_role,
         ])
         db.session.flush()
         db.session.add_all([
@@ -225,10 +233,13 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
             RolPermiso(id=3002, rol_id=quality_role.id, permiso_id=history_permission.id),
             RolPermiso(id=3003, rol_id=quality_role.id, permiso_id=edit_permission.id),
             RolPermiso(id=3004, rol_id=quality_role.id, permiso_id=review_permission.id),
+            RolPermiso(id=3005, rol_id=editor_role.id, permiso_id=view_permission.id),
+            RolPermiso(id=3006, rol_id=editor_role.id, permiso_id=edit_permission.id),
+            RolPermiso(id=3007, rol_id=quality_role.id, permiso_id=download_permission.id),
             UsuarioRol(id=4001, usuario_id=201, rol_id=quality_role.id),
             UsuarioRol(id=4002, usuario_id=202, rol_id=consultation_role.id),
             UsuarioRol(id=4003, usuario_id=203, rol_id=quality_role.id),
-            UsuarioRol(id=4004, usuario_id=204, rol_id=quality_role.id),
+            UsuarioRol(id=4004, usuario_id=204, rol_id=editor_role.id),
         ])
 
     def login(self, user_id):
@@ -268,6 +279,51 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
                 </w:document>""",
             )
         return stream.getvalue()
+
+    def minimal_xlsx(self, text="LabZenISO"):
+        stream = BytesIO()
+        with zipfile.ZipFile(stream, "w") as archive:
+            archive.writestr(
+                "[Content_Types].xml",
+                """<?xml version="1.0" encoding="UTF-8"?>
+                <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+                  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+                  <Default Extension="xml" ContentType="application/xml"/>
+                  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+                  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+                </Types>""",
+            )
+            archive.writestr(
+                "xl/workbook.xml",
+                """<?xml version="1.0" encoding="UTF-8"?>
+                <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                  <sheets><sheet name="Hoja1" sheetId="1" r:id="rId1" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/></sheets>
+                </workbook>""",
+            )
+            archive.writestr(
+                "xl/worksheets/sheet1.xml",
+                f"""<?xml version="1.0" encoding="UTF-8"?>
+                <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                  <sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>{text}</t></is></c></row></sheetData>
+                </worksheet>""",
+            )
+        return stream.getvalue()
+
+    def minimal_xlsm(self):
+        data = self.minimal_xlsx("macro")
+        stream = BytesIO(data)
+        output = BytesIO()
+        with zipfile.ZipFile(stream, "r") as source, zipfile.ZipFile(output, "w") as target:
+            for name in source.namelist():
+                content = source.read(name)
+                if name == "[Content_Types].xml":
+                    content = content.replace(
+                        b"spreadsheetml.sheet.main+xml",
+                        b"spreadsheetml.sheet.macroEnabled.main+xml",
+                    )
+                target.writestr(name, content)
+            target.writestr("xl/vbaProject.bin", b"macro")
+        return output.getvalue()
 
     def minimal_pdf(self, text="LabZenISO"):
         body = (
@@ -334,6 +390,8 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
             version="1",
             estado="EN_ELABORACION",
             elaborado_por_id=201 if company_id == 101 else 203,
+            revisado_por_id=204 if company_id == 101 else 203,
+            aprobado_por_id=201 if company_id == 101 else 203,
         )
         db.session.add_all([document, version])
         db.session.flush()
@@ -371,6 +429,14 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
             hojas_modificadas="No aplica",
         )
         db.session.commit()
+        reviewer = db.session.get(Usuario, version.revisado_por_id)
+        workflow_mark_review_conformity(
+            documento=document,
+            version_doc=version,
+            usuario=reviewer,
+            comentario="Conforme",
+        )
+        db.session.commit()
         workflow_approve_version(
             documento=document,
             version_doc=version,
@@ -382,6 +448,20 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
             documento_version_id=version.id,
             tipo="APROBADO",
         ).one()
+
+    def add_xlsx_attachment(self, document, version, *, filename="testexcel.xlsx", text="anexo"):
+        anexo = DocumentAttachmentService().add_attachment(
+            documento=document,
+            version_doc=version,
+            usuario=db.session.get(Usuario, 201),
+            file_storage=FileStorage(
+                stream=BytesIO(self.minimal_xlsx(text)),
+                filename=filename,
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+        )
+        db.session.commit()
+        return anexo
 
     def test_pdf_conversion_accepts_only_approved_snapshot_source(self):
         document, version = self.add_document_with_file(content=self.minimal_docx("revision"))
@@ -519,7 +599,13 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
             resumen_cambios="Primer ciclo",
             hojas_modificadas="No aplica",
         )
-        workflow_reject_version(documento=document, version_doc=version, usuario=user, comentario="Corregir")
+        reviewer = db.session.get(Usuario, version.revisado_por_id)
+        workflow_request_review_corrections(
+            documento=document,
+            version_doc=version,
+            usuario=reviewer,
+            comentario="Corregir",
+        )
         db.session.commit()
 
         first_review = DocumentoSnapshot.query.filter_by(
@@ -569,6 +655,13 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
             hojas_modificadas="No aplica",
         )
         review = DocumentoSnapshot.query.filter_by(documento_version_id=version.id, tipo="ENVIO_REVISION").one()
+        reviewer = db.session.get(Usuario, version.revisado_por_id)
+        workflow_mark_review_conformity(
+            documento=document,
+            version_doc=version,
+            usuario=reviewer,
+            comentario="Conforme",
+        )
         workflow_approve_version(documento=document, version_doc=version, usuario=user, comentario="Aprobado")
         db.session.commit()
 
@@ -594,11 +687,17 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         self.assertIsNotNone(review.workflow_evento_id)
         self.assertEqual(review.workflow_evento.accion, "ENVIAR_REVISION")
 
-        workflow_reject_version(documento=document, version_doc=version, usuario=user, comentario="Corregir")
+        reviewer = db.session.get(Usuario, version.revisado_por_id)
+        workflow_request_review_corrections(
+            documento=document,
+            version_doc=version,
+            usuario=reviewer,
+            comentario="Corregir",
+        )
         db.session.commit()
         rejected = DocumentoSnapshot.query.filter_by(documento_version_id=version.id, tipo="RECHAZADO").one()
         self.assertIsNotNone(rejected.workflow_evento_id)
-        self.assertEqual(rejected.workflow_evento.accion, "RECHAZAR")
+        self.assertEqual(rejected.workflow_evento.accion, "SOLICITAR_CORRECCIONES")
 
         workflow_return_to_draft(documento=document, version_doc=version, usuario=user, comentario="Devolver")
         self.replace_working_docx(version, "eventos ciclo dos")
@@ -608,6 +707,12 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
             usuario=user,
             resumen_cambios="Segundo envio con evento",
             hojas_modificadas="No aplica",
+        )
+        workflow_mark_review_conformity(
+            documento=document,
+            version_doc=version,
+            usuario=reviewer,
+            comentario="Conforme",
         )
         workflow_approve_version(documento=document, version_doc=version, usuario=user, comentario="Aprobar")
         db.session.commit()
@@ -812,6 +917,8 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         self.assertNotIn("unit-test-onlyoffice-secret", response.get_data(as_text=True))
 
     def test_client_docx_is_ignored_by_git(self):
+        if not shutil.which("git"):
+            self.skipTest("git no esta disponible en PATH")
         result = subprocess.run(
             [
                 "git",
@@ -826,6 +933,20 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertIn("docs/cliente/*.docx", result.stdout)
+
+    def test_docx_filename_does_not_keep_double_extension(self):
+        _document, version = self.add_document_with_file(
+            filename="TEST-GT.PR.SOD.PEECE-v1.docx.docx",
+            content=self.minimal_docx("nombre"),
+        )
+
+        self.assertEqual(normalize_document_filename("TEST-GT.PR.SOD.PEECE-v1.docx.docx"), "TEST-GT.PR.SOD.PEECE-v1.docx")
+        self.assertEqual(normalize_document_filename("testexcel.xlsx.docx"), "testexcel.xlsx")
+        self.assertEqual(normalize_document_filename("testexcel.xlsx.xlsx"), "testexcel.xlsx")
+        self.assertEqual(version.archivo_nombre_original, "TEST-GT.PR.SOD.PEECE-v1.docx")
+        self.assertFalse(version.archivo_nombre_original.lower().endswith(".docx.docx"))
+        self.assertFalse(version.archivo_nombre_guardado.lower().endswith(".docx.docx"))
+        self.assertIn("/v1/", f"/{version.archivo_storage_path}")
 
     def test_document_token_ttl_is_loaded_from_config(self):
         self.assertEqual(self.app.config["ONLYOFFICE_DOCUMENT_TOKEN_TTL_SECONDS"], 300)
@@ -854,6 +975,193 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         self.assertIn("ONLYOFFICE", body)
         self.assertNotIn("unit-test-onlyoffice-secret", body)
         self.assertNotIn(version.archivo_storage_path, body)
+
+    def test_docx_version_can_have_multiple_xlsx_attachments(self):
+        document, version = self.add_document_with_file(content=self.minimal_docx("principal"))
+
+        first = self.add_xlsx_attachment(document, version, filename="testexcel.xlsx", text="uno")
+        second = self.add_xlsx_attachment(document, version, filename="testexcel-2.xlsx", text="dos")
+
+        self.assertEqual(DocumentoVersionAnexo.query.filter_by(documento_version_id=version.id).count(), 2)
+        self.assertEqual(first.archivo_nombre_original, "testexcel.xlsx")
+        self.assertEqual(first.archivo_mime, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.assertFalse(first.archivo_nombre_original.lower().endswith(".docx"))
+        self.assertEqual(second.tipo, "XLSX")
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_xlsx_attachment_viewer_uses_cell_document_type(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx("principal"))
+        anexo = self.add_xlsx_attachment(document, version, text="vista")
+
+        response = self.login(201).get(f"/documentacion/anexos/{anexo.public_id}/onlyoffice/ver")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"fileType": "xlsx"', body)
+        self.assertIn('"documentType": "cell"', body)
+        self.assertIn('"mode": "view"', body)
+        self.assertIn('"edit": false', body)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_elaborator_can_edit_xlsx_attachment_in_draft(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx("principal"))
+        anexo = self.add_xlsx_attachment(document, version, text="edicion")
+
+        response = self.login(201).get(f"/documentacion/anexos/{anexo.public_id}/onlyoffice/editar")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"mode": "edit"', body)
+        self.assertIn('"fileType": "xlsx"', body)
+        self.assertIn('"documentType": "cell"', body)
+        self.assertEqual(DocumentoEdicion.query.filter_by(documento_version_anexo_id=anexo.id).count(), 1)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_reviewer_and_review_states_cannot_edit_xlsx_attachment(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx("principal"))
+        anexo = self.add_xlsx_attachment(document, version, text="revision")
+
+        reviewer_response = self.login(204).get(f"/documentacion/anexos/{anexo.public_id}/onlyoffice/editar")
+        self.assertEqual(reviewer_response.status_code, 403)
+
+        user = db.session.get(Usuario, 201)
+        workflow_send_for_review(
+            documento=document,
+            version_doc=version,
+            usuario=user,
+            comentario="Listo",
+            resumen_cambios="Cambio controlado",
+            hojas_modificadas="No aplica",
+        )
+        db.session.commit()
+        review_response = self.login(201).get(f"/documentacion/anexos/{anexo.public_id}/onlyoffice/editar")
+        view_response = self.login(201).get(f"/documentacion/anexos/{anexo.public_id}/onlyoffice/ver")
+
+        self.assertEqual(review_response.status_code, 403)
+        self.assertEqual(view_response.status_code, 200)
+        snapshot = DocumentoSnapshot.query.filter_by(documento_version_id=version.id, tipo="ENVIO_REVISION").one()
+        self.assertEqual(snapshot.metadata_json["anexos"][0]["sha256"], anexo.archivo_sha256)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_attachment_lock_blocks_second_user(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx("principal"))
+        document.elaborado_por_id = 204
+        version.elaborado_por_id = 204
+        db.session.commit()
+        anexo = self.add_xlsx_attachment(document, version, text="bloqueo")
+
+        first = DocumentAttachmentService().acquire_lock(anexo=anexo, user=db.session.get(Usuario, 204))
+
+        self.assertEqual(first.usuario_id, 204)
+        with self.assertRaises(OnlyOfficeEditConflictError):
+            DocumentAttachmentService().acquire_lock(anexo=anexo, user=db.session.get(Usuario, 201))
+        self.assertEqual(DocumentoEdicion.query.filter_by(documento_version_anexo_id=anexo.id, estado="ACTIVA").count(), 1)
+
+    @patch("app.services.document_attachment_service.urlopen")
+    def test_xlsx_attachment_callback_updates_same_attachment_and_is_idempotent(self, urlopen_mock):
+        document, version = self.add_document_with_file(content=self.minimal_docx("principal"))
+        anexo = self.add_xlsx_attachment(document, version, text="original")
+        edicion = DocumentoEdicion(
+            empresa_id=document.empresa_id,
+            public_id="public-attachment-force",
+            documento_id=document.id,
+            documento_version_id=version.id,
+            documento_version_anexo_id=anexo.id,
+            usuario_id=201,
+            editor_key="editor-attachment-force",
+            estado="ACTIVA",
+            fecha_inicio=datetime.now(timezone.utc),
+            ultima_actividad=datetime.now(timezone.utc),
+            fecha_expiracion=datetime.now(timezone.utc) + timedelta(minutes=5),
+            hash_inicial=anexo.archivo_sha256,
+            hash_ultimo_guardado=anexo.archivo_sha256,
+        )
+        db.session.add(edicion)
+        db.session.commit()
+        old_hash = anexo.archivo_sha256
+        updated = self.minimal_xlsx("updated")
+        token = generate_onlyoffice_callback_token(public_id=edicion.public_id, editor_key=edicion.editor_key)
+        url = f"/documentacion/integraciones/onlyoffice/ediciones/{edicion.public_id}/callback?token={token}"
+        payload = {"status": 6, "key": edicion.editor_key, "url": "http://localhost:8082/cache/anexo.xlsx"}
+        urlopen_mock.return_value = FakeHttpResponse(200, body=updated, url="http://localhost:8082/cache/anexo.xlsx")
+
+        first = self.app.test_client().post(url, json=payload)
+        second = self.app.test_client().post(url, json=payload)
+
+        saved = db.session.get(DocumentoVersionAnexo, anexo.id)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(urlopen_mock.call_count, 1)
+        self.assertEqual(DocumentoVersionAnexo.query.count(), 1)
+        self.assertNotEqual(saved.archivo_sha256, old_hash)
+        self.assertEqual(saved.archivo_size, len(updated))
+        self.assertEqual(saved.archivo_mime, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    def test_approving_docx_makes_attachments_immutable_and_does_not_convert_them(self):
+        self.app.config["ONLYOFFICE_CONVERSION_ENABLED"] = True
+        document, version = self.add_document_with_file(content=self.minimal_docx("principal"))
+        anexo = self.add_xlsx_attachment(document, version, text="aprobado")
+        user = db.session.get(Usuario, 201)
+        workflow_send_for_review(
+            documento=document,
+            version_doc=version,
+            usuario=user,
+            comentario="Listo",
+            resumen_cambios="Cambio controlado",
+            hojas_modificadas="No aplica",
+        )
+        db.session.commit()
+        workflow_mark_review_conformity(
+            documento=document,
+            version_doc=version,
+            usuario=db.session.get(Usuario, version.revisado_por_id),
+            comentario="Conforme",
+        )
+        db.session.commit()
+        workflow_approve_version(documento=document, version_doc=version, usuario=user, comentario="Aprobado")
+        db.session.commit()
+
+        saved = db.session.get(DocumentoVersionAnexo, anexo.id)
+        self.assertEqual(saved.estado, "APROBADO")
+        self.assertTrue(saved.inmutable)
+        self.assertEqual(DocumentoConversion.query.count(), 0)
+
+    def test_attachment_download_and_cross_tenant_are_controlled(self):
+        document, version = self.add_document_with_file(content=self.minimal_docx("principal"))
+        content = self.minimal_xlsx("download")
+        anexo = DocumentAttachmentService().add_attachment(
+            documento=document,
+            version_doc=version,
+            usuario=db.session.get(Usuario, 201),
+            file_storage=FileStorage(
+                stream=BytesIO(content),
+                filename="testexcel.xlsx",
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+        )
+        db.session.commit()
+
+        ok = self.login(201).get(f"/documentacion/anexos/{anexo.public_id}/descargar")
+        wrong_tenant_token = generate_onlyoffice_document_token(
+            empresa_id=102,
+            documento_id=document.id,
+            version_id=version.id,
+            archivo_sha256=anexo.archivo_sha256,
+            attachment_public_id=anexo.public_id,
+        )
+        other = self.app.test_client().get(
+            f"/documentacion/integraciones/onlyoffice/anexos/{anexo.public_id}/archivo?token={wrong_tenant_token}"
+        )
+
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.data, content)
+        self.assertIn("spreadsheetml.sheet", ok.headers["Content-Type"])
+        self.assertEqual(other.status_code, 404)
+        ok.close()
 
     @patch("app.services.onlyoffice_health_service.urlopen")
     def test_viewer_uses_responsive_large_read_only_frame(self, urlopen_mock):
@@ -1049,6 +1357,61 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
 
     @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_xlsx_viewer_uses_spreadsheet_profile(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(
+            filename="testexcel.xlsx",
+            content=self.minimal_xlsx("vista"),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        response = self.login(201).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/ver")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(version.archivo_nombre_original, "testexcel.xlsx")
+        self.assertFalse(version.archivo_nombre_original.lower().endswith(".docx"))
+        self.assertFalse(version.archivo_nombre_guardado.lower().endswith(".xlsx.xlsx"))
+        self.assertEqual(version.archivo_mime, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.assertIn('"fileType": "xlsx"', body)
+        self.assertIn('"documentType": "cell"', body)
+        self.assertIn('"mode": "view"', body)
+        self.assertIn('"edit": false', body)
+
+    def test_xlsm_is_rejected_as_macro_enabled_excel(self):
+        document = Documento(
+            id=701,
+            empresa_id=101,
+            codigo="DOC-XLSM",
+            titulo="Macro",
+            tipo_documento="PROCEDIMIENTO",
+            estado="EN_ELABORACION",
+            version_actual="1",
+            elaborado_por_id=201,
+        )
+        version = DocumentoVersion(
+            id=1701,
+            empresa_id=101,
+            documento_id=701,
+            version="1",
+            estado="EN_ELABORACION",
+            elaborado_por_id=201,
+        )
+        db.session.add_all([document, version])
+        db.session.flush()
+
+        with self.assertRaises(DocumentStorageError):
+            store_document_file(
+                FileStorage(
+                    stream=BytesIO(self.minimal_xlsm()),
+                    filename="macro.xlsm",
+                    content_type="application/vnd.ms-excel.sheet.macroEnabled.12",
+                ),
+                documento=document,
+                version=version.version,
+            )
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
     def test_missing_private_file_returns_404(self, urlopen_mock):
         urlopen_mock.return_value = FakeHttpResponse(200)
         document, version = self.add_document_with_file()
@@ -1124,6 +1487,29 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, b"docx content")
         self.assertIn("officedocument.wordprocessingml.document", response.headers["Content-Type"])
+
+    def test_valid_document_token_delivers_xlsx_without_session_cookie(self):
+        content = self.minimal_xlsx("descarga")
+        document, version = self.add_document_with_file(
+            filename="testexcel.xlsx",
+            content=content,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        token = generate_onlyoffice_document_token(
+            empresa_id=document.empresa_id,
+            documento_id=document.id,
+            version_id=version.id,
+            archivo_sha256=version.archivo_sha256,
+        )
+
+        response = self.app.test_client().get(
+            f"/documentacion/integraciones/onlyoffice/versiones/{version.id}/archivo?token={token}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, content)
+        self.assertIn("spreadsheetml.sheet", response.headers["Content-Type"])
+        self.assertIn("testexcel.xlsx", response.headers["Content-Disposition"])
 
     def test_document_token_rejects_wrong_scope_company_document_version_and_hash(self):
         document, version = self.add_document_with_file()
@@ -1217,7 +1603,83 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         response = self.login(201).get(f"/documentacion/{document.id}")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Abrir y editar", response.get_data(as_text=True))
+        self.assertIn("Editar contenido en ONLYOFFICE", response.get_data(as_text=True))
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_xlsx_detail_shows_view_and_edit_to_assigned_elaborator(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, _version = self.add_document_with_file(
+            filename="testexcel.xlsx",
+            content=self.minimal_xlsx("detalle"),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        response = self.login(201).get(f"/documentacion/{document.id}")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("testexcel.xlsx", body)
+        self.assertIn("Ver en ONLYOFFICE", body)
+        self.assertIn("Editar contenido en ONLYOFFICE", body)
+        self.assertNotIn("testexcel.docx", body)
+        self.assertNotIn("testexcel.xlsx.docx", body)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_reviewer_cannot_edit_xlsx(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(
+            filename="testexcel.xlsx",
+            content=self.minimal_xlsx("revisor"),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        detail = self.login(204).get(f"/documentacion/{document.id}")
+        response = self.login(204).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertNotIn("Editar contenido en ONLYOFFICE", detail.get_data(as_text=True))
+        self.assertEqual(response.status_code, 403)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_xlsx_edit_uses_spreadsheet_profile(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(
+            filename="testexcel.xlsx",
+            content=self.minimal_xlsx("edicion"),
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        response = self.login(201).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"mode": "edit"', body)
+        self.assertIn('"edit": true', body)
+        self.assertIn('"fileType": "xlsx"', body)
+        self.assertIn('"documentType": "cell"', body)
+        self.assertIn("callbackUrl", body)
+        self.assertEqual(DocumentoEdicion.query.filter_by(documento_version_id=version.id).count(), 1)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_non_assigned_editor_does_not_see_or_open_onlyoffice_edit(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx())
+
+        detail = self.login(204).get(f"/documentacion/{document.id}")
+        response = self.login(204).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertNotIn("Editar contenido en ONLYOFFICE", detail.get_data(as_text=True))
+        self.assertEqual(response.status_code, 403)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_other_tenant_cannot_open_onlyoffice_edit_config(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx())
+
+        response = self.login(203).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+
+        self.assertEqual(response.status_code, 404)
 
     def test_sensitive_request_tokens_are_redacted_from_http_logs(self):
         request_line = (
@@ -1256,6 +1718,20 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         self.assertIn("height: 78vh", body)
         self.assertIn('new window.DocsAPI.DocEditor("onlyoffice-editor", onlyOfficeConfig)', body)
         self.assertIn("Math.ceil((FORCE_SAVE_DEBOUNCE_SECONDS + 30) / 1.5)", body)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_assigned_elaborator_can_open_update_state_in_edit_mode(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx("actualizacion"))
+        document.estado = "EN_ACTUALIZACION"
+        version.estado = "EN_ACTUALIZACION"
+        db.session.commit()
+
+        response = self.login(201).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"mode": "edit"', response.get_data(as_text=True))
+        self.assertEqual(DocumentoEdicion.query.filter_by(documento_version_id=version.id).count(), 1)
 
     @patch("app.services.onlyoffice_health_service.urlopen")
     def test_edit_reuses_same_user_session_and_blocks_second_user(self, urlopen_mock):
@@ -1466,6 +1942,7 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         before_documents = Documento.query.count()
         before_versions = DocumentoVersion.query.count()
         old_hash = version.archivo_sha256
+        version.archivo_mime = "application/octet-stream"
         edicion = DocumentoEdicion(
             empresa_id=document.empresa_id,
             public_id="public-force",
@@ -1496,6 +1973,7 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         self.assertEqual(saved_edit.estado, "ACTIVA")
         self.assertNotEqual(saved_version.archivo_sha256, old_hash)
         self.assertEqual(saved_version.archivo_size, len(updated))
+        self.assertEqual(saved_version.archivo_mime, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
         self.assertEqual(Documento.query.count(), before_documents)
         self.assertEqual(DocumentoVersion.query.count(), before_versions)
         self.assertEqual(saved_version.version, "1")
@@ -1532,6 +2010,57 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         self.assertEqual(second.status_code, 200)
         self.assertEqual(urlopen_mock.call_count, 1)
         self.assertEqual(DocumentoEdicionEvento.query.filter_by(tipo="GUARDADO_FORZADO_COMPLETADO").count(), 1)
+
+    @patch("app.services.onlyoffice_document_edit_service.urlopen")
+    def test_xlsx_callback_replaces_same_version_and_is_idempotent(self, urlopen_mock):
+        original = self.minimal_xlsx("original")
+        updated = self.minimal_xlsx("updated")
+        document, version = self.add_document_with_file(
+            filename="testexcel.xlsx",
+            content=original,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        before_documents = Documento.query.count()
+        before_versions = DocumentoVersion.query.count()
+        old_hash = version.archivo_sha256
+        version.archivo_mime = "application/octet-stream"
+        edicion = DocumentoEdicion(
+            empresa_id=document.empresa_id,
+            public_id="public-xlsx-force",
+            documento_id=document.id,
+            documento_version_id=version.id,
+            usuario_id=201,
+            editor_key="editor-xlsx-force",
+            estado="ACTIVA",
+            fecha_inicio=datetime.now(timezone.utc),
+            ultima_actividad=datetime.now(timezone.utc),
+            fecha_expiracion=datetime.now(timezone.utc) + timedelta(minutes=5),
+            hash_inicial=version.archivo_sha256,
+            hash_ultimo_guardado=version.archivo_sha256,
+        )
+        db.session.add(edicion)
+        db.session.commit()
+        token = generate_onlyoffice_callback_token(public_id=edicion.public_id, editor_key=edicion.editor_key)
+        url = f"/documentacion/integraciones/onlyoffice/ediciones/{edicion.public_id}/callback?token={token}"
+        payload = {"status": 6, "key": edicion.editor_key, "url": "http://localhost:8082/cache/result.xlsx"}
+        urlopen_mock.return_value = FakeHttpResponse(200, body=updated, url="http://localhost:8082/cache/result.xlsx")
+
+        first = self.app.test_client().post(url, json=payload)
+        second = self.app.test_client().post(url, json=payload)
+
+        saved_version = db.session.get(DocumentoVersion, version.id)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(urlopen_mock.call_count, 1)
+        self.assertNotEqual(saved_version.archivo_sha256, old_hash)
+        self.assertEqual(saved_version.archivo_size, len(updated))
+        self.assertEqual(saved_version.archivo_mime, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.assertEqual(saved_version.archivo_nombre_original, "testexcel.xlsx")
+        self.assertFalse(saved_version.archivo_nombre_original.lower().endswith(".docx"))
+        self.assertEqual(saved_version.version, "1")
+        self.assertEqual(saved_version.estado, "EN_ELABORACION")
+        self.assertEqual(Documento.query.count(), before_documents)
+        self.assertEqual(DocumentoVersion.query.count(), before_versions)
 
     @patch("app.services.onlyoffice_document_edit_service.urlopen")
     def test_callback_rejects_ssrf_and_invalid_docx_without_replacing_file(self, urlopen_mock):

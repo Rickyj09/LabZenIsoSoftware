@@ -5,9 +5,9 @@ from app.extensions import db
 from app.models.documentos import Documento, DocumentoVersion
 
 
-TECHNICAL_DOCUMENT_STATES = ("EN_ELABORACION", "EN_REVISION", "APROBADO", "RECHAZADO", "OBSOLETO")
-FLOW_DOCUMENT_STATES = ("EN_ELABORACION", "EN_REVISION", "RECHAZADO", "VIGENTE", "EN_ACTUALIZACION", "OBSOLETO")
-PREPARATION_STATES = ("EN_ELABORACION", "EN_REVISION", "RECHAZADO")
+TECHNICAL_DOCUMENT_STATES = ("EN_ELABORACION", "EN_REVISION", "EN_APROBACION", "APROBADO", "RECHAZADO", "OBSOLETO")
+FLOW_DOCUMENT_STATES = ("EN_ELABORACION", "EN_REVISION", "EN_APROBACION", "RECHAZADO", "VIGENTE", "EN_ACTUALIZACION", "OBSOLETO")
+PREPARATION_STATES = ("EN_ELABORACION", "EN_REVISION", "EN_APROBACION", "RECHAZADO")
 
 
 def _company_documents_query(user):
@@ -30,10 +30,10 @@ def _assigned_pending_version_conditions(user):
         DocumentoVersion.empresa_id == user.empresa_id,
         DocumentoVersion.documento_id == Documento.id,
         DocumentoVersion.empresa_id == Documento.empresa_id,
-        DocumentoVersion.estado == "EN_REVISION",
+        DocumentoVersion.estado.in_(("EN_REVISION", "EN_APROBACION")),
         or_(
-            DocumentoVersion.revisado_por_id == user.id,
-            DocumentoVersion.aprobado_por_id == user.id,
+            and_(DocumentoVersion.estado == "EN_REVISION", DocumentoVersion.revisado_por_id == user.id),
+            and_(DocumentoVersion.estado == "EN_APROBACION", DocumentoVersion.aprobado_por_id == user.id),
         ),
     )
 
@@ -70,10 +70,10 @@ def _annotate_assigned_pending_documents(documents, user):
                 DocumentoVersion.empresa_id == user.empresa_id,
                 Documento.empresa_id == user.empresa_id,
                 DocumentoVersion.documento_id.in_(document_ids),
-                DocumentoVersion.estado == "EN_REVISION",
+                DocumentoVersion.estado.in_(("EN_REVISION", "EN_APROBACION")),
                 or_(
-                    DocumentoVersion.revisado_por_id == user.id,
-                    DocumentoVersion.aprobado_por_id == user.id,
+                    and_(DocumentoVersion.estado == "EN_REVISION", DocumentoVersion.revisado_por_id == user.id),
+                    and_(DocumentoVersion.estado == "EN_APROBACION", DocumentoVersion.aprobado_por_id == user.id),
                 ),
             )
             .group_by(DocumentoVersion.documento_id)
@@ -157,6 +157,7 @@ def count_by_flow_status(user):
     counts = {state: 0 for state in FLOW_DOCUMENT_STATES}
     counts["EN_ELABORACION"] = _company_documents_query(user).filter(Documento.estado == "EN_ELABORACION").count()
     counts["EN_REVISION"] = _company_documents_query(user).filter(Documento.estado == "EN_REVISION").count()
+    counts["EN_APROBACION"] = _company_documents_query(user).filter(Documento.estado == "EN_APROBACION").count()
     counts["RECHAZADO"] = _company_documents_query(user).filter(Documento.estado == "RECHAZADO").count()
     counts["OBSOLETO"] = _company_documents_query(user).filter(Documento.estado == "OBSOLETO").count()
     counts["EN_ACTUALIZACION"] = in_update_count
@@ -209,10 +210,10 @@ def get_pending_documents_assigned_to_user(user, limit=None):
     query = (
         _company_versions_query(user)
         .filter(
-            DocumentoVersion.estado == "EN_REVISION",
+            DocumentoVersion.estado.in_(("EN_REVISION", "EN_APROBACION")),
             or_(
-                DocumentoVersion.revisado_por_id == user.id,
-                DocumentoVersion.aprobado_por_id == user.id,
+                and_(DocumentoVersion.estado == "EN_REVISION", DocumentoVersion.revisado_por_id == user.id),
+                and_(DocumentoVersion.estado == "EN_APROBACION", DocumentoVersion.aprobado_por_id == user.id),
             ),
         )
         .options(joinedload(DocumentoVersion.documento))
@@ -230,10 +231,10 @@ def count_pending_documents_assigned_to_user(user):
     return (
         _company_versions_query(user)
         .filter(
-            DocumentoVersion.estado == "EN_REVISION",
+            DocumentoVersion.estado.in_(("EN_REVISION", "EN_APROBACION")),
             or_(
-                DocumentoVersion.revisado_por_id == user.id,
-                DocumentoVersion.aprobado_por_id == user.id,
+                and_(DocumentoVersion.estado == "EN_REVISION", DocumentoVersion.revisado_por_id == user.id),
+                and_(DocumentoVersion.estado == "EN_APROBACION", DocumentoVersion.aprobado_por_id == user.id),
             ),
         )
         .count()

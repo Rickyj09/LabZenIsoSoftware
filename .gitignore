@@ -37,4 +37,8 @@ docs/cliente/*.docx
 # private trust stores or synthetic signing fixtures.
 instance/signature-trust/
 instance/signature-test/
+instance/dev_signature_certificates/
 storage/signature-test/
+
+# Documentos confidenciales del cliente
+docs/cliente/

@@ -43,6 +43,7 @@ class DocumentDemoSeedTest(unittest.TestCase):
             Rol(id=2001, nombre="CALIDAD", es_sistema=True),
             Rol(id=2002, nombre="TECNICO", es_sistema=True),
             Rol(id=2003, nombre="CONSULTA", es_sistema=True),
+            Rol(id=2004, nombre="REVISOR_DOCUMENTAL", es_sistema=True),
         ])
         db.session.commit()
 
@@ -71,9 +72,12 @@ class DocumentDemoSeedTest(unittest.TestCase):
         review = Documento.query.filter_by(codigo="DEMO-REV-001").one()
         obsolete = Documento.query.filter_by(codigo="DEMO-OBS-001").one()
         updating = Documento.query.filter_by(codigo="DEMO-ACT-001").one()
+        review_version = DocumentoVersion.query.filter_by(documento_id=review.id, version="1").one()
+        reviewer = Usuario.query.filter_by(empresa_id=1, username="revisor_documental").one()
 
         self.assertIsNotNone(current.version_vigente_id)
         self.assertEqual(review.estado, "EN_REVISION")
+        self.assertEqual(review_version.revisado_por_id, reviewer.id)
         self.assertEqual(obsolete.estado, "OBSOLETO")
         self.assertEqual(
             DocumentoVersion.query.filter_by(documento_id=updating.id).count(),
@@ -92,11 +96,14 @@ class DocumentDemoSeedTest(unittest.TestCase):
         seed_demo_documents(empresa_id=1)
 
         quality = Usuario.query.filter_by(empresa_id=1, username="calidad_demo").one()
+        reviewer = Usuario.query.filter_by(empresa_id=1, username="revisor_documental").one()
         technician = Usuario.query.filter_by(empresa_id=1, username="tecnico_demo").one()
         consultation = Usuario.query.filter_by(empresa_id=1, username="consulta_demo").one()
 
-        self.assertEqual(Rol.query.filter(Rol.nombre.in_(("CALIDAD", "TECNICO", "CONSULTA"))).count(), 3)
+        self.assertEqual(Rol.query.filter(Rol.nombre.in_(("CALIDAD", "TECNICO", "CONSULTA", "REVISOR_DOCUMENTAL"))).count(), 4)
         self.assertEqual(UsuarioRol.query.filter_by(usuario_id=quality.id).count(), 1)
+        self.assertEqual(UsuarioRol.query.filter_by(usuario_id=reviewer.id).count(), 1)
+        self.assertEqual(reviewer.email, "revisor.documental@labzen.test")
         self.assertEqual(UsuarioRol.query.filter_by(usuario_id=technician.id).count(), 1)
         self.assertEqual(UsuarioRol.query.filter_by(usuario_id=consultation.id).count(), 1)
 

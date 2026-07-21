@@ -12,9 +12,9 @@ from app.services.onlyoffice_jwt_service import (
     sign_onlyoffice_config,
 )
 from app.services.storage_service import DocumentStorageError, resolve_document_path
+from app.services.office_document_profile import DOCX_MIME, get_onlyoffice_document_profile, is_onlyoffice_supported_version
 
 
-DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 class OnlyOfficeDocumentViewError(ValueError):
@@ -43,13 +43,8 @@ class OnlyOfficeDocumentViewContext:
 
 
 def is_docx_version(version_doc):
-    filename = (
-        version_doc.archivo_nombre_original
-        or version_doc.archivo_nombre_guardado
-        or version_doc.archivo_storage_path
-        or ""
-    )
-    return filename.lower().endswith(".docx")
+    profile = get_onlyoffice_document_profile(version_doc)
+    return bool(profile and profile.extension == "docx")
 
 
 def onlyoffice_document_key(*, empresa_id, documento_id, version_id, archivo_sha256, source_id=None):
@@ -57,22 +52,29 @@ def onlyoffice_document_key(*, empresa_id, documento_id, version_id, archivo_sha
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def resolve_viewable_docx_path(version_doc):
-    if not is_docx_version(version_doc):
-        raise OnlyOfficeInvalidDocumentError("La versión documental no es un archivo DOCX compatible.")
+def resolve_onlyoffice_source_path(version_doc):
+    profile = get_onlyoffice_document_profile(version_doc)
+    if not profile:
+        raise OnlyOfficeInvalidDocumentError("La version documental no es un archivo compatible con ONLYOFFICE.")
     if not version_doc.archivo_storage_path:
-        raise OnlyOfficeInvalidDocumentError("La versión no tiene archivo privado disponible para ONLYOFFICE.")
+        raise OnlyOfficeInvalidDocumentError("La version no tiene archivo privado disponible para ONLYOFFICE.")
     if not version_doc.archivo_sha256:
-        raise OnlyOfficeInvalidDocumentError("La versión no tiene hash documental registrado.")
+        raise OnlyOfficeInvalidDocumentError("La version no tiene hash documental registrado.")
 
     try:
         physical_path = resolve_document_path(version_doc.archivo_storage_path)
     except DocumentStorageError as exc:
-        raise OnlyOfficeInvalidDocumentError("La ruta privada del documento no es válida.") from exc
+        raise OnlyOfficeInvalidDocumentError("La ruta privada del documento no es valida.") from exc
 
     if not physical_path.is_file():
-        raise FileNotFoundError("El archivo privado de la versión no existe.")
+        raise FileNotFoundError("El archivo privado de la version no existe.")
     return physical_path
+
+
+def resolve_viewable_docx_path(version_doc):
+    if not is_docx_version(version_doc):
+        raise OnlyOfficeInvalidDocumentError("La version documental no es un archivo DOCX compatible.")
+    return resolve_onlyoffice_source_path(version_doc)
 
 
 class OnlyOfficeDocumentViewService:
@@ -105,12 +107,13 @@ class OnlyOfficeDocumentViewService:
             documento=documento,
             version_doc=version,
         )
-        if not (source.filename or "").lower().endswith(".docx"):
-            raise OnlyOfficeInvalidDocumentError("La fuente documental oficial no es un archivo DOCX compatible.")
+        profile = get_onlyoffice_document_profile(source.filename or version)
+        if not profile:
+            raise OnlyOfficeInvalidDocumentError("La fuente documental oficial no es compatible con ONLYOFFICE.")
         if source.kind == "snapshot":
             snapshot_service.resolve_snapshot_path(source.snapshot)
         else:
-            resolve_viewable_docx_path(version)
+            resolve_onlyoffice_source_path(version)
 
         health = OnlyOfficeHealthService(self.app).check()
         if not health.available:
@@ -124,7 +127,7 @@ class OnlyOfficeDocumentViewService:
             archivo_sha256=source.sha256,
             source_id=source.snapshot.public_id if source.snapshot else None,
         )
-        config = self._build_editor_config(documento, version, document_url, document_key, user, source)
+        config = self._build_editor_config(documento, version, document_url, document_key, user, source, profile)
         config["token"] = sign_onlyoffice_config(config)
 
         return OnlyOfficeDocumentViewContext(
@@ -151,11 +154,12 @@ class OnlyOfficeDocumentViewService:
             + urlencode({"token": token})
         )
 
-    def _build_editor_config(self, documento, version, document_url, document_key, user, source=None):
-        title = (source.filename if source else None) or version.archivo_nombre_original or f"{documento.codigo}_v{version.version}.docx"
+    def _build_editor_config(self, documento, version, document_url, document_key, user, source=None, profile=None):
+        profile = profile or get_onlyoffice_document_profile(source.filename if source else version)
+        title = (source.filename if source else None) or version.archivo_nombre_original or f"{documento.codigo}_v{version.version}.{profile.extension}"
         return {
             "document": {
-                "fileType": "docx",
+                "fileType": profile.file_type,
                 "key": document_key,
                 "title": Path(title).name,
                 "url": document_url,
@@ -169,7 +173,7 @@ class OnlyOfficeDocumentViewService:
                     "review": False,
                 },
             },
-            "documentType": "word",
+            "documentType": profile.document_type,
             "editorConfig": {
                 "mode": "view",
                 "lang": "es",

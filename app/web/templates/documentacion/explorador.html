@@ -1,0 +1,406 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Explorador documental{% endblock %}
+
+{% macro render_tree(nodes, active_id) %}
+    {% for node in nodes %}
+        {% set folder = node.folder %}
+        <div class="folder-tree-node" style="--depth: {{ node.depth }};">
+            {% if node.children %}
+                <details open>
+                    <summary class="folder-tree-summary">
+                        <a class="folder-tree-link {% if active_id == folder.id %}active{% endif %}"
+                           href="{{ url_for('documentacion.explorador_carpeta', carpeta_id=folder.id) }}">
+                            <span>{{ folder.nombre }}</span>
+                        </a>
+                    </summary>
+                    {{ render_tree(node.children, active_id) }}
+                </details>
+            {% else %}
+                <a class="folder-tree-link {% if active_id == folder.id %}active{% endif %}"
+                   href="{{ url_for('documentacion.explorador_carpeta', carpeta_id=folder.id) }}">
+                    <span class="folder-symbol" aria-hidden="true">▸</span>
+                    <span>{{ folder.nombre }}</span>
+                </a>
+            {% endif %}
+        </div>
+    {% endfor %}
+{% endmacro %}
+
+{% block content %}
+<style>
+    .explorer-shell {
+        display: grid;
+        grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+        gap: 1rem;
+    }
+    .explorer-sidebar {
+        position: sticky;
+        top: 1rem;
+        align-self: start;
+    }
+    .folder-tree-link {
+        display: flex;
+        align-items: center;
+        gap: .45rem;
+        min-height: 2.1rem;
+        padding: .35rem .5rem .35rem calc(.5rem + (var(--depth) * 1rem));
+        color: #334155;
+        text-decoration: none;
+        border-radius: .375rem;
+    }
+    .folder-tree-link:hover,
+    .folder-tree-link.active {
+        background: #e8f0fe;
+        color: #0f3b7a;
+    }
+    .folder-tree-summary {
+        display: flex;
+        align-items: center;
+        padding-left: calc(.5rem + (var(--depth) * 1rem));
+        border-radius: .375rem;
+    }
+    .folder-tree-summary .folder-tree-link {
+        flex: 1;
+        padding-left: .35rem;
+    }
+    .folder-symbol {
+        color: #64748b;
+        font-size: .8rem;
+    }
+    .explorer-card {
+        border: 1px solid #d9e2ef;
+        border-radius: .5rem;
+        background: #fff;
+        height: 100%;
+    }
+    .folder-card-link,
+    .document-card-link {
+        color: inherit;
+        text-decoration: none;
+    }
+    .folder-icon {
+        width: 2.4rem;
+        height: 2rem;
+        border-radius: .25rem;
+        background: #f3c95f;
+        border: 1px solid #d6a736;
+        display: inline-block;
+        position: relative;
+        flex: 0 0 auto;
+    }
+    .folder-icon::before {
+        content: "";
+        position: absolute;
+        width: 1rem;
+        height: .35rem;
+        left: .2rem;
+        top: -.35rem;
+        background: #e7b94f;
+        border: 1px solid #d6a736;
+        border-bottom: 0;
+        border-radius: .25rem .25rem 0 0;
+    }
+    .document-icon {
+        width: 2rem;
+        height: 2.4rem;
+        border: 1px solid #8aa3c7;
+        border-radius: .25rem;
+        background: linear-gradient(180deg, #fff, #edf4ff);
+        display: inline-block;
+        flex: 0 0 auto;
+    }
+    .explorer-toolbar {
+        gap: .5rem;
+    }
+    @media (max-width: 992px) {
+        .explorer-shell {
+            grid-template-columns: 1fr;
+        }
+        .explorer-sidebar {
+            position: static;
+        }
+    }
+</style>
+
+<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-3">
+    <div>
+        <h2 class="mb-1">Explorador documental</h2>
+        <div class="text-muted">Organización lógica por carpetas sin cambiar el flujo documental ni el almacenamiento privado.</div>
+    </div>
+    <div class="d-flex flex-wrap explorer-toolbar">
+        <div class="btn-group" role="group" aria-label="Selector de vista documental">
+            <a href="{{ url_for('documentacion.index') }}" class="btn btn-outline-secondary">Vista actual</a>
+            <a href="{{ url_for('documentacion.explorador') }}" class="btn btn-primary">Vista explorador</a>
+        </div>
+        {% if can('documentos.crear') %}
+        <a href="{{ url_for('documentacion.nuevo') }}" class="btn btn-outline-primary">Nuevo documento</a>
+        {% endif %}
+    </div>
+</div>
+
+<nav aria-label="Ruta de carpetas" class="mb-3">
+    <ol class="breadcrumb mb-0">
+        <li class="breadcrumb-item"><a href="{{ url_for('documentacion.explorador') }}">Inicio</a></li>
+        {% if uncategorized %}
+            <li class="breadcrumb-item active" aria-current="page">Sin clasificar</li>
+        {% else %}
+            {% for crumb in breadcrumb %}
+                {% if loop.last %}
+                    <li class="breadcrumb-item active" aria-current="page">{{ crumb.nombre }}</li>
+                {% else %}
+                    <li class="breadcrumb-item"><a href="{{ url_for('documentacion.explorador_carpeta', carpeta_id=crumb.id) }}">{{ crumb.nombre }}</a></li>
+                {% endif %}
+            {% endfor %}
+        {% endif %}
+    </ol>
+</nav>
+
+<div class="page-card mb-4">
+    <form method="get" class="row g-3">
+        <div class="col-md-3">
+            <label class="form-label">Buscar</label>
+            <input type="text" name="q" class="form-control" value="{{ filters.q }}" placeholder="Código o título">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Estado</label>
+            <select name="estado" class="form-select">
+                <option value="">Todos</option>
+                {% for estado in estados_documento %}
+                <option value="{{ estado }}" {% if filters.estado == estado %}selected{% endif %}>{{ document_state_label(estado) }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Tipo</label>
+            <select name="tipo" class="form-select">
+                <option value="">Todos</option>
+                {% for tipo in filter_options.tipos %}
+                <option value="{{ tipo }}" {% if filters.tipo == tipo %}selected{% endif %}>{{ tipo }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Proceso</label>
+            <select name="proceso" class="form-select">
+                <option value="">Todos</option>
+                {% for proceso in filter_options.procesos %}
+                <option value="{{ proceso }}" {% if filters.proceso == proceso %}selected{% endif %}>{{ proceso }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+            <button type="submit" class="btn btn-outline-primary w-100">Filtrar</button>
+        </div>
+    </form>
+</div>
+
+<div class="explorer-shell">
+    <aside class="page-card explorer-sidebar">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0">Carpetas</h5>
+            {% if can_create_folder %}
+            <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#crearCarpeta">
+                Nueva
+            </button>
+            {% endif %}
+        </div>
+
+        {% if can_create_folder %}
+        <div class="collapse mb-3" id="crearCarpeta">
+            <form method="post" action="{{ url_for('documentacion.crear_carpeta') }}" class="border rounded p-3">
+                <input type="hidden" name="padre_id" value="{{ folder.id if folder else '' }}">
+                <label class="form-label">Nombre</label>
+                <input type="text" name="nombre" class="form-control form-control-sm mb-2" maxlength="150" required>
+                <label class="form-label">Descripción</label>
+                <textarea name="descripcion" class="form-control form-control-sm mb-2" rows="2"></textarea>
+                <button type="submit" class="btn btn-sm btn-primary">Crear carpeta</button>
+            </form>
+        </div>
+        {% endif %}
+
+        <a class="folder-tree-link {% if not folder and not uncategorized %}active{% endif %}"
+           href="{{ url_for('documentacion.explorador') }}">
+            <span class="folder-symbol" aria-hidden="true">▸</span>
+            <span>Inicio</span>
+        </a>
+        {{ render_tree(tree, folder.id if folder else None) }}
+        <a class="folder-tree-link {% if uncategorized %}active{% endif %}"
+           href="{{ url_for('documentacion.explorador_sin_clasificar') }}">
+            <span class="folder-symbol" aria-hidden="true">▸</span>
+            <span>Sin clasificar</span>
+        </a>
+    </aside>
+
+    <main>
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <div>
+                <h4 class="mb-1">
+                    {% if uncategorized %}Sin clasificar{% elif folder %}{{ folder.nombre }}{% else %}Inicio{% endif %}
+                </h4>
+                {% if folder and folder.descripcion %}
+                <div class="text-muted">{{ folder.descripcion }}</div>
+                {% endif %}
+            </div>
+            {% if folder and (can_edit_folder or can_delete_folder) %}
+            <div class="d-flex flex-wrap gap-2">
+                {% if can_edit_folder %}
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#editarCarpeta">
+                    Editar carpeta
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#moverCarpeta">
+                    Mover carpeta
+                </button>
+                {% endif %}
+                {% if can_delete_folder %}
+                <form method="post" action="{{ url_for('documentacion.eliminar_carpeta', carpeta_id=folder.id) }}">
+                    <input type="hidden" name="retorno_padre_id" value="{{ folder.padre_id or '' }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Eliminar carpeta vacía">
+                        Eliminar carpeta
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        {% if folder and can_edit_folder %}
+        <div class="collapse mb-3" id="editarCarpeta">
+            <div class="page-card">
+                <form method="post" action="{{ url_for('documentacion.editar_carpeta', carpeta_id=folder.id) }}" class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Nombre</label>
+                        <input type="text" name="nombre" class="form-control" maxlength="150" required value="{{ folder.nombre }}">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Descripción</label>
+                        <input type="text" name="descripcion" class="form-control" value="{{ folder.descripcion or '' }}">
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <button type="submit" class="btn btn-primary w-100">Guardar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <div class="collapse mb-3" id="moverCarpeta">
+            <div class="page-card">
+                <form method="post" action="{{ url_for('documentacion.mover_carpeta', carpeta_id=folder.id) }}" class="row g-3">
+                    <div class="col-md-8">
+                        <label class="form-label">Nueva ubicación</label>
+                        <select name="padre_id" class="form-select">
+                            {% for option in folder_options %}
+                            <option value="{{ option.id or '' }}" {% if folder.padre_id == option.id %}selected{% endif %}>
+                                {{ '-- ' * option.depth }}{{ option.label }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                        <button type="submit" class="btn btn-primary w-100">Mover carpeta</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if subfolders %}
+        <h5 class="mb-3">Subcarpetas</h5>
+        <div class="row g-3 mb-4">
+            {% for subfolder in subfolders %}
+            <div class="col-md-6 col-xl-4">
+                <div class="explorer-card p-3">
+                    <a class="folder-card-link d-flex gap-3" href="{{ url_for('documentacion.explorador_carpeta', carpeta_id=subfolder.id) }}">
+                        <span class="folder-icon" aria-hidden="true"></span>
+                        <span class="min-w-0">
+                            <strong class="d-block">{{ subfolder.nombre }}</strong>
+                            <span class="text-muted small">
+                                {{ subfolder_counts.get(subfolder.id, 0) }} subcarpeta(s) · {{ document_counts.get(subfolder.id, 0) }} documento(s)
+                            </span>
+                            {% if subfolder.descripcion %}
+                            <span class="d-block text-muted small mt-1">{{ subfolder.descripcion }}</span>
+                            {% endif %}
+                        </span>
+                    </a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0">Documentos</h5>
+            <span class="badge bg-light text-dark">{{ documents|length }} resultado(s)</span>
+        </div>
+
+        <div class="row g-3">
+            {% for item in documents %}
+            <div class="col-xl-6">
+                <div class="explorer-card p-3">
+                    <div class="d-flex gap-3">
+                        <span class="document-icon" aria-hidden="true"></span>
+                        <div class="flex-grow-1 min-w-0">
+                            <div class="d-flex justify-content-between gap-2 flex-wrap">
+                                <div>
+                                    <a class="document-card-link" href="{{ url_for('documentacion.detalle', item_id=item.id) }}">
+                                        <strong>{{ item.codigo }}</strong>
+                                        <span>{{ item.titulo }}</span>
+                                    </a>
+                                </div>
+                                <span class="badge {{ document_state_badge_class(item.estado) }}">
+                                    {{ document_state_label(item.estado) }}
+                                </span>
+                            </div>
+                            <div class="text-muted small mt-2">
+                                {{ item.tipo_documento }}{% if item.proceso %} · {{ item.proceso }}{% endif %}
+                            </div>
+                            <div class="text-muted small">
+                                Versión: {{ item.version_vigente.version if item.version_vigente else item.version_actual or 'Sin versión aprobada' }}
+                                · Actualizado: {{ item.updated_at.strftime('%Y-%m-%d') if item.updated_at else '' }}
+                            </div>
+                            <div class="text-muted small">
+                                Responsable: {{ item.elaborado_por.nombre ~ ' ' ~ item.elaborado_por.apellido if item.elaborado_por else 'Sin responsable' }}
+                                {% if attachment_counts.get(item.id, 0) %}
+                                · {{ attachment_counts.get(item.id, 0) }} anexo(s)
+                                {% endif %}
+                            </div>
+                            <div class="d-flex flex-wrap gap-2 mt-3">
+                                <a href="{{ url_for('documentacion.detalle', item_id=item.id) }}" class="btn btn-sm btn-outline-secondary">Abrir detalle</a>
+                                {% if item.version_vigente %}
+                                <a href="{{ url_for('documentacion.ver_onlyoffice', item_id=item.id, version_id=item.version_vigente.id) }}" class="btn btn-sm btn-outline-primary">Ver</a>
+                                    {% if can('documentos.descargar') %}
+                                    <a href="{{ url_for('documentacion.descargar_version', version_id=item.version_vigente.id) }}" class="btn btn-sm btn-outline-dark">Descargar</a>
+                                    {% endif %}
+                                {% endif %}
+                                {% if can_move_documents %}
+                                <form method="post" action="{{ url_for('documentacion.mover_documento_carpeta', item_id=item.id) }}" class="d-flex gap-2">
+                                    <input type="hidden" name="retorno_carpeta_id" value="{{ folder.id if folder else '' }}">
+                                    <input type="hidden" name="retorno_sin_clasificar" value="{{ 1 if uncategorized else 0 }}">
+                                    <select name="carpeta_id" class="form-select form-select-sm" title="Mover documento a carpeta">
+                                        <option value="">Sin clasificar</option>
+                                        {% for option in folder_options %}
+                                            {% if option.id %}
+                                            <option value="{{ option.id }}" {% if item.carpeta_id == option.id %}selected{% endif %}>
+                                                {{ '-- ' * option.depth }}{{ option.label }}
+                                            </option>
+                                            {% endif %}
+                                        {% endfor %}
+                                    </select>
+                                    <button type="submit" class="btn btn-sm btn-outline-primary">Mover</button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="col-12">
+                <div class="page-card text-center text-muted py-4">
+                    No hay documentos en esta ubicación con los filtros aplicados.
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </main>
+</div>
+{% endblock %}

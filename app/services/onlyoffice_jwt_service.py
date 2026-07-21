@@ -90,6 +90,7 @@ def generate_onlyoffice_document_token(
     version_id,
     archivo_sha256,
     snapshot_public_id=None,
+    attachment_public_id=None,
 ):
     settings = _document_jwt_settings()
     now = datetime.now(timezone.utc)
@@ -108,6 +109,8 @@ def generate_onlyoffice_document_token(
     }
     if snapshot_public_id:
         payload["snapshot_public_id"] = str(snapshot_public_id)
+    if attachment_public_id:
+        payload["attachment_public_id"] = str(attachment_public_id)
     return jwt.encode(payload, settings["secret"], algorithm="HS256")
 
 

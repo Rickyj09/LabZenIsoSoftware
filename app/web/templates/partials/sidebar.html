@@ -11,6 +11,9 @@
             <span class="sidebar-brand-title">LabZenISO</span>
             <span class="sidebar-brand-title">Software</span>
             <div class="sidebar-brand-subtitle">LIMS + SGC ISO 17025</div>
+            <div class="sidebar-laboratory-name" title="{{ laboratorio_nombre_actual }}">
+                {{ laboratorio_nombre_actual }}
+            </div>
         </div>
     </div>
 
@@ -138,12 +141,12 @@
                 type="button"
                 data-bs-toggle="collapse"
                 data-bs-target="#menuSGC"
-                aria-expanded="{% if request.endpoint and (request.endpoint.startswith('organigrama.') or request.endpoint.startswith('politica_calidad.') or request.endpoint.startswith('objetivos_calidad.') or request.endpoint.startswith('mapa_procesos.') or request.endpoint.startswith('riesgos_oportunidades.') or request.endpoint.startswith('documentacion.')) %}true{% else %}false{% endif %}">
+                aria-expanded="{% if request.endpoint and (request.endpoint.startswith('organigrama.') or request.endpoint.startswith('politica_calidad.') or request.endpoint.startswith('objetivos_calidad.') or request.endpoint.startswith('mapa_procesos.') or request.endpoint.startswith('riesgos_oportunidades.') or request.endpoint.startswith('documentacion.') or request.endpoint.startswith('documentacion_firmas.')) %}true{% else %}false{% endif %}">
             <span>Sistema de Gestión (SGC)</span>
             <span>▾</span>
         </button>
 
-        <div class="collapse {% if request.endpoint and (request.endpoint.startswith('organigrama.') or request.endpoint.startswith('politica_calidad.') or request.endpoint.startswith('objetivos_calidad.') or request.endpoint.startswith('mapa_procesos.') or request.endpoint.startswith('riesgos_oportunidades.') or request.endpoint.startswith('documentacion.')) %}show{% endif %}"
+        <div class="collapse {% if request.endpoint and (request.endpoint.startswith('organigrama.') or request.endpoint.startswith('politica_calidad.') or request.endpoint.startswith('objetivos_calidad.') or request.endpoint.startswith('mapa_procesos.') or request.endpoint.startswith('riesgos_oportunidades.') or request.endpoint.startswith('documentacion.') or request.endpoint.startswith('documentacion_firmas.')) %}show{% endif %}"
              id="menuSGC">
             <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('organigrama.') %}active{% endif %}"
                href="{{ url_for('organigrama.index') }}">
@@ -199,6 +202,11 @@
                 {% endif %}
             </a>
 
+            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('documentacion.explorador') %}active{% endif %}"
+               href="{{ url_for('documentacion.explorador') }}">
+                Explorador documental
+            </a>
+
             <a class="sidebar-link {% if request.endpoint == 'documentacion.registros' %}active{% endif %}"
                href="{{ url_for('documentacion.registros') }}">
                 Registros
@@ -208,6 +216,13 @@
                href="{{ url_for('documentacion.archivo') }}">
                 Archivo
             </a>
+
+            {% if can('documentos.firmas.identidades.gestionar') %}
+            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('documentacion_firmas.') %}active{% endif %}"
+               href="{{ url_for('documentacion_firmas.identidades') }}">
+                Identidades de firma
+            </a>
+            {% endif %}
             {% endif %}
         </div>
 

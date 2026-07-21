@@ -235,8 +235,8 @@ class DocumentDashboardTest(unittest.TestCase):
         self.add_document(
             331,
             "DOC-PEND-VIEJO",
-            "EN_REVISION",
-            "EN_REVISION",
+            "EN_APROBACION",
+            "EN_APROBACION",
             aprobado_por_id=201,
             fecha_envio_revision=now - timedelta(days=5),
         )

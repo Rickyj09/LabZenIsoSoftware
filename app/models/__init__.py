@@ -13,8 +13,10 @@ from app.models.laboratorio import (
 )
 from app.models.equipos import Equipo, EquipoCalibracion, EquipoMantenimiento, EquipoDocumento
 from app.models.documentos import (
+    CarpetaDocumental,
     Documento,
     DocumentoVersion,
+    DocumentoVersionAnexo,
     DocumentoAprobacion,
     DocumentoSnapshot,
     DocumentoArtefacto,

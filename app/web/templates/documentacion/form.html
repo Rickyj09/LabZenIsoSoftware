@@ -3,11 +3,12 @@
 {% block title %}{% if item %}Editar documento{% else %}Nuevo documento{% endif %}{% endblock %}
 
 {% block content %}
+{% set fd = form_data|default({}) %}
 <div class="mb-4">
     <h2>{% if item %}Editar documento{% else %}Nuevo documento{% endif %}</h2>
     <div class="text-muted">
         {% if item %}
-            Actualiza la información general del documento.
+            Actualiza la informacion general del documento.
         {% else %}
             Registra un nuevo documento controlado del sistema.
         {% endif %}
@@ -18,15 +19,15 @@
     <form method="post" enctype="multipart/form-data">
         <div class="row g-3">
             <div class="col-md-3">
-                <label class="form-label">Código</label>
+                <label class="form-label">Codigo</label>
                 <input type="text" name="codigo" class="form-control"
-                       value="{{ item.codigo if item else '' }}" required>
+                       value="{{ fd.get('codigo', item.codigo if item else '') }}" required>
             </div>
 
             <div class="col-md-5">
-                <label class="form-label">Título</label>
+                <label class="form-label">Titulo</label>
                 <input type="text" name="titulo" class="form-control"
-                       value="{{ item.titulo if item else '' }}" required>
+                       value="{{ fd.get('titulo', item.titulo if item else '') }}" required>
             </div>
 
             <div class="col-md-4">
@@ -34,7 +35,7 @@
                 <select name="tipo_documento" class="form-select" required>
                     <option value="">Seleccione</option>
                     {% for t in tipos_documento %}
-                    <option value="{{ t }}" {% if item and item.tipo_documento == t %}selected{% endif %}>{{ t }}</option>
+                    <option value="{{ t }}" {% if fd.get('tipo_documento', item.tipo_documento if item else '') == t %}selected{% endif %}>{{ t }}</option>
                     {% endfor %}
                 </select>
             </div>
@@ -42,20 +43,56 @@
             <div class="col-md-4">
                 <label class="form-label">Proceso</label>
                 <input type="text" name="proceso" class="form-control"
-                       value="{{ item.proceso if item else '' }}">
+                       value="{{ fd.get('proceso', item.proceso if item else '') }}">
             </div>
 
             {% if item %}
             <div class="col-md-4">
-                <label class="form-label">Versión vigente aprobada</label>
-                <input type="text" class="form-control" value="{{ item.version_vigente.version if item.version_vigente else 'Sin versión aprobada vigente' }}" disabled>
+                <label class="form-label">Version vigente aprobada</label>
+                <input type="text" class="form-control" value="{{ item.version_vigente.version if item.version_vigente else 'Sin version aprobada vigente' }}" disabled>
             </div>
             {% endif %}
 
             {% if not item %}
             <div class="col-md-4">
-                <label class="form-label">Versión inicial</label>
-                <input type="text" name="version" class="form-control" value="1" required>
+                <label class="form-label">Version inicial</label>
+                <input type="text" name="version" class="form-control" value="{{ fd.get('version', '1') }}" required>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Elaborado por</label>
+                <select name="elaborado_por_id" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for responsable in responsables_documentales %}
+                    <option value="{{ responsable.id }}" {% if fd.get('elaborado_por_id', current_user.id|string) == responsable.id|string %}selected{% endif %}>
+                        {{ responsable.nombre }} {{ responsable.apellido }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Revisado por</label>
+                <select name="revisado_por_id" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for responsable in responsables_documentales %}
+                    <option value="{{ responsable.id }}" {% if fd.get('revisado_por_id', '') == responsable.id|string %}selected{% endif %}>
+                        {{ responsable.nombre }} {{ responsable.apellido }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label class="form-label">Aprobado por</label>
+                <select name="aprobado_por_id" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for responsable in responsables_documentales %}
+                    <option value="{{ responsable.id }}" {% if fd.get('aprobado_por_id', '') == responsable.id|string %}selected{% endif %}>
+                        {{ responsable.nombre }} {{ responsable.apellido }}
+                    </option>
+                    {% endfor %}
+                </select>
             </div>
 
             <div class="col-md-12">
@@ -65,19 +102,19 @@
             </div>
 
             <div class="col-md-12">
-                <label class="form-label">Cambios / observaciones de la versión</label>
-                <textarea name="cambios" class="form-control" rows="3" placeholder="Ejemplo: Versión inicial del documento." required></textarea>
+                <label class="form-label">Cambios / observaciones de la version</label>
+                <textarea name="cambios" class="form-control" rows="3" placeholder="Ejemplo: Version inicial del documento." required>{{ fd.get('cambios', '') }}</textarea>
             </div>
 
             <div class="col-md-12">
                 <label class="form-label">Contenido</label>
-                <textarea name="contenido" class="form-control" rows="12"></textarea>
+                <textarea name="contenido" class="form-control" rows="12">{{ fd.get('contenido', '') }}</textarea>
             </div>
             {% else %}
             <div class="col-12">
                 <div class="alert alert-light border">
-                    Para modificar el contenido o generar una nueva revisión del documento, utiliza la opción
-                    <strong>Nueva versión</strong> desde el detalle del documento.
+                    Para modificar el contenido o generar una nueva revision del documento, utiliza la opcion
+                    <strong>Nueva version</strong> desde el detalle del documento.
                 </div>
             </div>
             {% endif %}

@@ -1,4 +1,4 @@
-{% extends "base_admin.html" %}
+﻿{% extends "base_admin.html" %}
 
 {% block title %}Detalle del documento{% endblock %}
 
@@ -38,28 +38,55 @@
             {% endif %}
 
         {% elif version_preparacion and version_preparacion.estado == 'EN_REVISION' %}
-            {% if can('documentos.aprobar') %}
+            {% if can('documentos.revisar') and version_preparacion.revisado_por_id == current_user.id %}
             <form method="post"
-                  action="{{ url_for('documentacion.aprobar_version', item_id=item.id, version_id=version_preparacion.id) }}"
+                  action="{{ url_for('documentacion.dar_conformidad_revision', item_id=item.id, version_id=version_preparacion.id) }}"
                   class="d-flex gap-2">
                 <input type="text" name="comentario" class="form-control form-control-sm"
                        placeholder="Comentario de aprobación (opcional)">
                 <button type="submit" class="btn btn-success">
-                    Aprobar
+                    Dar conformidad
                 </button>
             </form>
             {% endif %}
 
-            {% if can('documentos.rechazar') %}
+            {% if can('documentos.revisar') and version_preparacion.revisado_por_id == current_user.id %}
             <form method="post"
-                  action="{{ url_for('documentacion.rechazar_version', item_id=item.id, version_id=version_preparacion.id) }}"
+                  action="{{ url_for('documentacion.solicitar_correcciones_revision', item_id=item.id, version_id=version_preparacion.id) }}"
                   class="d-flex gap-2">
                 <input type="text" name="comentario" class="form-control form-control-sm"
                        placeholder="Motivo de rechazo" required>
                 <button type="submit" class="btn btn-outline-danger">
-                    Rechazar
+                    Solicitar correcciones
                 </button>
             </form>
+            {% endif %}
+
+        {% elif version_preparacion and version_preparacion.estado == 'EN_APROBACION' %}
+            {% if version_preparacion.aprobado_por_id == current_user.id or can('documentos.ver_historial') %}
+                {% if can('documentos.aprobar') %}
+                <form method="post"
+                      action="{{ url_for('documentacion.aprobar_version', item_id=item.id, version_id=version_preparacion.id) }}"
+                      class="d-flex gap-2">
+                    <input type="text" name="comentario" class="form-control form-control-sm"
+                           placeholder="Comentario de aprobacion (opcional)">
+                    <button type="submit" class="btn btn-success">
+                        Aprobar
+                    </button>
+                </form>
+                {% endif %}
+
+                {% if can('documentos.rechazar') %}
+                <form method="post"
+                      action="{{ url_for('documentacion.rechazar_version', item_id=item.id, version_id=version_preparacion.id) }}"
+                      class="d-flex gap-2">
+                    <input type="text" name="comentario" class="form-control form-control-sm"
+                           placeholder="Motivo de rechazo en aprobacion" required>
+                    <button type="submit" class="btn btn-outline-danger">
+                        Rechazar
+                    </button>
+                </form>
+                {% endif %}
             {% endif %}
 
         {% elif version_rechazada %}
@@ -101,20 +128,24 @@
 
 <div class="page-card mb-4">
     <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between">
-        <div class="workflow-step {% if item.estado in ['EN_ELABORACION', 'EN_REVISION', 'APROBADO', 'OBSOLETO'] %}active{% endif %}">
+        <div class="workflow-step {% if item.estado in ['EN_ELABORACION', 'EN_REVISION', 'EN_APROBACION', 'APROBADO', 'OBSOLETO'] %}active{% endif %}">
             1. En elaboración
         </div>
         <div class="workflow-separator"></div>
-        <div class="workflow-step {% if item.estado in ['EN_REVISION', 'APROBADO', 'OBSOLETO'] %}active{% endif %}">
+        <div class="workflow-step {% if item.estado in ['EN_REVISION', 'EN_APROBACION', 'APROBADO', 'OBSOLETO'] %}active{% endif %}">
             2. En revisión
         </div>
         <div class="workflow-separator"></div>
+        <div class="workflow-step {% if item.estado in ['EN_APROBACION', 'APROBADO', 'OBSOLETO'] %}active{% endif %}">
+            3. En aprobacion
+        </div>
+        <div class="workflow-separator"></div>
         <div class="workflow-step {% if item.estado in ['APROBADO', 'OBSOLETO'] %}active{% endif %}">
-            3. Aprobado
+            4. Aprobado
         </div>
         <div class="workflow-separator"></div>
         <div class="workflow-step {% if item.estado == 'OBSOLETO' %}active danger{% endif %}">
-            4. Obsoleto
+            5. Obsoleto
         </div>
     </div>
 </div>
@@ -218,7 +249,7 @@
                             Descargar
                         </a>
                         {% endif %}
-                        {% if onlyoffice_enabled and is_docx_version(version_vigente) and can('documentos.ver') %}
+                        {% if onlyoffice_enabled and is_onlyoffice_supported_version(version_vigente) and can('documentos.ver') %}
                         <a href="{{ url_for('documentacion.ver_onlyoffice', item_id=item.id, version_id=version_vigente.id) }}" class="btn btn-sm btn-outline-info">
                             Ver en ONLYOFFICE
                         </a>
@@ -302,8 +333,8 @@
     {% if pdf_artifact and pdf_artifact.estado == 'DISPONIBLE' %}
         <div class="row mt-3 g-3">
             <div class="col-md-3"><strong>Fecha:</strong><br>{{ pdf_artifact.disponible_en or '-' }}</div>
-            <div class="col-md-2"><strong>PÃ¡ginas:</strong><br>{{ pdf_artifact.page_count or '-' }}</div>
-            <div class="col-md-2"><strong>TamaÃ±o:</strong><br>{{ pdf_artifact.archivo_size or '-' }} bytes</div>
+            <div class="col-md-2"><strong>Páginas:</strong><br>{{ pdf_artifact.page_count or '-' }}</div>
+            <div class="col-md-2"><strong>Tamaño:</strong><br>{{ pdf_artifact.archivo_size or '-' }} bytes</div>
             <div class="col-md-3"><strong>Hash:</strong><br><code>{{ (pdf_artifact.archivo_sha256 or '')[:12] }}</code></div>
             <div class="col-md-2"><strong>Proveedor:</strong><br>{{ pdf_artifact.provider }}</div>
         </div>
@@ -358,7 +389,7 @@
                 El documento permanece APROBADO.
             </p>
         </div>
-        {% if not signature_process and pdf_artifact and pdf_artifact.estado == 'DISPONIBLE' and can('documentos.aprobar') %}
+        {% if can_start_signature %}
         <form method="post" action="{{ url_for('documentacion.iniciar_firma_digital', item_id=item.id, version_id=version_vigente.id) }}">
             <button type="submit" class="btn btn-sm btn-outline-success">Iniciar firma externa</button>
         </form>
@@ -367,6 +398,38 @@
         {% endif %}
     </div>
 
+    {% if dev_signature_preview_available %}
+    <div class="mt-3">
+        <a class="btn btn-sm btn-outline-warning"
+           href="{{ url_for('documentacion.vista_previa_firmas_dev', item_id=item.id) }}">
+            Vista previa de ubicaciÃ³n de firmas
+        </a>
+    </div>
+    {% endif %}
+
+    {% if missing_signature_identities and pdf_artifact and pdf_artifact.estado == 'DISPONIBLE' and not signature_process %}
+    <div class="alert alert-warning mt-3 mb-0">
+        <div class="fw-semibold">Faltan identidades de firma verificadas:</div>
+        <ul class="mb-2">
+            {% for status in missing_signature_identities %}
+            <li>
+                {{ status.role }}:
+                {% if status.user %}
+                    {{ status.user.nombre }} {{ status.user.apellido or '' }} ({{ status.user.username }})
+                {% else %}
+                    Responsable no asignado
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% if can(manage_signature_identity_permission) %}
+        <a class="btn btn-sm btn-outline-warning" href="{{ url_for('documentacion_firmas.identidades') }}">
+            Gestionar identidades de firma
+        </a>
+        {% endif %}
+    </div>
+    {% endif %}
+
     {% if signature_process %}
         <div class="row mt-3 g-3">
             <div class="col-md-3"><strong>Proveedor:</strong><br>{{ signature_process.provider }}</div>
@@ -374,11 +437,28 @@
             <div class="col-md-3"><strong>Vence:</strong><br>{{ signature_process.vence_en or '-' }}</div>
             <div class="col-md-3"><strong>Final:</strong><br>
                 {% if signature_process.pdf_final %}
+                    <a href="{{ url_for('documentacion.descargar_pdf_firmado_final', public_id=signature_process.public_id) }}" class="btn btn-sm btn-outline-success">
+                        Descargar PDF final firmado
+                    </a>
                     <code>{{ signature_process.pdf_final.archivo_sha256[:12] }}</code>
                 {% else %}
                     -
                 {% endif %}
             </div>
+        </div>
+
+        <div class="mt-3">
+            <strong>PDF actual disponible para firma:</strong>
+            {% if signature_enabled_step and signature_enabled_step.artifact_entrada %}
+                {{ signature_enabled_step.artifact_entrada.archivo_nombre_visible or signature_enabled_step.artifact_entrada.tipo }}
+                <code>{{ signature_enabled_step.artifact_entrada.archivo_sha256[:12] }}</code>
+            {% elif signature_process.pdf_final %}
+                {{ signature_process.pdf_final.archivo_nombre_visible or 'PDF final firmado' }}
+                <code>{{ signature_process.pdf_final.archivo_sha256[:12] }}</code>
+            {% else %}
+                {{ signature_process.pdf_origen.archivo_nombre_visible or 'PDF aprobado sin firmas' }}
+                <code>{{ signature_process.pdf_origen.archivo_sha256[:12] }}</code>
+            {% endif %}
         </div>
 
         {% if signature_enabled_step %}
@@ -396,6 +476,13 @@
                     <input type="file" name="pdf_firmado" class="form-control form-control-sm" accept="application/pdf,.pdf" required>
                     <button type="submit" class="btn btn-sm btn-success">Subir PDF firmado</button>
                 </form>
+                {% if dev_signature_available %}
+                <form method="post"
+                      action="{{ url_for('documentacion.firmar_pdf_dev', public_id=signature_enabled_step.public_id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ dev_signature_csrf_token }}">
+                    <button type="submit" class="btn btn-sm btn-warning">Firmar con certificado de prueba</button>
+                </form>
+                {% endif %}
                 <form method="post"
                       action="{{ url_for('documentacion.rechazar_paso_firma', public_id=signature_enabled_step.public_id) }}"
                       class="d-flex flex-wrap gap-2">
@@ -403,6 +490,11 @@
                     <button type="submit" class="btn btn-sm btn-outline-danger">Rechazar firma</button>
                 </form>
             </div>
+            {% if dev_signature_available %}
+            <div class="alert alert-warning mt-3 mb-0">
+                MODO DESARROLLO: esta firma utiliza certificados locales de prueba y no tiene validez legal.
+            </div>
+            {% endif %}
         </div>
         {% endif %}
 
@@ -439,7 +531,7 @@
                 </tbody>
             </table>
         </div>
-        {% if can('documentos.aprobar') and signature_process.estado == 'EN_FIRMA' %}
+        {% if can(start_signature_permission) and signature_process.estado == 'EN_FIRMA' %}
         <form method="post"
               action="{{ url_for('documentacion.cancelar_proceso_firma', public_id=signature_process.public_id) }}"
               class="d-flex flex-wrap gap-2 mt-2">
@@ -461,12 +553,12 @@
     <p class="mb-1"><strong>Enviada a revisión:</strong> {{ version_preparacion.fecha_envio_revision or '-' }}</p>
     <p class="mb-1"><strong>Comentario de revisión:</strong> {{ version_preparacion.comentario_revision or '-' }}</p>
     <p class="mb-0"><strong>Cambios:</strong> {{ version_preparacion.cambios or '-' }}</p>
-    {% if onlyoffice_enabled and is_docx_version(version_preparacion) and can('documentos.ver') %}
+    {% if onlyoffice_enabled and is_onlyoffice_supported_version(version_preparacion) and can('documentos.ver') %}
     <div class="mt-3">
         <a href="{{ url_for('documentacion.ver_onlyoffice', item_id=item.id, version_id=version_preparacion.id) }}" class="btn btn-sm btn-outline-info">
             Ver en ONLYOFFICE
         </a>
-        {% if onlyoffice_edit_enabled and version_preparacion.estado == 'EN_ELABORACION' and can('documentos.editar') %}
+        {% if onlyoffice_edit_enabled and can_user_edit_onlyoffice_version(item, version_preparacion, current_user, enforce_lock=false) %}
             {% if active_edit_info and active_edit_info.blocked_by_other_user %}
                 <span class="badge bg-warning text-dark ms-2">
                     En ediciÃ³n por {{ active_edit_info.edicion.usuario.nombre }} {{ active_edit_info.edicion.usuario.apellido or '' }}
@@ -485,7 +577,7 @@
                 {% endif %}
             {% else %}
                 <a href="{{ url_for('documentacion.editar_onlyoffice', item_id=item.id, version_id=version_preparacion.id) }}" class="btn btn-sm btn-primary ms-2">
-                    Abrir y editar
+                    Editar contenido en ONLYOFFICE
                 </a>
             {% endif %}
         {% endif %}
@@ -517,6 +609,84 @@
         <div class="text-center">
             <img src="{{ preview_url }}" alt="Documento" class="img-fluid rounded border">
         </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if version_trazabilidad %}
+<div class="page-card mb-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h5 class="mb-0">Anexos de la versión</h5>
+        {% if version_preparacion and version_trazabilidad.id == version_preparacion.id and can('documentos.editar') %}
+        <form method="post"
+              action="{{ url_for('documentacion.agregar_anexo', item_id=item.id, version_id=version_trazabilidad.id) }}"
+              enctype="multipart/form-data"
+              class="d-flex gap-2 align-items-center flex-wrap">
+            <input type="file" name="anexo" class="form-control form-control-sm" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+            <button type="submit" class="btn btn-sm btn-outline-primary">Agregar anexo XLSX</button>
+        </form>
+        {% endif %}
+    </div>
+
+    {% if anexos_version_mostrada %}
+    <div class="table-responsive">
+        <table class="table table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Archivo</th>
+                    <th>Estado</th>
+                    <th>Tamaño</th>
+                    <th>Hash</th>
+                    <th>Fecha</th>
+                    <th>Usuario</th>
+                    <th style="width: 360px;">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for anexo in anexos_version_mostrada %}
+                <tr>
+                    <td>{{ anexo.archivo_nombre_original }}</td>
+                    <td>{{ anexo.estado }}</td>
+                    <td>{{ anexo.archivo_size or '-' }} bytes</td>
+                    <td><code>{{ (anexo.archivo_sha256 or '')[:12] }}</code></td>
+                    <td>{{ anexo.updated_at or anexo.created_at }}</td>
+                    <td>
+                        {% if anexo.actualizado_por %}
+                            {{ anexo.actualizado_por.nombre }} {{ anexo.actualizado_por.apellido or '' }}
+                        {% elif anexo.creado_por %}
+                            {{ anexo.creado_por.nombre }} {{ anexo.creado_por.apellido or '' }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if can('documentos.descargar') %}
+                        <a href="{{ url_for('documentacion.descargar_anexo', public_id=anexo.public_id) }}" class="btn btn-sm btn-outline-primary">Descargar</a>
+                        {% endif %}
+                        {% if onlyoffice_enabled and can('documentos.ver') %}
+                        <a href="{{ url_for('documentacion.ver_anexo_onlyoffice', public_id=anexo.public_id) }}" class="btn btn-sm btn-outline-info">Ver en ONLYOFFICE</a>
+                        {% endif %}
+                        {% if onlyoffice_edit_enabled and can_user_edit_attachment(item, version_trazabilidad, anexo, current_user, enforce_lock=false) %}
+                        <a href="{{ url_for('documentacion.editar_anexo_onlyoffice', public_id=anexo.public_id) }}" class="btn btn-sm btn-primary">Editar contenido en ONLYOFFICE</a>
+                        <form method="post"
+                              action="{{ url_for('documentacion.reemplazar_anexo', public_id=anexo.public_id) }}"
+                              enctype="multipart/form-data"
+                              class="d-inline-flex gap-1 align-items-center mt-1">
+                            <input type="file" name="anexo" class="form-control form-control-sm" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+                            <button type="submit" class="btn btn-sm btn-outline-secondary">Reemplazar</button>
+                        </form>
+                        <form method="post" action="{{ url_for('documentacion.eliminar_anexo', public_id=anexo.public_id) }}" class="d-inline">
+                            <button type="submit" class="btn btn-sm btn-outline-danger">Eliminar</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="text-muted">No existen anexos XLSX para esta versión.</div>
     {% endif %}
 </div>
 {% endif %}
@@ -557,7 +727,7 @@
                                 Descargar
                             </a>
                             {% endif %}
-                            {% if onlyoffice_enabled and is_docx_version(v) and can('documentos.ver') %}
+                            {% if onlyoffice_enabled and is_onlyoffice_supported_version(v) and can('documentos.ver') %}
                             <a href="{{ url_for('documentacion.ver_onlyoffice', item_id=item.id, version_id=v.id) }}" class="btn btn-sm btn-outline-info">
                                 Ver en ONLYOFFICE
                             </a>

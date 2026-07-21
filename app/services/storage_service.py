@@ -4,13 +4,18 @@ import os
 import re
 import shutil
 import unicodedata
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
 from flask import current_app
 from werkzeug.utils import secure_filename
+
+from app.services.office_document_profile import (
+    get_onlyoffice_document_profile,
+    get_onlyoffice_profile_by_extension,
+    validate_ooxml_file_path,
+)
 
 
 ALLOWED_DOCUMENT_EXTENSIONS = {
@@ -74,8 +79,30 @@ def validate_document_file(file_storage) -> None:
 
 def _safe_version(value) -> str:
     normalized = secure_filename(str(value or "1")).replace("_", "-")
+    lowered = normalized.lower()
+    for extension in ALLOWED_DOCUMENT_EXTENSIONS:
+        suffix = f".{extension}"
+        if lowered.endswith(suffix):
+            normalized = normalized[: -len(suffix)]
+            break
     normalized = re.sub(r"[^A-Za-z0-9.-]+", "-", normalized).strip(".-")
     return normalized or "1"
+
+
+def normalize_document_filename(filename: str) -> str:
+    normalized = str(filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    while True:
+        safe_name = secure_filename(normalized)
+        if "." not in safe_name:
+            return normalized
+        stem, extension = safe_name.rsplit(".", 1)
+        duplicate_suffix = f".{extension.lower()}"
+        if not stem.lower().endswith(duplicate_suffix) and not any(
+            stem.lower().endswith(f".{known_extension}")
+            for known_extension in ALLOWED_DOCUMENT_EXTENSIONS
+        ):
+            return normalized
+        normalized = normalized[: -(len(extension) + 1)]
 
 
 def _safe_snapshot_type(value) -> str:
@@ -138,8 +165,10 @@ def store_document_file(file_storage, *, documento, version) -> StoredDocumentFi
         return None
 
     validate_document_file(file_storage)
-    original_name = str(file_storage.filename).replace("\\", "/").rsplit("/", 1)[-1].strip()
+    original_name = normalize_document_filename(file_storage.filename)
     safe_original_name = secure_filename(original_name)
+    extension = safe_original_name.rsplit(".", 1)[1].lower()
+    profile = get_onlyoffice_profile_by_extension(extension)
 
     relative_directory = Path(
         f"empresa_{int(documento.empresa_id)}",
@@ -170,6 +199,11 @@ def store_document_file(file_storage, *, documento, version) -> StoredDocumentFi
                     )
                 digest.update(chunk)
                 output.write(chunk)
+        if profile and profile.extension == "xlsx":
+            try:
+                validate_ooxml_file_path(temporary, profile)
+            except ValueError as exc:
+                raise DocumentStorageError(str(exc)) from exc
         sha256 = digest.hexdigest()
         stored_name = build_document_filename(
             documento,
@@ -187,7 +221,7 @@ def store_document_file(file_storage, *, documento, version) -> StoredDocumentFi
         temporary.unlink(missing_ok=True)
         raise
 
-    mime_type = (
+    mime_type = profile.mime_type if profile else (
         file_storage.mimetype
         or mimetypes.guess_type(safe_original_name)[0]
         or "application/octet-stream"
@@ -215,17 +249,15 @@ def apply_stored_file_metadata(version_doc, stored_file: StoredDocumentFile | No
 
 
 def validate_docx_file_path(path: Path) -> None:
-    if path.is_symlink():
-        raise DocumentStorageError("No se permiten enlaces simbolicos como documento DOCX.")
+    validate_onlyoffice_file_path(path, get_onlyoffice_profile_by_extension("docx"))
+
+
+def validate_onlyoffice_file_path(path: Path, profile=None) -> None:
+    profile = profile or get_onlyoffice_profile_by_extension("docx")
     try:
-        with zipfile.ZipFile(path) as archive:
-            names = set(archive.namelist())
-            if "word/document.xml" not in names:
-                raise DocumentStorageError("El archivo DOCX no contiene word/document.xml.")
-            if "[Content_Types].xml" not in names:
-                raise DocumentStorageError("El archivo DOCX no contiene tipos de contenido OOXML.")
-    except zipfile.BadZipFile as exc:
-        raise DocumentStorageError("El archivo DOCX recibido no es un ZIP OOXML vÃ¡lido.") from exc
+        validate_ooxml_file_path(path, profile)
+    except ValueError as exc:
+        raise DocumentStorageError(str(exc)) from exc
 
 
 def file_digest_and_size(path: Path) -> tuple[str, int]:
@@ -247,7 +279,10 @@ def prepare_document_file_replacement(version_doc, source_path: Path) -> AtomicD
     if not version_doc.archivo_storage_path:
         raise DocumentStorageError("La versiÃ³n no tiene ruta privada para reemplazo.")
 
-    validate_docx_file_path(source_path)
+    profile = get_onlyoffice_document_profile(version_doc)
+    if not profile:
+        raise DocumentStorageError("La version no tiene un formato compatible con ONLYOFFICE.")
+    validate_onlyoffice_file_path(source_path, profile)
     new_sha256, new_size = file_digest_and_size(source_path)
     destination = resolve_document_path(version_doc.archivo_storage_path)
     if "snapshots" in destination.parts:
@@ -302,12 +337,15 @@ def replace_document_file_atomically(version_doc, source_path: Path) -> tuple[st
 
 
 def store_snapshot_copy(*, source_path: Path, documento, version_doc, secuencia: int, tipo: str) -> StoredSnapshotFile:
-    """Crea una copia fisica independiente e inmutable de un DOCX de trabajo."""
+    """Crea una copia fisica independiente e inmutable de un documento Office de trabajo."""
     if source_path.is_symlink():
         raise DocumentStorageError("No se permite congelar un enlace simbolico.")
     if not source_path.is_file():
         raise DocumentStorageError("La copia de trabajo no existe.")
-    validate_docx_file_path(source_path)
+    profile = get_onlyoffice_document_profile(version_doc)
+    if not profile:
+        raise DocumentStorageError("La version no tiene un formato compatible con ONLYOFFICE.")
+    validate_onlyoffice_file_path(source_path, profile)
     source_sha256, source_size = file_digest_and_size(source_path)
 
     relative_directory = Path(
@@ -321,7 +359,7 @@ def store_snapshot_copy(*, source_path: Path, documento, version_doc, secuencia:
     if os.path.commonpath([str(_storage_root()), str(destination_directory)]) != str(_storage_root()):
         raise DocumentStorageError("La ruta de snapshots no es valida.")
 
-    stored_name = f"{int(secuencia):04d}-{_safe_snapshot_type(tipo)}-{source_sha256[:12]}.docx"
+    stored_name = f"{int(secuencia):04d}-{_safe_snapshot_type(tipo)}-{source_sha256[:12]}.{profile.extension}"
     destination = (destination_directory / stored_name).resolve()
     if os.path.commonpath([str(_storage_root()), str(destination)]) != str(_storage_root()):
         raise DocumentStorageError("La ruta del snapshot no es valida.")
@@ -331,7 +369,7 @@ def store_snapshot_copy(*, source_path: Path, documento, version_doc, secuencia:
     temporary = (destination_directory / f".snapshot-{uuid4().hex}.tmp").resolve()
     try:
         shutil.copyfile(source_path, temporary, follow_symlinks=False)
-        validate_docx_file_path(temporary)
+        validate_onlyoffice_file_path(temporary, profile)
         copied_sha256, copied_size = file_digest_and_size(temporary)
         if copied_sha256 != source_sha256 or copied_size != source_size:
             raise DocumentStorageError("El hash del snapshot no coincide con el origen.")
@@ -348,7 +386,7 @@ def store_snapshot_copy(*, source_path: Path, documento, version_doc, secuencia:
     return StoredSnapshotFile(
         stored_name=stored_name,
         storage_path=(relative_directory / stored_name).as_posix(),
-        mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        mime_type=profile.mime_type,
         size=source_size,
         sha256=source_sha256,
     )
@@ -516,7 +554,10 @@ def restore_working_copy_from_snapshot(*, snapshot_storage_path: str, version_do
     snapshot_path = resolve_document_path(snapshot_storage_path)
     if snapshot_path.is_symlink() or not snapshot_path.is_file():
         raise DocumentStorageError("El snapshot no esta disponible para restauracion.")
-    validate_docx_file_path(snapshot_path)
+    profile = get_onlyoffice_document_profile(version_doc)
+    if not profile:
+        raise DocumentStorageError("La version no tiene un formato compatible con ONLYOFFICE.")
+    validate_onlyoffice_file_path(snapshot_path, profile)
     return prepare_document_file_replacement(version_doc, snapshot_path)
 
 

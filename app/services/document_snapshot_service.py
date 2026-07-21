@@ -12,6 +12,7 @@ from app.models.documentos import (
     DocumentoVersion,
     ESTADO_EDICION_ACTIVA,
     ESTADO_EDICION_ERROR,
+    ESTADO_EN_APROBACION,
     ESTADO_EN_ELABORACION,
     ESTADO_EN_REVISION,
     ESTADO_APROBADO,
@@ -21,7 +22,7 @@ from app.models.documentos import (
     SNAPSHOT_ENVIO_REVISION,
     SNAPSHOT_RECHAZADO,
 )
-from app.services.onlyoffice_document_view_service import DOCX_MIME, is_docx_version
+from app.services.office_document_profile import DOCX_MIME, get_onlyoffice_document_profile
 from app.services.storage_service import (
     DocumentStorageError,
     delete_snapshot_file,
@@ -31,7 +32,7 @@ from app.services.storage_service import (
     restore_document_file_replacement,
     restore_working_copy_from_snapshot,
     store_snapshot_copy,
-    validate_docx_file_path,
+    validate_onlyoffice_file_path,
 )
 
 
@@ -77,16 +78,17 @@ class DocumentSnapshotService:
             raise DocumentSnapshotError("La versiÃ³n no pertenece al documento o empresa indicados.")
 
     def validate_working_copy(self, version_doc):
-        if not is_docx_version(version_doc):
-            raise DocumentSnapshotError("La versiÃ³n no es un DOCX compatible.")
+        profile = get_onlyoffice_document_profile(version_doc)
+        if not profile:
+            raise DocumentSnapshotError("La version no es compatible con ONLYOFFICE.")
         if not version_doc.archivo_storage_path:
-            raise DocumentSnapshotError("La versiÃ³n no tiene copia de trabajo privada.")
+            raise DocumentSnapshotError("La version no tiene copia de trabajo privada.")
         if not _hash_is_sha256(version_doc.archivo_sha256 or ""):
-            raise DocumentSnapshotError("La versiÃ³n no tiene hash SHA-256 vÃ¡lido.")
+            raise DocumentSnapshotError("La version no tiene hash SHA-256 valido.")
 
         try:
             physical_path = resolve_document_path(version_doc.archivo_storage_path)
-            validate_docx_file_path(physical_path)
+            validate_onlyoffice_file_path(physical_path, profile)
             actual_sha, actual_size = file_digest_and_size(physical_path)
         except (DocumentStorageError, FileNotFoundError) as exc:
             raise DocumentSnapshotError(str(exc)) from exc
@@ -94,7 +96,7 @@ class DocumentSnapshotService:
         if actual_sha != version_doc.archivo_sha256:
             raise DocumentSnapshotError("La copia de trabajo no coincide con la metadata registrada.")
         if version_doc.archivo_size and int(version_doc.archivo_size) != int(actual_size):
-            raise DocumentSnapshotError("El tamaÃ±o de la copia de trabajo no coincide con la metadata registrada.")
+            raise DocumentSnapshotError("El tamano de la copia de trabajo no coincide con la metadata registrada.")
         return physical_path, actual_sha, actual_size
 
     def ensure_no_blocking_edit(self, version_doc):
@@ -198,7 +200,7 @@ class DocumentSnapshotService:
 
     def create_approved_snapshot(self, *, documento, version_doc, usuario, comentario=None):
         self.validate_context(documento=documento, version_doc=version_doc, usuario=usuario)
-        if version_doc.estado != ESTADO_EN_REVISION:
+        if version_doc.estado != ESTADO_EN_APROBACION:
             raise DocumentSnapshotError("Solo una versiÃ³n en revisiÃ³n puede aprobarse.")
         self.ensure_no_blocking_edit(version_doc)
         review_snapshot = self.latest_review_snapshot(version_doc)
@@ -226,7 +228,7 @@ class DocumentSnapshotService:
 
     def create_rejection_marker(self, *, documento, version_doc, usuario, comentario):
         self.validate_context(documento=documento, version_doc=version_doc, usuario=usuario)
-        if version_doc.estado != ESTADO_EN_REVISION:
+        if version_doc.estado not in (ESTADO_EN_REVISION, ESTADO_EN_APROBACION):
             raise DocumentSnapshotError("Solo una versiÃ³n en revisiÃ³n puede rechazarse.")
         comment = _normalize_required(comentario, "El comentario de rechazo es obligatorio.", max_length=2000)
         review_snapshot = self.latest_review_snapshot(version_doc)
@@ -287,7 +289,8 @@ class DocumentSnapshotService:
         try:
             version_doc.archivo_sha256 = replacement.sha256
             version_doc.archivo_size = replacement.size
-            version_doc.archivo_mime = version_doc.archivo_mime or DOCX_MIME
+            profile = get_onlyoffice_document_profile(version_doc)
+            version_doc.archivo_mime = version_doc.archivo_mime or (profile.mime_type if profile else DOCX_MIME)
             db.session.flush()
         except Exception:
             restore_document_file_replacement(replacement)
@@ -309,7 +312,8 @@ class DocumentSnapshotService:
             raise DocumentSnapshotError("El snapshot no tiene archivo fÃ­sico asociado.")
         try:
             path = resolve_document_path(snapshot.storage_path)
-            validate_docx_file_path(path)
+            profile = get_onlyoffice_document_profile(snapshot.archivo_nombre_original or snapshot.archivo_nombre_interno or snapshot.storage_path)
+            validate_onlyoffice_file_path(path, profile)
         except (DocumentStorageError, FileNotFoundError) as exc:
             raise DocumentSnapshotError(str(exc)) from exc
         actual_sha, actual_size = file_digest_and_size(path)
@@ -330,10 +334,10 @@ class DocumentSnapshotService:
                 sha256=version_doc.archivo_sha256,
                 size=version_doc.archivo_size,
                 mime_type=version_doc.archivo_mime,
-                filename=version_doc.archivo_nombre_original or "documento.docx",
+                filename=version_doc.archivo_nombre_original or "documento",
             )
         snapshot = None
-        if version_doc.estado == ESTADO_EN_REVISION:
+        if version_doc.estado in (ESTADO_EN_REVISION, ESTADO_EN_APROBACION):
             snapshot = self.latest_review_snapshot(version_doc)
         elif version_doc.estado == ESTADO_APROBADO:
             snapshot = self.approved_snapshot(version_doc) or self.latest_review_snapshot(version_doc)
@@ -353,7 +357,7 @@ class DocumentSnapshotService:
             sha256=physical_snapshot.archivo_sha256,
             size=physical_snapshot.archivo_size,
             mime_type=physical_snapshot.archivo_mime,
-            filename=snapshot.archivo_nombre_original or version_doc.archivo_nombre_original or "documento.docx",
+            filename=snapshot.archivo_nombre_original or version_doc.archivo_nombre_original or "documento",
         )
 
     def official_source_for_version_as_working(self, *, documento, version_doc):
@@ -366,7 +370,7 @@ class DocumentSnapshotService:
             sha256=version_doc.archivo_sha256,
             size=version_doc.archivo_size,
             mime_type=version_doc.archivo_mime,
-            filename=version_doc.archivo_nombre_original or "documento.docx",
+            filename=version_doc.archivo_nombre_original or "documento",
         )
 
     def list_snapshots(self, *, documento):
@@ -416,7 +420,7 @@ class DocumentSnapshotService:
                 estado=SNAPSHOT_DISPONIBLE,
                 storage_path=stored.storage_path,
                 archivo_nombre_interno=stored.stored_name,
-                archivo_nombre_original=version_doc.archivo_nombre_original or f"{documento.codigo}_v{version_doc.version}.docx",
+                archivo_nombre_original=version_doc.archivo_nombre_original or f"{documento.codigo}_v{version_doc.version}.{get_onlyoffice_document_profile(version_doc).extension}",
                 archivo_mime=stored.mime_type,
                 archivo_size=stored.size,
                 archivo_sha256=stored.sha256,
@@ -437,3 +441,5 @@ class DocumentSnapshotService:
             if stored:
                 delete_snapshot_file(stored.storage_path)
             raise
+
+

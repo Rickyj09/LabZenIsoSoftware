@@ -1,13 +1,15 @@
 from flask import Blueprint, abort, current_app, jsonify, render_template, request, send_file
 from flask_login import login_required
 
-from app.models.documentos import Documento, DocumentoSnapshot, DocumentoVersion
+from app.models.documentos import Documento, DocumentoSnapshot, DocumentoVersion, DocumentoVersionAnexo
+from app.services.document_attachment_service import DocumentAttachmentService
 from app.security.permissions import require_permission
 from app.services.onlyoffice_document_view_service import (
     DOCX_MIME,
-    is_docx_version,
-    resolve_viewable_docx_path,
+    is_onlyoffice_supported_version,
+    resolve_onlyoffice_source_path,
 )
+from app.services.office_document_profile import get_onlyoffice_document_profile
 from app.services.document_snapshot_service import DocumentSnapshotError, DocumentSnapshotService
 from app.services.onlyoffice_health_service import OnlyOfficeHealthService
 from app.services.onlyoffice_jwt_service import (
@@ -144,23 +146,25 @@ def document_file(version_id):
             physical_path = DocumentSnapshotService().resolve_snapshot_path(snapshot)
         except DocumentSnapshotError:
             abort(422)
-        download_name = snapshot.archivo_nombre_original or version.archivo_nombre_original or "documento.docx"
-        mimetype = snapshot.archivo_mime or version.archivo_mime or DOCX_MIME
+        profile = get_onlyoffice_document_profile(snapshot.archivo_nombre_original or snapshot.archivo_nombre_interno or snapshot.storage_path)
+        download_name = snapshot.archivo_nombre_original or version.archivo_nombre_original or f"documento.{profile.extension if profile else 'docx'}"
+        mimetype = snapshot.archivo_mime or version.archivo_mime or (profile.mime_type if profile else DOCX_MIME)
         content_length = snapshot.archivo_size
     else:
         if version.archivo_sha256 != payload.get("archivo_sha256"):
             abort(401)
-        if not is_docx_version(version):
+        if not is_onlyoffice_supported_version(version):
             abort(422)
 
         try:
-            physical_path = resolve_viewable_docx_path(version)
+            physical_path = resolve_onlyoffice_source_path(version)
         except FileNotFoundError:
             abort(404)
         except ValueError:
             abort(422)
-        download_name = version.archivo_nombre_original or "documento.docx"
-        mimetype = version.archivo_mime or DOCX_MIME
+        profile = get_onlyoffice_document_profile(version)
+        download_name = version.archivo_nombre_original or f"documento.{profile.extension if profile else 'docx'}"
+        mimetype = version.archivo_mime or (profile.mime_type if profile else DOCX_MIME)
         content_length = version.archivo_size
 
     response = send_file(
@@ -174,6 +178,42 @@ def document_file(version_id):
     response.headers["X-Content-Type-Options"] = "nosniff"
     if content_length:
         response.headers["Content-Length"] = str(content_length)
+    return response
+
+
+@bp.route("/anexos/<public_id>/archivo", methods=["GET"])
+def attachment_file(public_id):
+    try:
+        payload = validate_onlyoffice_document_token(request.args.get("token", ""))
+    except OnlyOfficeTokenError:
+        abort(401)
+    if payload.get("attachment_public_id") != public_id:
+        abort(401)
+    anexo = DocumentoVersionAnexo.query.filter_by(
+        public_id=public_id,
+        empresa_id=int(payload.get("empresa_id", 0)),
+        documento_id=int(payload.get("documento_id", 0)),
+        documento_version_id=int(payload.get("version_id", 0)),
+    ).first()
+    if not anexo:
+        abort(404)
+    if anexo.archivo_sha256 != payload.get("archivo_sha256"):
+        abort(401)
+    try:
+        physical_path = DocumentAttachmentService().resolve_attachment_path(anexo)
+    except Exception:
+        abort(422)
+    response = send_file(
+        physical_path,
+        as_attachment=False,
+        download_name=anexo.archivo_nombre_original,
+        mimetype=anexo.archivo_mime,
+        conditional=True,
+    )
+    response.headers["Cache-Control"] = "private, max-age=60"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    if anexo.archivo_size:
+        response.headers["Content-Length"] = str(anexo.archivo_size)
     return response
 
 
@@ -195,8 +235,8 @@ def conversion_source_snapshot(public_id):
     response = send_file(
         physical_path,
         as_attachment=False,
-        download_name=snapshot.archivo_nombre_original or "snapshot-aprobado.docx",
-        mimetype=snapshot.archivo_mime or DOCX_MIME,
+        download_name=snapshot.archivo_nombre_original or f"snapshot-aprobado.{get_onlyoffice_document_profile(snapshot.archivo_nombre_original or snapshot.archivo_nombre_interno or snapshot.storage_path).extension}",
+        mimetype=snapshot.archivo_mime or get_onlyoffice_document_profile(snapshot.archivo_nombre_original or snapshot.archivo_nombre_interno or snapshot.storage_path).mime_type,
         conditional=True,
     )
     response.headers["Cache-Control"] = "private, max-age=60"

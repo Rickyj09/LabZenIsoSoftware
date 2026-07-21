@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import os
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
@@ -27,6 +28,8 @@ from app.models.documentos import (
     ARTEFACTO_PDF_FIRMADO_FINAL,
     ARTEFACTO_PDF_FIRMADO_PARCIAL,
     ESTADO_APROBADO,
+    FIRMA_IDENTIDAD_PENDIENTE,
+    FIRMA_IDENTIDAD_REVOCADA,
     FIRMA_IDENTIDAD_VERIFICADA,
     FIRMA_PASO_FIRMADO,
     FIRMA_PASO_HABILITADO,
@@ -35,17 +38,29 @@ from app.models.documentos import (
     Documento,
     DocumentoArtefacto,
     DocumentoFirmaPaso,
+    DocumentoFirmaProceso,
     DocumentoSnapshot,
     DocumentoVersion,
     UsuarioIdentidadFirma,
 )
 from app.models.empresa import Empresa
-from app.models.seguridad import Usuario
+from app.models.auditoria import AuditoriaLog
+from app.models.seguridad import Permiso, Rol, RolPermiso, Usuario, UsuarioRol
 from app.services.document_pdf_service import DocumentPdfService
+from app.services.document_signature_identity_service import (
+    DocumentSignatureIdentityError,
+    DocumentSignatureIdentityService,
+    SIGNATURE_IDENTITY_PERMISSION,
+)
+from app.services.document_signature_dev_service import (
+    DEV_TEST_SIGNATURE_VALIDATED,
+    DocumentSignatureDevCertificateService,
+)
 from app.services.document_signature_service import (
     DocumentSignatureError,
     DocumentSignatureService,
     PyHankoPdfSignatureValidator,
+    START_SIGNATURE_PERMISSION,
     SignatureValidationResult,
 )
 from app.services.storage_service import file_digest_and_size, resolve_document_path, store_pdf_artifact_copy
@@ -82,6 +97,11 @@ class DocumentSignatureTest(unittest.TestCase):
             "DOCUMENT_LEGACY_STORAGE_ROOT": self.temp_directory.name,
             "DOCUMENT_SIGNATURES_ENABLED": True,
             "DOCUMENT_SIGNATURE_VALIDATION_MODE": "strict",
+            "DOCUMENT_SIGNATURES_DEV_TEST_MODE": False,
+            "DOCUMENT_SIGNATURES_DEV_KEY_PASSWORD": "",
+            "DOCUMENT_SIGNATURES_DEV_ELABORADOR_BOX": "",
+            "DOCUMENT_SIGNATURES_DEV_REVISOR_BOX": "",
+            "DOCUMENT_SIGNATURES_DEV_APROBADOR_BOX": "",
             "DOCUMENT_SIGNATURE_PROCESS_TTL_DAYS": 15,
             "DOCUMENT_SIGNATURE_MAX_PDF_BYTES": 5 * 1024 * 1024,
         })
@@ -129,15 +149,68 @@ class DocumentSignatureTest(unittest.TestCase):
         pdf += b"startxref\n" + str(xref_offset).encode("ascii") + b"\n%%EOF\n"
         return pdf
 
+    def two_page_pdf(self):
+        first = b"BT /F1 12 Tf 30 120 Td (pagina 1 contenido) Tj ET\n"
+        second = b"BT /F1 12 Tf 30 120 Td (ultima pagina tabla firmas) Tj ET\n"
+        objects = [
+            b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
+            b"2 0 obj << /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >> endobj\n",
+            b"3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >> endobj\n",
+            b"4 0 obj << /Length " + str(len(first)).encode("ascii") + b" >> stream\n" + first + b"endstream endobj\n",
+            b"5 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 6 0 R >> endobj\n",
+            b"6 0 obj << /Length " + str(len(second)).encode("ascii") + b" >> stream\n" + second + b"endstream endobj\n",
+        ]
+        pdf = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"
+        offsets = [0]
+        for obj in objects:
+            offsets.append(len(pdf))
+            pdf += obj
+        xref_offset = len(pdf)
+        xref_entries = [b"0000000000 65535 f \n"] + [
+            f"{offset:010d} 00000 n \n".encode("ascii") for offset in offsets[1:]
+        ]
+        pdf += b"xref\n0 7\n" + b"".join(xref_entries)
+        pdf += b"trailer << /Root 1 0 R /Size 7 >>\n"
+        pdf += b"startxref\n" + str(xref_offset).encode("ascii") + b"\n%%EOF\n"
+        return pdf
+
     def seed_data(self):
-        db.session.add(Empresa(id=101, nombre="Empresa firma"))
+        db.session.add_all([
+            Empresa(id=101, nombre="Empresa firma"),
+            Empresa(id=102, nombre="Empresa externa"),
+        ])
         users = [
-            Usuario(id=201, empresa_id=101, nombre="Ela", apellido="Borador", email="ela@firma", username="ela", password_hash="x", activo=True),
-            Usuario(id=202, empresa_id=101, nombre="Re", apellido="Visor", email="rev@firma", username="rev", password_hash="x", activo=True),
+            Usuario(id=201, empresa_id=101, nombre="Ela", apellido="Borador", email="ela@firma", username="tecnico_documental", password_hash="x", activo=True),
+            Usuario(id=202, empresa_id=101, nombre="Re", apellido="Visor", email="rev@firma", username="revisor_documental", password_hash="x", activo=True),
             Usuario(id=203, empresa_id=101, nombre="Apro", apellido="Bador", email="apr@firma", username="apr", password_hash="x", activo=True),
             Usuario(id=204, empresa_id=101, nombre="Admin", apellido="Calidad", email="admin@firma", username="admin", password_hash="x", activo=True),
+            Usuario(id=205, empresa_id=101, nombre="Consulta", apellido="Firma", email="consulta@firma", username="consulta", password_hash="x", activo=True),
+            Usuario(id=206, empresa_id=102, nombre="Otro", apellido="Admin", email="otro-admin@firma", username="otro-admin", password_hash="x", activo=True),
         ]
         db.session.add_all(users)
+        permissions = [
+            Permiso(id=1001, codigo="documentos.ver", nombre="Ver documentos", modulo="documentos"),
+            Permiso(id=1002, codigo="documentos.descargar", nombre="Descargar documentos", modulo="documentos"),
+            Permiso(id=1003, codigo=START_SIGNATURE_PERMISSION, nombre="Iniciar firmas", modulo="documentos"),
+            Permiso(id=1004, codigo=SIGNATURE_IDENTITY_PERMISSION, nombre="Gestionar identidades", modulo="documentos"),
+        ]
+        admin_role = Rol(id=2001, nombre="CALIDAD", es_sistema=True)
+        viewer_role = Rol(id=2002, nombre="CONSULTA", es_sistema=True)
+        db.session.add_all([*permissions, admin_role, viewer_role])
+        db.session.flush()
+        db.session.add_all([
+            RolPermiso(id=3001, rol_id=admin_role.id, permiso_id=1001),
+            RolPermiso(id=3002, rol_id=admin_role.id, permiso_id=1002),
+            RolPermiso(id=3003, rol_id=admin_role.id, permiso_id=1003),
+            RolPermiso(id=3004, rol_id=admin_role.id, permiso_id=1004),
+            RolPermiso(id=3005, rol_id=viewer_role.id, permiso_id=1001),
+            RolPermiso(id=3006, rol_id=viewer_role.id, permiso_id=1002),
+            UsuarioRol(id=4001, usuario_id=204, rol_id=admin_role.id),
+            UsuarioRol(id=4002, usuario_id=205, rol_id=viewer_role.id),
+            UsuarioRol(id=4003, usuario_id=206, rol_id=admin_role.id),
+            UsuarioRol(id=4004, usuario_id=201, rol_id=viewer_role.id),
+            UsuarioRol(id=4005, usuario_id=202, rol_id=viewer_role.id),
+        ])
         document = Documento(
             id=501,
             empresa_id=101,
@@ -233,6 +306,34 @@ class DocumentSignatureTest(unittest.TestCase):
         db.session.add(artifact)
         db.session.commit()
 
+    def login(self, user_id):
+        client = self.app.test_client()
+        with client.session_transaction() as session:
+            session["_user_id"] = str(user_id)
+            session["_fresh"] = True
+        return client
+
+    def clear_identity(self, user_id):
+        UsuarioIdentidadFirma.query.filter_by(empresa_id=101, usuario_id=user_id).delete()
+        db.session.commit()
+
+    def enable_dev_signature_mode(self):
+        cert_dir = Path(self.temp_directory.name) / "dev_signature_certificates"
+        self.app.config.update(
+            APP_ENV="testing",
+            DOCUMENT_SIGNATURES_DEV_TEST_MODE=True,
+            DOCUMENT_SIGNATURES_DEV_CERT_DIR=str(cert_dir),
+            DOCUMENT_SIGNATURES_DEV_KEY_PASSWORD="local-test-password",
+            DOCUMENT_SIGNATURE_VALIDATION_MODE="strict",
+        )
+        return cert_dir
+
+    def make_current_version_visible_in_detail(self):
+        document = Documento.query.get(501)
+        document.version_vigente_id = 1501
+        db.session.commit()
+        return document
+
     def signed_upload(self, text):
         payload = self.minimal_pdf(text)
         return FileStorage(
@@ -307,6 +408,73 @@ class DocumentSignatureTest(unittest.TestCase):
     def cert_sha256(self, cert):
         return cert.fingerprint(hashes.SHA256()).hex()
 
+    def embedded_signature_count(self, artifact):
+        with resolve_document_path(artifact.storage_path).open("rb") as handle:
+            from pyhanko.pdf_utils.reader import PdfFileReader
+
+            return len(list(PdfFileReader(handle).embedded_signatures))
+
+    def embedded_signature_names(self, artifact):
+        with resolve_document_path(artifact.storage_path).open("rb") as handle:
+            from pyhanko.pdf_utils.reader import PdfFileReader
+
+            return [signature.field_name for signature in PdfFileReader(handle).embedded_signatures]
+
+    def signature_field_layouts(self, artifact):
+        with resolve_document_path(artifact.storage_path).open("rb") as handle:
+            from pyhanko.pdf_utils.reader import PdfFileReader
+
+            reader = PdfFileReader(handle)
+            page_count = int(reader.root["/Pages"]["/Count"])
+            page_refs = [reader.find_page_for_modification(index)[0].reference for index in range(page_count)]
+            fields = reader.root["/AcroForm"]["/Fields"]
+            layouts = {}
+            for field_ref in fields:
+                field = field_ref.get_object()
+                name = str(field["/T"])
+                page_ref = field.raw_get("/P")
+                page_index = next(
+                    index for index, candidate in enumerate(page_refs)
+                    if page_ref.reference == candidate
+                )
+                layouts[name] = {
+                    "page_index": page_index,
+                    "rect": tuple(float(item) for item in field["/Rect"]),
+                }
+            return layouts
+
+    def assert_horizontal_procedure_layout(self, placements, *, page_index=1):
+        self.assertEqual(list(placements), ["ELABORADOR", "REVISOR", "APROBADOR"])
+        self.assertEqual({placement.page_index for placement in placements.values()}, {page_index})
+        self.assertEqual(
+            {role: placement.normalized_box for role, placement in placements.items()},
+            {
+                "ELABORADOR": (0.02, 0.18, 0.32, 0.28),
+                "REVISOR": (0.35, 0.18, 0.65, 0.28),
+                "APROBADOR": (0.68, 0.18, 0.98, 0.28),
+            },
+        )
+        boxes = {role: placement.box for role, placement in placements.items()}
+        self.assertLess(boxes["ELABORADOR"][0], boxes["REVISOR"][0])
+        self.assertLess(boxes["REVISOR"][0], boxes["APROBADOR"][0])
+        self.assertEqual(
+            {box[1:4:2] for box in boxes.values()},
+            {(36, 56)},
+        )
+        self.assertLessEqual(boxes["ELABORADOR"][2], boxes["REVISOR"][0])
+        self.assertLessEqual(boxes["REVISOR"][2], boxes["APROBADOR"][0])
+        self.assertEqual(boxes["ELABORADOR"], (4, 36, 64, 56))
+        self.assertEqual(boxes["REVISOR"], (70, 36, 130, 56))
+        self.assertEqual(boxes["APROBADOR"], (136, 36, 196, 56))
+        for box in boxes.values():
+            x1, y1, x2, y2 = box
+            self.assertGreater(x2, x1)
+            self.assertGreater(y2, y1)
+            self.assertGreaterEqual(x1, 0)
+            self.assertGreaterEqual(y1, 0)
+            self.assertLessEqual(x2, 200)
+            self.assertLessEqual(y2, 200)
+
     def update_identity_for_cert(self, user_id, cert):
         identity = UsuarioIdentidadFirma.query.filter_by(usuario_id=user_id).first()
         identity.certificado_fingerprint_sha256 = self.cert_sha256(cert)
@@ -365,6 +533,488 @@ class DocumentSignatureTest(unittest.TestCase):
         self.assertEqual(document.estado, ESTADO_APROBADO)
         self.assertIsNone(document.version_vigente_id)
 
+    def test_start_process_is_idempotent_for_double_request(self):
+        service = DocumentSignatureService(provider=FakeSignatureProvider())
+        document = Documento.query.get(501)
+        version = DocumentoVersion.query.get(1501)
+        admin = Usuario.query.get(204)
+        first = service.start_process(documento=document, version_doc=version, usuario=admin)
+        second = service.start_process(documento=document, version_doc=version, usuario=admin)
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(DocumentoFirmaPaso.query.filter_by(proceso_id=first.id).count(), 3)
+
+    def test_start_process_requires_approved_pdf(self):
+        DocumentoArtefacto.query.filter_by(documento_version_id=1501, tipo=ARTEFACTO_PDF_APROBADO).delete()
+        db.session.commit()
+        with self.assertRaisesRegex(DocumentSignatureError, "No existe PDF aprobado"):
+            DocumentSignatureService(provider=FakeSignatureProvider()).start_process(
+                documento=Documento.query.get(501),
+                version_doc=DocumentoVersion.query.get(1501),
+                usuario=Usuario.query.get(204),
+            )
+
+    def test_start_process_requires_approved_state(self):
+        document = Documento.query.get(501)
+        document.estado = "EN_REVISION"
+        db.session.commit()
+        with self.assertRaisesRegex(DocumentSignatureError, "APROBADOS"):
+            DocumentSignatureService(provider=FakeSignatureProvider()).start_process(
+                documento=document,
+                version_doc=DocumentoVersion.query.get(1501),
+                usuario=Usuario.query.get(204),
+            )
+
+    def test_start_process_requires_signature_permission(self):
+        with self.assertRaisesRegex(DocumentSignatureError, "permiso"):
+            DocumentSignatureService(provider=FakeSignatureProvider()).start_process(
+                documento=Documento.query.get(501),
+                version_doc=DocumentoVersion.query.get(1501),
+                usuario=Usuario.query.get(205),
+            )
+
+    def test_detail_shows_start_signature_for_authorized_approved_document_with_pdf(self):
+        self.make_current_version_visible_in_detail()
+        response = self.login(204).get("/documentacion/501")
+        html = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Firmas digitales", html)
+        self.assertIn("Iniciar firma externa", html)
+        self.assertIn("Páginas", html)
+        self.assertIn("Tamaño", html)
+
+    def test_detail_hides_start_signature_without_permission_and_post_is_forbidden(self):
+        self.make_current_version_visible_in_detail()
+        client = self.login(205)
+        response = client.get("/documentacion/501")
+        self.assertNotIn("Iniciar firma externa", response.get_data(as_text=True))
+        post = client.post("/documentacion/501/versiones/1501/firmas/iniciar")
+        self.assertEqual(post.status_code, 403)
+
+    def test_identity_admin_lists_only_active_company_users(self):
+        db.session.add_all([
+            Usuario(id=207, empresa_id=101, nombre="In", apellido="Activo", email="inactivo@firma", username="inactivo", password_hash="x", activo=False),
+            Usuario(id=208, empresa_id=102, nombre="Tenant", apellido="Ajeno", email="tenant@firma", username="tenant-ajeno", password_hash="x", activo=True),
+        ])
+        db.session.commit()
+        response = self.login(204).get("/documentacion/firmas/identidades")
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Identidades de firma", html)
+        self.assertIn("Ela", html)
+        self.assertIn("Re", html)
+        self.assertIn("Apro", html)
+        self.assertIn("Admin", html)
+        self.assertNotIn("inactivo", html)
+        self.assertNotIn("tenant-ajeno", html)
+
+    def test_identity_admin_requires_permission(self):
+        client = self.login(205)
+
+        self.assertEqual(client.get("/documentacion/firmas/identidades").status_code, 403)
+        self.assertEqual(client.post("/documentacion/firmas/identidades", data={
+            "user_id": "201",
+            "identificacion": "ID-201-X",
+        }).status_code, 403)
+
+    def test_create_identity_validates_required_fields_and_fingerprint(self):
+        self.clear_identity(201)
+        client = self.login(204)
+
+        missing = client.post("/documentacion/firmas/identidades", data={
+            "user_id": "201",
+            "identificacion": "",
+        }, follow_redirects=True)
+        self.assertEqual(missing.status_code, 200)
+        self.assertIsNone(UsuarioIdentidadFirma.query.filter_by(usuario_id=201).first())
+
+        invalid = client.post("/documentacion/firmas/identidades", data={
+            "user_id": "201",
+            "identificacion": "ID-201-X",
+            "certificado_fingerprint_sha256": "abc",
+        }, follow_redirects=True)
+        self.assertEqual(invalid.status_code, 200)
+        self.assertIsNone(UsuarioIdentidadFirma.query.filter_by(usuario_id=201).first())
+
+        valid = client.post("/documentacion/firmas/identidades", data={
+            "user_id": "201",
+            "identificacion": "ID-201-X",
+            "nombre_certificado": "Certificado X",
+            "emisor_certificado": "CA X",
+            "certificado_fingerprint_sha256": "A" * 64,
+        }, follow_redirects=True)
+        identity = UsuarioIdentidadFirma.query.filter_by(usuario_id=201).one()
+        self.assertEqual(valid.status_code, 200)
+        self.assertEqual(identity.estado, FIRMA_IDENTIDAD_PENDIENTE)
+        self.assertEqual(identity.certificado_fingerprint_sha256, "a" * 64)
+
+    def test_identity_service_rejects_inactive_and_cross_tenant_users(self):
+        db.session.add_all([
+            Usuario(id=207, empresa_id=101, nombre="In", apellido="Activo", email="inactivo@firma", username="inactivo", password_hash="x", activo=False),
+            Usuario(id=208, empresa_id=102, nombre="Tenant", apellido="Ajeno", email="tenant@firma", username="tenant-ajeno", password_hash="x", activo=True),
+        ])
+        db.session.commit()
+        service = DocumentSignatureIdentityService()
+        actor = Usuario.query.get(204)
+
+        with self.assertRaisesRegex(DocumentSignatureIdentityError, "inactivo"):
+            service.create_identity(actor=actor, user_id=207, identificacion="ID-207")
+        with self.assertRaisesRegex(DocumentSignatureIdentityError, "otra empresa"):
+            service.create_identity(actor=actor, user_id=208, identificacion="ID-208")
+
+    def test_identity_service_prevents_duplicate_identity_for_user(self):
+        self.clear_identity(201)
+        service = DocumentSignatureIdentityService()
+        actor = Usuario.query.get(204)
+
+        service.create_identity(actor=actor, user_id=201, identificacion="ID-201-X")
+        with self.assertRaisesRegex(DocumentSignatureIdentityError, "Ya existe"):
+            service.create_identity(actor=actor, user_id=201, identificacion="ID-201-Y")
+
+    def test_mock_verification_records_metadata_and_audit(self):
+        self.clear_identity(201)
+        service = DocumentSignatureIdentityService()
+        actor = Usuario.query.get(204)
+        identity = service.create_identity(
+            actor=actor,
+            user_id=201,
+            identificacion="ID-201-X",
+            certificado_fingerprint_sha256="B" * 64,
+        )
+
+        verified = service.verify_identity_mock(actor=actor, identity_id=identity.id)
+        actions = [
+            log.accion
+            for log in AuditoriaLog.query
+            .filter_by(tabla="usuario_identidades_firma", registro_id=identity.id)
+            .order_by(AuditoriaLog.id)
+            .all()
+        ]
+
+        self.assertEqual(verified.estado, FIRMA_IDENTIDAD_VERIFICADA)
+        self.assertEqual(verified.verificado_por_id, 204)
+        self.assertIsNotNone(verified.verificado_en)
+        self.assertEqual(verified.metadata_json["verification_type"], "local_mock")
+        self.assertEqual(actions, ["CREAR", "VERIFICAR"])
+
+    def test_dev_mode_is_disabled_by_default_and_blocked_in_production(self):
+        self.assertFalse(self.app.config.get("DOCUMENT_SIGNATURES_DEV_TEST_MODE"))
+        with self.assertRaisesRegex(RuntimeError, "produccion"):
+            create_app({
+                "TESTING": True,
+                "APP_ENV": "production",
+                "DOCUMENT_SIGNATURES_DEV_TEST_MODE": True,
+                "DOCUMENT_SIGNATURES_DEV_KEY_PASSWORD": "secret",
+                "SQLALCHEMY_DATABASE_URI": "sqlite://",
+                "SQLALCHEMY_ENGINE_OPTIONS": {},
+            })
+
+    def test_dev_cli_initializes_distinct_certificates_and_syncs_identities_idempotently(self):
+        cert_dir = self.enable_dev_signature_mode()
+        runner = self.app.test_cli_runner()
+
+        first = runner.invoke(args=["firmas-dev", "inicializar"])
+        second = runner.invoke(args=["firmas-dev", "inicializar"])
+
+        self.assertEqual(first.exit_code, 0, first.output)
+        self.assertEqual(second.exit_code, 0, second.output)
+        self.assertTrue((cert_dir / "labzeniso-dev-ca.cert.pem").exists())
+        self.assertTrue((cert_dir / "labzeniso-dev-ca.key.pem").exists())
+        identities = {
+            identity.usuario.username: identity
+            for identity in UsuarioIdentidadFirma.query
+            .filter(UsuarioIdentidadFirma.usuario_id.in_((201, 202, 204)))
+            .all()
+        }
+        fingerprints = {identity.certificado_fingerprint_sha256 for identity in identities.values()}
+
+        self.assertEqual(set(identities), {"tecnico_documental", "revisor_documental", "admin"})
+        self.assertEqual(len(fingerprints), 3)
+        self.assertEqual(UsuarioIdentidadFirma.query.filter_by(usuario_id=201).count(), 1)
+        for identity in identities.values():
+            self.assertEqual(identity.estado, FIRMA_IDENTIDAD_VERIFICADA)
+            self.assertTrue(identity.metadata_json["dev_test_certificate"])
+            self.assertTrue(identity.metadata_json["local_mock_verification"])
+            cert_info = DocumentSignatureDevCertificateService(self.app).load_user_certificate_info(identity.usuario.username)
+            self.assertEqual(identity.certificado_fingerprint_sha256, cert_info["fingerprint"])
+
+    def test_dev_signature_action_visibility_and_wrong_user_guard(self):
+        self.enable_dev_signature_mode()
+        DocumentSignatureDevCertificateService(self.app).initialize()
+        self.make_current_version_visible_in_detail()
+        version = DocumentoVersion.query.get(1501)
+        version.aprobado_por_id = 204
+        version.aprobado_por = Usuario.query.get(204)
+        db.session.commit()
+        process = DocumentSignatureService().start_process(
+            documento=Documento.query.get(501),
+            version_doc=version,
+            usuario=Usuario.query.get(204),
+        )
+        step = DocumentoFirmaPaso.query.filter_by(proceso_id=process.id, orden=1).one()
+
+        signer_client = self.login(201)
+        signer_response = signer_client.get("/documentacion/501")
+        with signer_client.session_transaction() as session:
+            csrf_token = session[f"dev_signature_csrf:{step.public_id}"]
+        missing_csrf = signer_client.post(f"/documentacion/firmas/pasos/{step.public_id}/firmar-dev")
+        wrong_user = self.login(202).post(f"/documentacion/firmas/pasos/{step.public_id}/firmar-dev")
+        self.app.config["DOCUMENT_SIGNATURES_DEV_TEST_MODE"] = False
+        hidden_response = self.login(201).get("/documentacion/501")
+        disabled_route = self.login(201).post(f"/documentacion/firmas/pasos/{step.public_id}/firmar-dev")
+
+        self.assertIn("Firmar con certificado de prueba", signer_response.get_data(as_text=True))
+        self.assertIn(csrf_token, signer_response.get_data(as_text=True))
+        self.assertEqual(missing_csrf.status_code, 403)
+        self.assertEqual(wrong_user.status_code, 403)
+        self.assertNotIn("Firmar con certificado de prueba", hidden_response.get_data(as_text=True))
+        self.assertEqual(disabled_route.status_code, 404)
+
+    def test_dev_signature_preview_does_not_sign_or_create_artifacts(self):
+        self.enable_dev_signature_mode()
+        self.make_current_version_visible_in_detail()
+        before_processes = DocumentoFirmaProceso.query.count()
+        before_artifacts = DocumentoArtefacto.query.count()
+
+        client = self.login(201)
+        detail = client.get("/documentacion/501")
+        response = client.get("/documentacion/501/firmas-dev/vista-previa")
+
+        self.assertIn("Vista previa de ubicaci", detail.get_data(as_text=True))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "application/pdf")
+        from pyhanko.pdf_utils.reader import PdfFileReader
+
+        preview_reader = PdfFileReader(BytesIO(response.get_data()))
+        self.assertEqual(len(list(preview_reader.embedded_signatures)), 0)
+        self.assertIn(b"PREVISUALIZACION", response.get_data())
+        self.assertIn(b"SIN FIRMAS", response.get_data())
+        self.assertEqual(DocumentoFirmaProceso.query.count(), before_processes)
+        self.assertEqual(DocumentoArtefacto.query.count(), before_artifacts)
+
+        self.app.config["DOCUMENT_SIGNATURES_DEV_TEST_MODE"] = False
+        disabled = client.get("/documentacion/501/firmas-dev/vista-previa")
+        self.assertEqual(disabled.status_code, 404)
+
+    def test_procedure_signature_profile_uses_horizontal_last_page_layout(self):
+        self.enable_dev_signature_mode()
+        document = Documento.query.get(501)
+        original_pdf = DocumentoArtefacto.query.filter_by(documento_version_id=1501, tipo=ARTEFACTO_PDF_APROBADO).one()
+        original_pdf_path = resolve_document_path(original_pdf.storage_path)
+        os.chmod(original_pdf_path, 0o600)
+        original_pdf_path.write_bytes(self.two_page_pdf())
+
+        placements = DocumentSignatureDevCertificateService(self.app).signature_placements_for_pdf(
+            original_pdf_path,
+            documento=document,
+        )
+
+        self.assert_horizontal_procedure_layout(placements)
+
+    def test_dev_signature_box_config_overrides_procedure_defaults(self):
+        self.enable_dev_signature_mode()
+        self.app.config.update(
+            DOCUMENT_SIGNATURES_DEV_ELABORADOR_BOX="0.10,0.04,0.30,0.14",
+            DOCUMENT_SIGNATURES_DEV_REVISOR_BOX="0.40,0.04,0.60,0.14",
+            DOCUMENT_SIGNATURES_DEV_APROBADOR_BOX="0.70,0.04,0.90,0.14",
+        )
+        document = Documento.query.get(501)
+        original_pdf = DocumentoArtefacto.query.filter_by(documento_version_id=1501, tipo=ARTEFACTO_PDF_APROBADO).one()
+        original_pdf_path = resolve_document_path(original_pdf.storage_path)
+        os.chmod(original_pdf_path, 0o600)
+        original_pdf_path.write_bytes(self.two_page_pdf())
+
+        placements = DocumentSignatureDevCertificateService(self.app).signature_placements_for_pdf(
+            original_pdf_path,
+            documento=document,
+        )
+
+        self.assertEqual(placements["ELABORADOR"].normalized_box, (0.10, 0.04, 0.30, 0.14))
+        self.assertEqual(placements["REVISOR"].normalized_box, (0.40, 0.04, 0.60, 0.14))
+        self.assertEqual(placements["APROBADOR"].normalized_box, (0.70, 0.04, 0.90, 0.14))
+        self.assertEqual(placements["ELABORADOR"].box, (20, 8, 60, 28))
+        self.assertEqual(placements["REVISOR"].box, (80, 8, 120, 28))
+        self.assertEqual(placements["APROBADOR"].box, (140, 8, 180, 28))
+
+    def test_invalid_dev_signature_box_blocks_signature_without_advancing_step(self):
+        self.enable_dev_signature_mode()
+        self.app.config["DOCUMENT_SIGNATURES_DEV_REVISOR_BOX"] = "0.03,0.19,0.31,0.27"
+        DocumentSignatureDevCertificateService(self.app).initialize()
+        self.make_current_version_visible_in_detail()
+        version = DocumentoVersion.query.get(1501)
+        version.aprobado_por_id = 204
+        version.aprobado_por = Usuario.query.get(204)
+        db.session.commit()
+        process = DocumentSignatureService().start_process(
+            documento=Documento.query.get(501),
+            version_doc=version,
+            usuario=Usuario.query.get(204),
+        )
+        step = DocumentoFirmaPaso.query.filter_by(proceso_id=process.id, orden=1).one()
+
+        with self.assertRaises(DocumentSignatureError) as raised:
+            DocumentSignatureService().sign_step_with_dev_certificate(
+                paso=step,
+                usuario=Usuario.query.get(201),
+            )
+
+        db.session.refresh(step)
+        db.session.refresh(process)
+        self.assertIn("se superponen", str(raised.exception))
+        self.assertEqual(step.estado, FIRMA_PASO_HABILITADO)
+        self.assertEqual(process.estado, FIRMA_PROCESO_EN_FIRMA)
+        self.assertEqual(DocumentoArtefacto.query.filter_by(tipo=ARTEFACTO_PDF_FIRMADO_PARCIAL).count(), 0)
+
+    def test_dev_pades_flow_signs_three_distinct_certificates_and_completes_process(self):
+        self.enable_dev_signature_mode()
+        DocumentSignatureDevCertificateService(self.app).initialize()
+        self.make_current_version_visible_in_detail()
+        document = Documento.query.get(501)
+        version = DocumentoVersion.query.get(1501)
+        version.aprobado_por_id = 204
+        version.aprobado_por = Usuario.query.get(204)
+        original_pdf = DocumentoArtefacto.query.filter_by(documento_version_id=1501, tipo=ARTEFACTO_PDF_APROBADO).one()
+        original_pdf_path = resolve_document_path(original_pdf.storage_path)
+        os.chmod(original_pdf_path, 0o600)
+        original_pdf_path.write_bytes(self.two_page_pdf())
+        validation = DocumentPdfService().validate_pdf_file(original_pdf_path)
+        original_pdf.archivo_sha256 = validation.sha256
+        original_pdf.archivo_size = validation.size
+        original_pdf.page_count = validation.page_count
+        original_state = (document.estado, version.version, original_pdf.archivo_sha256, original_pdf.storage_path)
+        db.session.commit()
+        dev_service = DocumentSignatureDevCertificateService(self.app)
+        placements = dev_service.signature_placements_for_pdf(original_pdf_path, documento=document)
+        self.assert_horizontal_procedure_layout(placements)
+
+        process = DocumentSignatureService().start_process(
+            documento=document,
+            version_doc=version,
+            usuario=Usuario.query.get(204),
+        )
+        for order, user_id, expected_next_state in (
+            (1, 201, FIRMA_PASO_HABILITADO),
+            (2, 202, FIRMA_PASO_HABILITADO),
+            (3, 204, None),
+        ):
+            step = DocumentoFirmaPaso.query.filter_by(proceso_id=process.id, orden=order).one()
+            artifact = DocumentSignatureService().sign_step_with_dev_certificate(
+                paso=step,
+                usuario=Usuario.query.get(user_id),
+            )
+            db.session.refresh(step)
+            db.session.refresh(process)
+            self.assertIsNotNone(artifact.id)
+            self.assertEqual(step.estado, FIRMA_PASO_FIRMADO)
+            self.assertEqual(step.signature_count_after, order)
+            self.assertEqual(self.embedded_signature_count(step.artifact_salida), order)
+            if expected_next_state:
+                next_step = DocumentoFirmaPaso.query.filter_by(proceso_id=process.id, orden=order + 1).one()
+                self.assertEqual(next_step.estado, expected_next_state)
+
+        db.session.refresh(process)
+        db.session.refresh(document)
+        db.session.refresh(version)
+        db.session.refresh(original_pdf)
+        steps = DocumentoFirmaPaso.query.filter_by(proceso_id=process.id).order_by(DocumentoFirmaPaso.orden).all()
+        fingerprints = {step.identidad_firma.certificado_fingerprint_sha256 for step in steps}
+        dev_events = [
+            event.tipo_evento
+            for event in process.eventos
+            if event.tipo_evento == DEV_TEST_SIGNATURE_VALIDATED
+        ]
+
+        self.assertEqual(process.estado, FIRMA_PROCESO_COMPLETADO)
+        self.assertIsNotNone(process.pdf_final_id)
+        self.assertEqual(self.embedded_signature_count(process.pdf_final), 3)
+        self.assertEqual(
+            self.embedded_signature_names(process.pdf_final),
+            ["LabZenISO_Elaborador", "LabZenISO_Revisor", "LabZenISO_Aprobador"],
+        )
+        layouts = self.signature_field_layouts(process.pdf_final)
+        self.assertEqual(set(layouts), {"LabZenISO_Elaborador", "LabZenISO_Revisor", "LabZenISO_Aprobador"})
+        self.assertEqual({layout["page_index"] for layout in layouts.values()}, {1})
+        self.assertEqual(
+            layouts,
+            {
+                "LabZenISO_Elaborador": {"page_index": 1, "rect": (4.0, 36.0, 64.0, 56.0)},
+                "LabZenISO_Revisor": {"page_index": 1, "rect": (70.0, 36.0, 130.0, 56.0)},
+                "LabZenISO_Aprobador": {"page_index": 1, "rect": (136.0, 36.0, 196.0, 56.0)},
+            },
+        )
+        final_bytes = resolve_document_path(process.pdf_final.storage_path).read_bytes()
+        self.assertIn(b"CERTIFICADO DE DESARROLLO", final_bytes)
+        self.assertIn(b"SIN VALIDEZ LEGAL", final_bytes)
+        self.assertIn(b"Firmado digitalmente", final_bytes)
+        self.assertNotIn(b"Digitally signed by", final_bytes)
+        self.assertEqual(len(fingerprints), 3)
+        self.assertEqual(DocumentoFirmaProceso.query.count(), 1)
+        self.assertEqual(DocumentoFirmaPaso.query.filter_by(proceso_id=process.id).count(), 3)
+        self.assertEqual((document.estado, version.version, original_pdf.archivo_sha256, original_pdf.storage_path), original_state)
+        self.assertEqual(len(dev_events), 3)
+
+    def test_detail_hides_start_signature_without_pdf_and_post_does_not_create_process(self):
+        self.make_current_version_visible_in_detail()
+        DocumentoArtefacto.query.filter_by(documento_version_id=1501, tipo=ARTEFACTO_PDF_APROBADO).delete()
+        db.session.commit()
+        client = self.login(204)
+        response = client.get("/documentacion/501")
+        self.assertNotIn("Iniciar firma externa", response.get_data(as_text=True))
+        post = client.post("/documentacion/501/versiones/1501/firmas/iniciar", follow_redirects=True)
+        self.assertEqual(post.status_code, 200)
+        self.assertEqual(DocumentoFirmaPaso.query.count(), 0)
+
+    def test_detail_hides_start_signature_for_unapproved_document(self):
+        self.make_current_version_visible_in_detail()
+        document = Documento.query.get(501)
+        document.estado = "EN_REVISION"
+        db.session.commit()
+        response = self.login(204).get("/documentacion/501")
+        self.assertNotIn("Iniciar firma externa", response.get_data(as_text=True))
+
+    def test_cross_tenant_start_route_returns_not_found(self):
+        self.make_current_version_visible_in_detail()
+        response = self.login(206).post("/documentacion/501/versiones/1501/firmas/iniciar")
+        self.assertEqual(response.status_code, 404)
+
+    def test_start_route_creates_one_process_and_hides_button_afterward(self):
+        self.make_current_version_visible_in_detail()
+        client = self.login(204)
+        first = client.post("/documentacion/501/versiones/1501/firmas/iniciar", follow_redirects=True)
+        second = client.post("/documentacion/501/versiones/1501/firmas/iniciar", follow_redirects=True)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        html = second.get_data(as_text=True)
+        self.assertIn("Firmas digitales", html)
+        self.assertNotIn("Iniciar firma externa", html)
+        self.assertEqual(DocumentoFirmaProceso.query.count(), 1)
+        processes = DocumentoFirmaPaso.query.order_by(DocumentoFirmaPaso.orden).all()
+        self.assertEqual(len(processes), 3)
+        self.assertEqual([step.rol_firmante for step in processes], ["ELABORADOR", "REVISOR", "APROBADOR"])
+        self.assertEqual(processes[0].estado, FIRMA_PASO_HABILITADO)
+        self.assertEqual([step.estado for step in processes[1:]], ["PENDIENTE", "PENDIENTE"])
+        self.assertEqual(Documento.query.get(501).estado, ESTADO_APROBADO)
+
+    def test_detail_shows_final_signed_pdf_after_all_steps_complete(self):
+        self.make_current_version_visible_in_detail()
+        service = DocumentSignatureService(provider=FakeSignatureProvider())
+        process = service.start_process(
+            documento=Documento.query.get(501),
+            version_doc=DocumentoVersion.query.get(1501),
+            usuario=Usuario.query.get(204),
+        )
+        for user_id in (201, 202, 203):
+            step = DocumentoFirmaPaso.query.filter_by(proceso_id=process.id, estado=FIRMA_PASO_HABILITADO).first()
+            service.upload_signed_pdf(
+                paso=step,
+                usuario=Usuario.query.get(user_id),
+                file_storage=self.signed_upload(f"firmado-ui-{user_id}"),
+            )
+        response = self.login(204).get("/documentacion/501")
+        html = response.get_data(as_text=True)
+        self.assertIn("Descargar PDF final firmado", html)
+        self.assertIn("PDF_FIRMADO_FINAL", html)
+
     def test_missing_verified_identity_blocks_start(self):
         UsuarioIdentidadFirma.query.filter_by(usuario_id=202).delete()
         db.session.commit()
@@ -374,6 +1024,71 @@ class DocumentSignatureTest(unittest.TestCase):
                 version_doc=DocumentoVersion.query.get(1501),
                 usuario=Usuario.query.get(204),
             )
+
+    def test_pending_identity_blocks_start_button_and_service_start(self):
+        self.make_current_version_visible_in_detail()
+        self.clear_identity(202)
+        db.session.add(UsuarioIdentidadFirma(
+            empresa_id=101,
+            usuario_id=202,
+            identificacion="ID-202-P",
+            estado=FIRMA_IDENTIDAD_PENDIENTE,
+        ))
+        db.session.commit()
+
+        response = self.login(204).get("/documentacion/501")
+        html = response.get_data(as_text=True)
+        self.assertIn("Faltan identidades de firma verificadas", html)
+        self.assertNotIn("Iniciar firma externa", html)
+        with self.assertRaisesRegex(DocumentSignatureError, "Faltan identidades"):
+            DocumentSignatureService(provider=FakeSignatureProvider()).start_process(
+                documento=Documento.query.get(501),
+                version_doc=DocumentoVersion.query.get(1501),
+                usuario=Usuario.query.get(204),
+            )
+
+    def test_revoked_identity_blocks_start(self):
+        self.clear_identity(202)
+        service = DocumentSignatureIdentityService()
+        actor = Usuario.query.get(204)
+        identity = service.create_identity(actor=actor, user_id=202, identificacion="ID-202-R")
+        service.revoke_identity(actor=actor, identity_id=identity.id)
+        db.session.refresh(identity)
+
+        self.assertEqual(identity.estado, FIRMA_IDENTIDAD_REVOCADA)
+        with self.assertRaisesRegex(DocumentSignatureError, "Faltan identidades"):
+            DocumentSignatureService(provider=FakeSignatureProvider()).start_process(
+                documento=Documento.query.get(501),
+                version_doc=DocumentoVersion.query.get(1501),
+                usuario=Usuario.query.get(204),
+            )
+
+    def test_verifying_three_identities_shows_start_button_without_starting_process(self):
+        self.make_current_version_visible_in_detail()
+        for user_id in (201, 202, 203):
+            self.clear_identity(user_id)
+        service = DocumentSignatureIdentityService()
+        actor = Usuario.query.get(204)
+        document = Documento.query.get(501)
+        version = DocumentoVersion.query.get(1501)
+        artifact = DocumentoArtefacto.query.filter_by(documento_version_id=1501, tipo=ARTEFACTO_PDF_APROBADO).one()
+        original_state = (document.estado, version.estado, artifact.archivo_sha256, artifact.storage_path)
+
+        for user_id in (201, 202, 203):
+            identity = service.create_identity(actor=actor, user_id=user_id, identificacion=f"ID-{user_id}-OK")
+            service.verify_identity_mock(actor=actor, identity_id=identity.id)
+
+        response = self.login(204).get("/documentacion/501")
+        html = response.get_data(as_text=True)
+        db.session.refresh(document)
+        db.session.refresh(version)
+        db.session.refresh(artifact)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Faltan identidades de firma verificadas", html)
+        self.assertIn("Iniciar firma externa", html)
+        self.assertEqual(DocumentoFirmaProceso.query.count(), 0)
+        self.assertEqual((document.estado, version.estado, artifact.archivo_sha256, artifact.storage_path), original_state)
 
     def test_uploads_preserve_partial_and_final_immutable_artifacts(self):
         service = DocumentSignatureService(provider=FakeSignatureProvider())

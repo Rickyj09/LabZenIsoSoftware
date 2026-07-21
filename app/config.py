@@ -99,7 +99,32 @@ def validate_onlyoffice_config(config):
             raise RuntimeError("Los limites de descarga/PDF deben ser positivos y consistentes.")
 
 
+def _app_environment(config):
+    return (config.get("APP_ENV") or os.getenv("FLASK_ENV") or "development").strip().lower()
+
+
+def validate_document_signature_dev_config(config):
+    if not config.get("DOCUMENT_SIGNATURES_DEV_TEST_MODE"):
+        return
+
+    environment = _app_environment(config)
+    if environment not in {"development", "testing"} or config.get("ENV") == "production":
+        import logging
+
+        message = "DOCUMENT_SIGNATURES_DEV_TEST_MODE no puede habilitarse en produccion."
+        logging.getLogger(__name__).warning(message)
+        raise RuntimeError(message)
+
+    password = (config.get("DOCUMENT_SIGNATURES_DEV_KEY_PASSWORD") or "").strip()
+    if not password:
+        raise RuntimeError(
+            "DOCUMENT_SIGNATURES_DEV_KEY_PASSWORD es obligatorio cuando "
+            "DOCUMENT_SIGNATURES_DEV_TEST_MODE=true."
+        )
+
+
 class Config:
+    APP_ENV = os.getenv("FLASK_ENV", "development").lower()
     SECRET_KEY = os.getenv("SECRET_KEY", "labzeniso-dev-secret-key")
 
     SQLALCHEMY_DATABASE_URI = os.getenv(
@@ -184,12 +209,23 @@ class Config:
     )
     ONLYOFFICE_PDF_MAX_BYTES = _env_int("ONLYOFFICE_PDF_MAX_BYTES", 50 * 1024 * 1024)
     ONLYOFFICE_PDF_VALIDATE_PAGE_COUNT = _env_bool("ONLYOFFICE_PDF_VALIDATE_PAGE_COUNT", True)
-    DOCUMENT_SIGNATURES_ENABLED = _env_bool("DOCUMENT_SIGNATURES_ENABLED", False)
+    DOCUMENT_SIGNATURES_ENABLED = _env_bool("DOCUMENT_SIGNATURES_ENABLED", True)
     DOCUMENT_SIGNATURE_PROVIDER = os.getenv("DOCUMENT_SIGNATURE_PROVIDER", "external_controlled")
     DOCUMENT_SIGNATURE_VALIDATION_MODE = os.getenv("DOCUMENT_SIGNATURE_VALIDATION_MODE", "strict")
     DOCUMENT_SIGNATURE_TRUST_ROOTS_PATH = os.getenv("DOCUMENT_SIGNATURE_TRUST_ROOTS_PATH", "")
     DOCUMENT_SIGNATURE_ALLOWED_ISSUERS_PATH = os.getenv("DOCUMENT_SIGNATURE_ALLOWED_ISSUERS_PATH", "")
     DOCUMENT_SIGNATURE_TRUST_ROOTS_DIR = os.getenv("DOCUMENT_SIGNATURE_TRUST_ROOTS_DIR", "")
+    DOCUMENT_SIGNATURES_DEV_TEST_MODE = _env_bool("DOCUMENT_SIGNATURES_DEV_TEST_MODE", False)
+    DOCUMENT_SIGNATURES_DEV_CERT_DIR = os.getenv(
+        "DOCUMENT_SIGNATURES_DEV_CERT_DIR",
+        os.path.join("instance", "dev_signature_certificates"),
+    )
+    DOCUMENT_SIGNATURES_DEV_KEY_PASSWORD = os.getenv("DOCUMENT_SIGNATURES_DEV_KEY_PASSWORD", "")
+    DOCUMENT_SIGNATURES_DEV_APPEARANCE_PAGE = os.getenv("DOCUMENT_SIGNATURES_DEV_APPEARANCE_PAGE", "last")
+    DOCUMENT_SIGNATURES_DEV_LAYOUT_PROFILE = os.getenv("DOCUMENT_SIGNATURES_DEV_LAYOUT_PROFILE", "")
+    DOCUMENT_SIGNATURES_DEV_ELABORADOR_BOX = os.getenv("DOCUMENT_SIGNATURES_DEV_ELABORADOR_BOX", "")
+    DOCUMENT_SIGNATURES_DEV_REVISOR_BOX = os.getenv("DOCUMENT_SIGNATURES_DEV_REVISOR_BOX", "")
+    DOCUMENT_SIGNATURES_DEV_APROBADOR_BOX = os.getenv("DOCUMENT_SIGNATURES_DEV_APROBADOR_BOX", "")
     DOCUMENT_SIGNATURE_PROCESS_TTL_DAYS = _env_int("DOCUMENT_SIGNATURE_PROCESS_TTL_DAYS", 15)
     DOCUMENT_SIGNATURE_MAX_PDF_BYTES = _env_int("DOCUMENT_SIGNATURE_MAX_PDF_BYTES", 50 * 1024 * 1024)
     DOCUMENT_SIGNATURE_TESTING_ACCEPT_MARKER = os.getenv("DOCUMENT_SIGNATURE_TESTING_ACCEPT_MARKER", "")
@@ -202,14 +238,17 @@ class Config:
 
 
 class DevelopmentConfig(Config):
+    APP_ENV = "development"
     DEBUG = True
 
 
 class ProductionConfig(Config):
+    APP_ENV = "production"
     DEBUG = False
 
 
 class TestingConfig(Config):
+    APP_ENV = "testing"
     TESTING = True
     SQLALCHEMY_DATABASE_URI = os.getenv(
         "TEST_DATABASE_URL",

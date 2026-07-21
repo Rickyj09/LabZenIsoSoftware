@@ -4,7 +4,7 @@ import re
 from flask import Flask
 from flask_login import current_user
 
-from app.config import get_config, validate_onlyoffice_config
+from app.config import get_config, validate_document_signature_dev_config, validate_onlyoffice_config
 from app.extensions import db, migrate, login_manager
 
 
@@ -47,6 +47,7 @@ def create_app(config_overrides=None):
     if config_overrides:
         app.config.update(config_overrides)
     validate_onlyoffice_config(app.config)
+    validate_document_signature_dev_config(app.config)
     configure_sensitive_logging_redaction()
 
     db.init_app(app)
@@ -77,6 +78,11 @@ def register_template_context(app: Flask) -> None:
         def can(permission_code):
             return current_user_can(permission_code)
 
+        laboratory_name = None
+        if current_user.is_authenticated:
+            empresa = getattr(current_user, "empresa", None)
+            laboratory_name = (getattr(empresa, "nombre", None) or "").strip() or None
+
         pending_count = 0
         if (
             current_user.is_authenticated
@@ -88,13 +94,16 @@ def register_template_context(app: Flask) -> None:
             "documental_pending_count": pending_count,
             "document_state_label": etiqueta_estado_documental,
             "document_state_badge_class": clase_badge_estado_documental,
+            "laboratorio_nombre_actual": laboratory_name or "Laboratorio no configurado",
         }
 
 
 def register_cli(app: Flask) -> None:
     from app.cli.documentos import documentos_cli
+    from app.cli.firmas_dev import firmas_dev_cli
 
     app.cli.add_command(documentos_cli)
+    app.cli.add_command(firmas_dev_cli)
 
 
 def register_blueprints(app: Flask) -> None:
@@ -144,6 +153,9 @@ def register_blueprints(app: Flask) -> None:
 
     from app.web.routes.documentacion import bp as documentacion_bp
     app.register_blueprint(documentacion_bp)
+
+    from app.web.routes.documentacion_firmas import bp as documentacion_firmas_bp
+    app.register_blueprint(documentacion_firmas_bp)
 
     from app.web.routes.onlyoffice_integration import bp as onlyoffice_integration_bp
     app.register_blueprint(onlyoffice_integration_bp)

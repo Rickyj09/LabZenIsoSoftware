@@ -20,6 +20,7 @@ DEMO_DOCUMENTS = (
 
 DEMO_USERS = (
     ("calidad_demo", "Calidad", "Demo", "calidad_demo@labzen.local", "CALIDAD"),
+    ("revisor_documental", "Revisor", "Documental", "revisor.documental@labzen.test", "REVISOR_DOCUMENTAL"),
     ("tecnico_demo", "Técnico", "Demo", "tecnico_demo@labzen.local", "TECNICO"),
     ("consulta_demo", "Consulta", "Demo", "consulta_demo@labzen.local", "CONSULTA"),
 )
@@ -145,6 +146,7 @@ def seed_demo_documents(empresa_id=1):
     users = _get_or_create_demo_users(empresa_id)
     technician = users["tecnico_demo"]
     quality = users["calidad_demo"]
+    reviewer = users["revisor_documental"]
     created_documents = []
 
     def remember(document, was_created):
@@ -184,6 +186,8 @@ def seed_demo_documents(empresa_id=1):
         state="EN_REVISION",
         author_id=technician.id,
         changes="Versión demo enviada a revisión.",
+        revisado_por_id=reviewer.id,
+        aprobado_por_id=quality.id,
         fecha_envio_revision=_now(),
         comentario_revision="Documento demo listo para revisión.",
     )

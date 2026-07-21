@@ -2,18 +2,24 @@ from datetime import datetime, timezone
 
 from app.extensions import db
 from app.models.documentos import DocumentoAprobacion, DocumentoVersion
+from app.security.permissions import user_has_permission
 from app.services.document_versioning_service import (
     DocumentVersioningError,
     approve_version as apply_approval,
     get_current_version,
     get_preparation_version,
+    validate_document_responsibles,
 )
 from app.services.onlyoffice_document_edit_service import has_blocking_edit
 from app.services.document_snapshot_service import DocumentSnapshotError, DocumentSnapshotService
+from app.services.document_attachment_service import DocumentAttachmentService
 
 
 class DocumentWorkflowError(DocumentVersioningError):
     pass
+
+
+ADMIN_PERMISSION = "documentos.ver_historial"
 
 
 def _now():
@@ -34,6 +40,31 @@ def _validate_context(documento, version_doc, usuario):
         raise DocumentWorkflowError("El usuario no pertenece a la empresa del documento.")
     if version_doc.documento_id != documento.id or version_doc.empresa_id != documento.empresa_id:
         raise DocumentWorkflowError("La version no pertenece al documento o empresa indicados.")
+
+
+def _is_admin(usuario):
+    return user_has_permission(usuario, ADMIN_PERMISSION)
+
+
+def _validate_assigned_reviewer(documento, version_doc, usuario):
+    if not version_doc.revisado_por_id:
+        raise DocumentWorkflowError("La version no tiene revisor asignado.")
+    if int(version_doc.revisado_por_id) != int(usuario.id):
+        raise DocumentWorkflowError("Solo el revisor asignado puede ejecutar esta accion.")
+    if version_doc.elaborado_por_id and int(version_doc.elaborado_por_id) == int(usuario.id):
+        raise DocumentWorkflowError("El elaborador no puede revisar su propio documento.")
+    if documento.elaborado_por_id and int(documento.elaborado_por_id) == int(usuario.id):
+        raise DocumentWorkflowError("El elaborador no puede revisar su propio documento.")
+
+
+def _validate_assigned_approver(version_doc, usuario):
+    if version_doc.revisado_por_id and int(version_doc.revisado_por_id) == int(usuario.id):
+        raise DocumentWorkflowError("El revisor tecnico no puede aprobar finalmente el mismo documento.")
+    if version_doc.aprobado_por_id and int(version_doc.aprobado_por_id) == int(usuario.id):
+        return
+    if _is_admin(usuario):
+        return
+    raise DocumentWorkflowError("Solo el aprobador asignado o un usuario administrativo puede ejecutar esta accion.")
 
 
 def record_document_event(
@@ -101,8 +132,18 @@ def send_for_review(
         raise DocumentWorkflowError(
             "El documento esta abierto para edicion. Guarda y cierra la sesion antes de continuar."
         )
+    try:
+        validate_document_responsibles(
+            empresa_id=documento.empresa_id,
+            elaborado_por_id=version_doc.elaborado_por_id,
+            revisado_por_id=version_doc.revisado_por_id,
+            aprobado_por_id=version_doc.aprobado_por_id,
+        )
+    except DocumentVersioningError as exc:
+        raise DocumentWorkflowError(str(exc)) from exc
 
     snapshot_service = DocumentSnapshotService()
+    attachment_service = DocumentAttachmentService()
     try:
         snapshot = snapshot_service.create_review_snapshot(
             documento=documento,
@@ -113,6 +154,10 @@ def send_for_review(
         )
     except DocumentSnapshotError as exc:
         raise DocumentWorkflowError(str(exc)) from exc
+    snapshot.metadata_json = {
+        **(snapshot.metadata_json or {}),
+        "anexos": attachment_service.attachment_hash_manifest(version_doc),
+    }
 
     previous_state = version_doc.estado
     version_doc.estado = "EN_REVISION"
@@ -134,11 +179,84 @@ def send_for_review(
     return event
 
 
+def mark_review_conformity(*, documento, version_doc, usuario, comentario=None, ip=None, user_agent=None):
+    _validate_context(documento, version_doc, usuario)
+    _validate_assigned_reviewer(documento, version_doc, usuario)
+    if version_doc.estado != "EN_REVISION":
+        raise DocumentWorkflowError("Solo una version en revision puede recibir conformidad.")
+    if version_doc.id != getattr(get_preparation_version(documento), "id", None):
+        raise DocumentWorkflowError("La version seleccionada no es la preparacion activa.")
+
+    previous_state = version_doc.estado
+    now = _now()
+    version_doc.revisado_por_id = usuario.id
+    version_doc.fecha_revision = now
+    version_doc.comentario_revision = (comentario or "").strip() or None
+    version_doc.estado = "EN_APROBACION"
+    documento.estado = "EN_APROBACION"
+    return record_document_event(
+        documento=documento,
+        version_doc=version_doc,
+        usuario=usuario,
+        accion="DAR_CONFORMIDAD",
+        estado_anterior=previous_state,
+        estado_nuevo=version_doc.estado,
+        comentario=comentario,
+        ip=ip,
+        user_agent=user_agent,
+    )
+
+
+def request_review_corrections(*, documento, version_doc, usuario, comentario, ip=None, user_agent=None):
+    comment = _require_comment(comentario, "El comentario de correccion es obligatorio.")
+    _validate_context(documento, version_doc, usuario)
+    _validate_assigned_reviewer(documento, version_doc, usuario)
+    if version_doc.estado != "EN_REVISION":
+        raise DocumentWorkflowError("Solo una version en revision puede solicitar correcciones.")
+    if version_doc.id != getattr(get_preparation_version(documento), "id", None):
+        raise DocumentWorkflowError("La version seleccionada no es la preparacion activa.")
+
+    snapshot_service = DocumentSnapshotService()
+    try:
+        rejected_snapshot = snapshot_service.create_rejection_marker(
+            documento=documento,
+            version_doc=version_doc,
+            usuario=usuario,
+            comentario=comment,
+        )
+    except DocumentSnapshotError as exc:
+        raise DocumentWorkflowError(str(exc)) from exc
+
+    previous_state = version_doc.estado
+    version_doc.estado = "RECHAZADO"
+    version_doc.fecha_rechazo = _now()
+    version_doc.rechazado_por_id = usuario.id
+    version_doc.comentario_rechazo = comment
+    documento.estado = "APROBADO" if get_current_version(documento) else "RECHAZADO"
+    event = record_document_event(
+        documento=documento,
+        version_doc=version_doc,
+        usuario=usuario,
+        accion="SOLICITAR_CORRECCIONES",
+        estado_anterior=previous_state,
+        estado_nuevo=version_doc.estado,
+        comentario=comment,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    snapshot_service.attach_event(rejected_snapshot, event)
+    return event
+
+
 def approve_version(*, documento, version_doc, usuario, comentario=None, ip=None, user_agent=None):
     _validate_context(documento, version_doc, usuario)
+    _validate_assigned_approver(version_doc, usuario)
+    if version_doc.estado != "EN_APROBACION":
+        raise DocumentWorkflowError("Solo una version en aprobacion puede aprobarse.")
     previous_state = version_doc.estado
     previous_current = get_current_version(documento)
     snapshot_service = DocumentSnapshotService()
+    attachment_service = DocumentAttachmentService()
     try:
         approved_snapshot = snapshot_service.create_approved_snapshot(
             documento=documento,
@@ -156,8 +274,8 @@ def approve_version(*, documento, version_doc, usuario, comentario=None, ip=None
         )
     except DocumentVersioningError as exc:
         raise DocumentWorkflowError(str(exc)) from exc
+    attachment_service.approve_attachments(version_doc=version_doc, usuario=usuario)
 
-    version_doc.revisado_por_id = version_doc.revisado_por_id or usuario.id
     version_doc.comentario_aprobacion = (comentario or "").strip() or None
     approval_event = record_document_event(
         documento=documento,
@@ -189,8 +307,9 @@ def approve_version(*, documento, version_doc, usuario, comentario=None, ip=None
 def reject_version(*, documento, version_doc, usuario, comentario, ip=None, user_agent=None):
     comment = _require_comment(comentario, "El comentario de rechazo es obligatorio.")
     _validate_context(documento, version_doc, usuario)
-    if version_doc.estado != "EN_REVISION":
-        raise DocumentWorkflowError("Solo una version en revision puede rechazarse.")
+    _validate_assigned_approver(version_doc, usuario)
+    if version_doc.estado != "EN_APROBACION":
+        raise DocumentWorkflowError("Solo una version en aprobacion puede rechazarse.")
     if version_doc.id != getattr(get_preparation_version(documento), "id", None):
         raise DocumentWorkflowError("La version seleccionada no es la preparacion activa.")
 
@@ -209,14 +328,13 @@ def reject_version(*, documento, version_doc, usuario, comentario, ip=None, user
     version_doc.estado = "RECHAZADO"
     version_doc.fecha_rechazo = _now()
     version_doc.rechazado_por_id = usuario.id
-    version_doc.revisado_por_id = version_doc.revisado_por_id or usuario.id
     version_doc.comentario_rechazo = comment
     documento.estado = "APROBADO" if get_current_version(documento) else "RECHAZADO"
     event = record_document_event(
         documento=documento,
         version_doc=version_doc,
         usuario=usuario,
-        accion="RECHAZAR",
+        accion="RECHAZAR_APROBACION",
         estado_anterior=previous_state,
         estado_nuevo=version_doc.estado,
         comentario=comment,

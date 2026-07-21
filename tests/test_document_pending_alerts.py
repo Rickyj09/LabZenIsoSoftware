@@ -16,7 +16,11 @@ from app.services.document_pending_service import (
     get_pending_documents_for_user,
     user_has_document_pending_alert,
 )
-from app.services.document_workflow_service import approve_version, reject_version
+from app.services.document_workflow_service import (
+    approve_version,
+    mark_review_conformity,
+    request_review_corrections,
+)
 from app.services.document_workflow_service import send_for_review
 from app.services.storage_service import apply_stored_file_metadata, store_document_file
 from werkzeug.datastructures import FileStorage
@@ -59,7 +63,7 @@ class DocumentPendingAlertTest(unittest.TestCase):
             Usuario(id=205, empresa_id=101, nombre="Calidad", apellido="Alterna", email="quality-alt@pending", username="quality-alt", password_hash="x", activo=True),
         ])
         permissions = {}
-        for offset, suffix in enumerate(("ver", "aprobar", "rechazar", "ver_pendientes"), start=1):
+        for offset, suffix in enumerate(("ver", "aprobar", "rechazar", "ver_pendientes", "revisar"), start=1):
             permission = Permiso(id=1000 + offset, codigo=f"documentos.{suffix}", nombre=suffix, modulo="documentos")
             permissions[suffix] = permission
             db.session.add(permission)
@@ -88,7 +92,15 @@ class DocumentPendingAlertTest(unittest.TestCase):
         self.context.pop()
         self.temp_directory.cleanup()
 
-    def add_version(self, item_id, state, *, company_id=101, assigned_to=None):
+    def add_version(self, item_id, state, *, company_id=101, assigned_to=None, author_id=None, approver_id=None):
+        default_author_id = 202 if company_id == 101 else 203
+        author_id = author_id or default_author_id
+        reviewer_id = assigned_to if state == "EN_REVISION" else None
+        if state == "EN_REVISION" and reviewer_id is None:
+            reviewer_id = 201 if company_id == 101 else 203
+        approval_user_id = approver_id if state == "EN_APROBACION" else None
+        if state == "EN_APROBACION" and approval_user_id is None:
+            approval_user_id = 201 if company_id == 101 else 203
         document = Documento(
             id=item_id,
             empresa_id=company_id,
@@ -97,7 +109,7 @@ class DocumentPendingAlertTest(unittest.TestCase):
             tipo_documento="PROCEDIMIENTO",
             estado=state,
             version_actual="1",
-            elaborado_por_id=201 if company_id == 101 else 203,
+            elaborado_por_id=author_id,
         )
         version = DocumentoVersion(
             id=item_id + 1000,
@@ -105,8 +117,9 @@ class DocumentPendingAlertTest(unittest.TestCase):
             documento_id=item_id,
             version="1",
             estado=state,
-            elaborado_por_id=201 if company_id == 101 else 203,
-            revisado_por_id=assigned_to,
+            elaborado_por_id=author_id,
+            revisado_por_id=reviewer_id,
+            aprobado_por_id=approval_user_id,
         )
         db.session.add_all([document, version])
         db.session.commit()
@@ -145,10 +158,12 @@ class DocumentPendingAlertTest(unittest.TestCase):
             version=version.version,
         )
         apply_stored_file_metadata(version, stored)
+        version.revisado_por_id = 201
+        version.aprobado_por_id = 205
         send_for_review(
             documento=document,
             version_doc=version,
-            usuario=db.session.get(Usuario, 201),
+            usuario=db.session.get(Usuario, 202),
             resumen_cambios="Listo",
             hojas_modificadas="No aplica",
         )
@@ -215,17 +230,28 @@ class DocumentPendingAlertTest(unittest.TestCase):
         quality = db.session.get(Usuario, 201)
         self.assertEqual(count_pending_documents_for_user(quality), 1)
 
-        approve_version(documento=document, version_doc=version, usuario=quality)
+        mark_review_conformity(
+            documento=document,
+            version_doc=version,
+            usuario=quality,
+            comentario="Conforme",
+        )
+        version.aprobado_por_id = 205
+        db.session.commit()
+        approver = db.session.get(Usuario, 205)
+        self.assertEqual(count_pending_documents_for_user(quality), 0)
+        self.assertEqual(count_pending_documents_for_user(approver), 1)
+        approve_version(documento=document, version_doc=version, usuario=approver)
         db.session.commit()
 
-        self.assertEqual(count_pending_documents_for_user(quality), 0)
+        self.assertEqual(count_pending_documents_for_user(approver), 0)
 
     def test_alert_disappears_after_rejection(self):
         document, version = self.add_review_version_with_snapshot(311)
         quality = db.session.get(Usuario, 201)
         self.assertEqual(count_pending_documents_for_user(quality), 1)
 
-        reject_version(
+        request_review_corrections(
             documento=document,
             version_doc=version,
             usuario=quality,
