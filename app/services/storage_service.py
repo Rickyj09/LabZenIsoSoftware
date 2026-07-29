@@ -537,6 +537,117 @@ def store_signed_pdf_artifact_copy(
     )
 
 
+def store_publication_qr_copy(*, source_path: Path, documento, version_doc, public_id: str) -> StoredPdfArtifactFile:
+    if source_path.is_symlink() or not source_path.is_file():
+        raise DocumentStorageError("El QR temporal no existe.")
+    source_sha256, source_size = file_digest_and_size(source_path)
+    if source_size <= 0:
+        raise DocumentStorageError("El QR generado esta vacio.")
+
+    relative_directory = Path(
+        f"empresa_{int(documento.empresa_id)}",
+        f"documento_{int(documento.id)}",
+        f"v{_safe_version(getattr(version_doc, 'version', version_doc.id))}",
+        "publicacion",
+    )
+    destination_directory = (_storage_root() / relative_directory).resolve()
+    destination_directory.mkdir(parents=True, exist_ok=True)
+    if os.path.commonpath([str(_storage_root()), str(destination_directory)]) != str(_storage_root()):
+        raise DocumentStorageError("La ruta de QR no es valida.")
+
+    safe_public_id = slugify_filename_part(public_id, max_length=80) or uuid4().hex
+    stored_name = f"qr-{safe_public_id}-{source_sha256[:12]}.png"
+    destination = (destination_directory / stored_name).resolve()
+    if os.path.commonpath([str(_storage_root()), str(destination)]) != str(_storage_root()):
+        raise DocumentStorageError("La ruta del QR no es valida.")
+    if destination.exists():
+        raise DocumentStorageError("Ya existe un QR con la misma ruta.")
+
+    temporary = (destination_directory / f".qr-{uuid4().hex}.tmp").resolve()
+    try:
+        shutil.copyfile(source_path, temporary, follow_symlinks=False)
+        copied_sha256, copied_size = file_digest_and_size(temporary)
+        if copied_sha256 != source_sha256 or copied_size != source_size:
+            raise DocumentStorageError("El hash del QR copiado no coincide con el origen.")
+        os.replace(temporary, destination)
+        try:
+            destination.chmod(0o444)
+        except OSError:
+            current_app.logger.debug("No se pudo marcar QR como solo lectura: %s", stored_name)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
+        raise
+
+    return StoredPdfArtifactFile(
+        stored_name=stored_name,
+        storage_path=(relative_directory / stored_name).as_posix(),
+        mime_type="image/png",
+        size=source_size,
+        sha256=source_sha256,
+    )
+
+
+def store_qr_pdf_artifact_copy(
+    *,
+    source_path: Path,
+    documento,
+    version_doc,
+    source_artifact,
+    expected_sha256: str | None = None,
+) -> StoredPdfArtifactFile:
+    if source_path.is_symlink() or not source_path.is_file():
+        raise DocumentStorageError("El PDF con QR temporal no existe.")
+    source_sha256, source_size = file_digest_and_size(source_path)
+    if expected_sha256 and source_sha256 != expected_sha256:
+        raise DocumentStorageError("El hash del PDF con QR no coincide con la validacion previa.")
+
+    relative_directory = Path(
+        f"empresa_{int(documento.empresa_id)}",
+        f"documento_{int(documento.id)}",
+        f"v{_safe_version(getattr(version_doc, 'version', version_doc.id))}",
+        "pdf",
+        "publicacion",
+    )
+    destination_directory = (_storage_root() / relative_directory).resolve()
+    destination_directory.mkdir(parents=True, exist_ok=True)
+    if os.path.commonpath([str(_storage_root()), str(destination_directory)]) != str(_storage_root()):
+        raise DocumentStorageError("La ruta de PDF con QR no es valida.")
+
+    source_hash = _safe_hash_part(getattr(source_artifact, "archivo_sha256", ""))[:12]
+    pdf_hash = _safe_hash_part(source_sha256)[:12]
+    stored_name = f"aprobado-con-qr-{source_hash}-{pdf_hash}.pdf"
+    destination = (destination_directory / stored_name).resolve()
+    if os.path.commonpath([str(_storage_root()), str(destination)]) != str(_storage_root()):
+        raise DocumentStorageError("La ruta del PDF con QR no es valida.")
+    if destination.exists():
+        raise DocumentStorageError("Ya existe un PDF con QR en la ruta destino.")
+
+    temporary = (destination_directory / f".pdf-qr-{uuid4().hex}.tmp").resolve()
+    try:
+        shutil.copyfile(source_path, temporary, follow_symlinks=False)
+        copied_sha256, copied_size = file_digest_and_size(temporary)
+        if copied_sha256 != source_sha256 or copied_size != source_size:
+            raise DocumentStorageError("El hash del PDF con QR copiado no coincide con el origen.")
+        os.replace(temporary, destination)
+        try:
+            destination.chmod(0o444)
+        except OSError:
+            current_app.logger.debug("No se pudo marcar PDF con QR como solo lectura: %s", stored_name)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
+        raise
+
+    return StoredPdfArtifactFile(
+        stored_name=stored_name,
+        storage_path=(relative_directory / stored_name).as_posix(),
+        mime_type="application/pdf",
+        size=source_size,
+        sha256=source_sha256,
+    )
+
+
 def delete_pdf_artifact_file(storage_path: str | None) -> None:
     if not storage_path:
         return

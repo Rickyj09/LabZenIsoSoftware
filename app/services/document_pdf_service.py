@@ -19,6 +19,7 @@ from app.models.documentos import (
     ARTEFACTO_DISPONIBLE,
     ARTEFACTO_ERROR,
     ARTEFACTO_PDF_APROBADO,
+    ARTEFACTO_PDF_APROBADO_CON_QR,
     ARTEFACTO_PENDIENTE,
     CONVERSION_COMPLETADA,
     CONVERSION_EN_PROCESO,
@@ -393,9 +394,9 @@ class DocumentPdfService:
         if b"/Encrypt" in data:
             raise DocumentPdfError("PDF cifrado no permitido.")
         active_markers = {
-            "javascript": b"/JavaScript" in data or b"/JS" in data,
-            "open_action": b"/OpenAction" in data or b"/AA" in data,
-            "embedded_files": b"/EmbeddedFile" in data,
+            "javascript": bool(re.search(br"/(?:JavaScript|JS)\b", data)),
+            "open_action": bool(re.search(br"/(?:OpenAction|AA)\b", data)),
+            "embedded_files": bool(re.search(br"/EmbeddedFile\b", data)),
             "forms": (not allow_signature_forms) and b"/AcroForm" in data,
         }
         if any(active_markers.values()):
@@ -457,7 +458,7 @@ class DocumentPdfService:
         return artifact
 
     def validate_artifact_file(self, artifact):
-        if artifact.estado != ARTEFACTO_DISPONIBLE or artifact.tipo != ARTEFACTO_PDF_APROBADO:
+        if artifact.estado != ARTEFACTO_DISPONIBLE or artifact.tipo not in (ARTEFACTO_PDF_APROBADO, ARTEFACTO_PDF_APROBADO_CON_QR):
             raise DocumentPdfError("Artefacto PDF no disponible.")
         if not artifact.inmutable or not artifact.storage_path:
             raise DocumentPdfError("Artefacto PDF no es inmutable.")

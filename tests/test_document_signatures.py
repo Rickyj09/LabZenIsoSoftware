@@ -25,6 +25,7 @@ from app.models.base import BaseModel
 from app.models.documentos import (
     ARTEFACTO_DISPONIBLE,
     ARTEFACTO_PDF_APROBADO,
+    ARTEFACTO_PDF_APROBADO_CON_QR,
     ARTEFACTO_PDF_FIRMADO_FINAL,
     ARTEFACTO_PDF_FIRMADO_PARCIAL,
     ESTADO_APROBADO,
@@ -770,18 +771,20 @@ class DocumentSignatureTest(unittest.TestCase):
         self.assertNotIn("Firmar con certificado de prueba", hidden_response.get_data(as_text=True))
         self.assertEqual(disabled_route.status_code, 404)
 
-    def test_dev_signature_preview_does_not_sign_or_create_artifacts(self):
+    def test_dev_signature_preview_prepares_qr_without_signing_or_duplication(self):
         self.enable_dev_signature_mode()
         self.make_current_version_visible_in_detail()
         before_processes = DocumentoFirmaProceso.query.count()
-        before_artifacts = DocumentoArtefacto.query.count()
+        before_qr_artifacts = DocumentoArtefacto.query.filter_by(tipo=ARTEFACTO_PDF_APROBADO_CON_QR).count()
 
         client = self.login(201)
         detail = client.get("/documentacion/501")
-        response = client.get("/documentacion/501/firmas-dev/vista-previa")
+        response = client.get("/documentacion/501/firmas-dev/vista-previa", follow_redirects=True)
+        second_response = client.get("/documentacion/501/firmas-dev/vista-previa", follow_redirects=True)
 
-        self.assertIn("Vista previa de ubicaci", detail.get_data(as_text=True))
+        self.assertIn("Vista previa de QR y firmas", detail.get_data(as_text=True))
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
         self.assertEqual(response.mimetype, "application/pdf")
         from pyhanko.pdf_utils.reader import PdfFileReader
 
@@ -790,7 +793,10 @@ class DocumentSignatureTest(unittest.TestCase):
         self.assertIn(b"PREVISUALIZACION", response.get_data())
         self.assertIn(b"SIN FIRMAS", response.get_data())
         self.assertEqual(DocumentoFirmaProceso.query.count(), before_processes)
-        self.assertEqual(DocumentoArtefacto.query.count(), before_artifacts)
+        self.assertEqual(
+            DocumentoArtefacto.query.filter_by(tipo=ARTEFACTO_PDF_APROBADO_CON_QR).count(),
+            before_qr_artifacts + 1,
+        )
 
         self.app.config["DOCUMENT_SIGNATURES_DEV_TEST_MODE"] = False
         disabled = client.get("/documentacion/501/firmas-dev/vista-previa")

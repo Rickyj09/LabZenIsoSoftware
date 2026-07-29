@@ -69,6 +69,12 @@ from app.services.storage_service import (
     validate_document_file,
 )
 from app.services.document_pending_service import get_pending_documents_for_user
+from app.services.document_distribution_service import DocumentDistributionService
+from app.services.document_publication_service import (
+    DocumentPublicationError,
+    DocumentPublicationService,
+    PUBLISH_PERMISSION,
+)
 from app.services.document_dashboard_service import get_document_dashboard_stats
 from app.services.document_explorer_service import DocumentExplorerError, DocumentExplorerService
 from app.services.document_folder_service import (
@@ -671,6 +677,12 @@ def detalle(item_id):
     snapshots = DocumentSnapshotService().list_snapshots(documento=item) if can_view_history else []
     anexos_version_mostrada = list_active_attachments(version_mostrada) if version_mostrada else []
     pdf_service = DocumentPdfService()
+    publication_service = DocumentPublicationService()
+    distribution_service = DocumentDistributionService()
+    publication = publication_service.latest_publication_for_document(item)
+    version_publication = publication_service.publication_for_version(version_vigente) if version_vigente else None
+    active_publication = publication_service.active_publication_for_document(item)
+    distribution_recipients = distribution_service.active_recipients(item)
     pdf_artifact = pdf_service.available_artifact_for_version(version_vigente) if version_vigente else None
     pdf_conversion = pdf_service.latest_conversion_for_version(version_vigente) if version_vigente else None
     signature_service = DocumentSignatureService()
@@ -784,6 +796,19 @@ def detalle(item_id):
         can_start_signature=can_start_signature,
         start_signature_permission=START_SIGNATURE_PERMISSION,
         manage_signature_identity_permission=SIGNATURE_IDENTITY_PERMISSION,
+        publication=publication,
+        version_publication=version_publication,
+        active_publication=active_publication,
+        distribution_recipients=distribution_recipients,
+        can_publish_current=bool(
+            version_vigente
+            and item.estado == "APROBADO"
+            and version_vigente.estado == "APROBADO"
+            and signature_process
+            and signature_process.estado == FIRMA_PROCESO_COMPLETADO
+            and signature_process.pdf_final
+            and current_user_can(PUBLISH_PERMISSION)
+        ),
     )
 
 
@@ -1526,6 +1551,12 @@ def vista_previa_firmas_dev(item_id):
     version = item.version_vigente
     if not version:
         abort(404)
+    if item.estado == "APROBADO" and version.estado == "APROBADO":
+        return redirect(url_for(
+            "documentacion.vista_previa_qr_firmas",
+            item_id=item.id,
+            version_id=version.id,
+        ))
     artifact = DocumentPdfService().available_artifact_for_version(version)
     if not artifact or artifact.documento_id != item.id or artifact.empresa_id != current_user.empresa_id:
         abort(404)
@@ -1542,6 +1573,46 @@ def vista_previa_firmas_dev(item_id):
         preview_path,
         as_attachment=True,
         download_name=f"{item.codigo}-vista-previa-firmas-dev.pdf",
+        mimetype="application/pdf",
+        conditional=False,
+    )
+    response.call_on_close(lambda: preview_path.unlink(missing_ok=True))
+    return response
+
+
+@bp.route("/<int:item_id>/versiones/<int:version_id>/publicacion/vista-previa-qr-firmas")
+@login_required
+@require_permission("documentos.ver")
+def vista_previa_qr_firmas(item_id, version_id):
+    if not dev_signature_mode_enabled(current_app):
+        abort(404)
+    item = Documento.query.filter_by(id=item_id, empresa_id=current_user.empresa_id).first_or_404()
+    version = DocumentoVersion.query.filter_by(
+        id=version_id,
+        documento_id=item.id,
+        empresa_id=current_user.empresa_id,
+    ).first_or_404()
+    if item.estado != "APROBADO" or version.estado != "APROBADO":
+        abort(404)
+    try:
+        prepared = DocumentPublicationService(current_app).prepare_publication_for_signature(
+            documento=item,
+            version_doc=version,
+            usuario=current_user,
+        )
+        physical_path = DocumentPdfService().validate_artifact_file(prepared.artifact)
+        preview_path = DocumentSignatureDevCertificateService(current_app).preview_signature_locations(
+            physical_path,
+            documento=item,
+        )
+    except (DocumentPublicationError, DocumentPdfError, DocumentSignatureDevError) as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("documentacion.detalle", item_id=item.id))
+
+    response = send_file(
+        preview_path,
+        as_attachment=True,
+        download_name=f"{item.codigo}-vista-previa-qr-firmas.pdf",
         mimetype="application/pdf",
         conditional=False,
     )

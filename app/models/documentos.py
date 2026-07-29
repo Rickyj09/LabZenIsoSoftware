@@ -7,6 +7,7 @@ ESTADO_EN_ACTUALIZACION = "EN_ACTUALIZACION"
 ESTADO_EN_REVISION = "EN_REVISION"
 ESTADO_EN_APROBACION = "EN_APROBACION"
 ESTADO_APROBADO = "APROBADO"
+ESTADO_VIGENTE = "VIGENTE"
 ESTADO_RECHAZADO = "RECHAZADO"
 ESTADO_OBSOLETO = "OBSOLETO"
 ESTADO_SUSTITUIDO = "SUSTITUIDO"
@@ -17,6 +18,7 @@ ESTADOS_DOCUMENTO = (
     ESTADO_EN_REVISION,
     ESTADO_EN_APROBACION,
     ESTADO_APROBADO,
+    ESTADO_VIGENTE,
     ESTADO_RECHAZADO,
     ESTADO_OBSOLETO,
 )
@@ -27,6 +29,7 @@ ESTADOS_VERSION_DOCUMENTO = (
     ESTADO_EN_REVISION,
     ESTADO_EN_APROBACION,
     ESTADO_APROBADO,
+    ESTADO_VIGENTE,
     ESTADO_RECHAZADO,
     ESTADO_OBSOLETO,
     ESTADO_SUSTITUIDO,
@@ -43,6 +46,15 @@ ACCIONES_EVENTO_DOCUMENTO = (
     "DEVOLVER_BORRADOR",
     "OBSOLETAR",
     "SUSTITUIR_VERSION",
+    "PUBLICAR_VIGENTE",
+    "VERSION_ANTERIOR_OBSOLETA",
+    "PUBLICACION_PREPARADA",
+    "QR_GENERADO",
+    "PDF_QR_GENERADO",
+    "DISTRIBUCION_ENCOLADA",
+    "PUBLICACION_CONSULTADA",
+    "PDF_VIGENTE_DESCARGADO",
+    "PUBLICACION_REVOCADA",
 )
 
 ESTADO_EDICION_ACTIVA = "ACTIVA"
@@ -96,11 +108,13 @@ ESTADOS_DOCUMENTO_SNAPSHOT = (
 )
 
 ARTEFACTO_PDF_APROBADO = "PDF_APROBADO"
+ARTEFACTO_PDF_APROBADO_CON_QR = "PDF_APROBADO_CON_QR"
 ARTEFACTO_PDF_FIRMADO_PARCIAL = "PDF_FIRMADO_PARCIAL"
 ARTEFACTO_PDF_FIRMADO_FINAL = "PDF_FIRMADO_FINAL"
 
 TIPOS_DOCUMENTO_ARTEFACTO = (
     ARTEFACTO_PDF_APROBADO,
+    ARTEFACTO_PDF_APROBADO_CON_QR,
     ARTEFACTO_PDF_FIRMADO_PARCIAL,
     ARTEFACTO_PDF_FIRMADO_FINAL,
 )
@@ -211,6 +225,48 @@ FIRMA_EVENTO_DEV_SIGNATURE_REQUESTED = "DEV_TEST_SIGNATURE_REQUESTED"
 FIRMA_EVENTO_DEV_SIGNATURE_VALIDATED = "DEV_TEST_SIGNATURE_VALIDATED"
 FIRMA_EVENTO_DEV_SIGNATURE_REJECTED = "DEV_TEST_SIGNATURE_REJECTED"
 
+PUBLICACION_PREPARADA = "PREPARADA"
+PUBLICACION_ACTIVA = "ACTIVA"
+PUBLICACION_OBSOLETA = "OBSOLETA"
+PUBLICACION_REVOCADA = "REVOCADA"
+
+ESTADOS_DOCUMENTO_PUBLICACION = (
+    PUBLICACION_PREPARADA,
+    PUBLICACION_ACTIVA,
+    PUBLICACION_OBSOLETA,
+    PUBLICACION_REVOCADA,
+)
+
+PUBLICACION_ACCESO_AUTENTICADO = "AUTENTICADO"
+PUBLICACION_ACCESO_TOKEN_PUBLICO = "TOKEN_PUBLICO"
+
+MODOS_ACCESO_DOCUMENTO_PUBLICACION = (
+    PUBLICACION_ACCESO_AUTENTICADO,
+    PUBLICACION_ACCESO_TOKEN_PUBLICO,
+)
+
+DISTRIBUCION_TIPO_INTERNO = "INTERNO"
+DISTRIBUCION_TIPO_EXTERNO = "EXTERNO"
+
+TIPOS_DISTRIBUCION_DESTINATARIO = (
+    DISTRIBUCION_TIPO_INTERNO,
+    DISTRIBUCION_TIPO_EXTERNO,
+)
+
+ENTREGA_PENDIENTE = "PENDIENTE"
+ENTREGA_PROCESANDO = "PROCESANDO"
+ENTREGA_ENVIADO = "ENVIADO"
+ENTREGA_FALLIDO = "FALLIDO"
+ENTREGA_OMITIDO = "OMITIDO"
+
+ESTADOS_DISTRIBUCION_ENTREGA = (
+    ENTREGA_PENDIENTE,
+    ENTREGA_PROCESANDO,
+    ENTREGA_ENVIADO,
+    ENTREGA_FALLIDO,
+    ENTREGA_OMITIDO,
+)
+
 TIPOS_FIRMA_EVENTO = (
     FIRMA_EVENTO_PROCESO_CREADO,
     FIRMA_EVENTO_PASO_HABILITADO,
@@ -235,6 +291,7 @@ ESTADO_DOCUMENTO_LABELS = {
     ESTADO_EN_ELABORACION: "EN ELABORACIÓN",
     ESTADO_EN_REVISION: "EN REVISIÓN",
     ESTADO_APROBADO: "APROBADO",
+    ESTADO_VIGENTE: "VIGENTE",
     ESTADO_RECHAZADO: "RECHAZADO",
     ESTADO_OBSOLETO: "OBSOLETO",
     ESTADO_SUSTITUIDO: "SUSTITUIDO",
@@ -246,6 +303,7 @@ ESTADO_DOCUMENTO_BADGE_CLASSES = {
     ESTADO_EN_ELABORACION: "bg-secondary",
     ESTADO_EN_REVISION: "bg-warning text-dark",
     ESTADO_APROBADO: "bg-success",
+    ESTADO_VIGENTE: "bg-success",
     ESTADO_RECHAZADO: "bg-danger",
     ESTADO_OBSOLETO: "bg-danger",
     ESTADO_SUSTITUIDO: "bg-dark",
@@ -299,7 +357,7 @@ class Documento(TenantMixin, BaseModel):
     __table_args__ = (
         db.UniqueConstraint("empresa_id", "codigo", name="uq_documentos_empresa_codigo"),
         db.CheckConstraint(
-            "estado IN ('EN_ELABORACION', 'EN_ACTUALIZACION', 'EN_REVISION', 'EN_APROBACION', 'APROBADO', 'RECHAZADO', 'OBSOLETO')",
+            "estado IN ('EN_ELABORACION', 'EN_ACTUALIZACION', 'EN_REVISION', 'EN_APROBACION', 'APROBADO', 'VIGENTE', 'RECHAZADO', 'OBSOLETO')",
             name="ck_documentos_estado_valido",
         ),
         db.Index("ix_documentos_carpeta_id", "carpeta_id"),
@@ -349,7 +407,7 @@ class DocumentoVersion(TenantMixin, BaseModel):
     __table_args__ = (
         db.UniqueConstraint("documento_id", "version", name="uq_documento_version_numero"),
         db.CheckConstraint(
-            "estado IN ('EN_ELABORACION', 'EN_ACTUALIZACION', 'EN_REVISION', 'EN_APROBACION', 'APROBADO', 'RECHAZADO', 'OBSOLETO', 'SUSTITUIDO')",
+            "estado IN ('EN_ELABORACION', 'EN_ACTUALIZACION', 'EN_REVISION', 'EN_APROBACION', 'APROBADO', 'VIGENTE', 'RECHAZADO', 'OBSOLETO', 'SUSTITUIDO')",
             name="ck_documento_versiones_estado_valido",
         ),
         db.Index("ix_documento_versiones_documento_id", "documento_id"),
@@ -388,6 +446,8 @@ class DocumentoVersion(TenantMixin, BaseModel):
     fecha_envio_revision = db.Column(db.DateTime(timezone=True), nullable=True)
     fecha_rechazo = db.Column(db.DateTime(timezone=True), nullable=True)
     fecha_obsolescencia = db.Column(db.DateTime(timezone=True), nullable=True)
+    vigente_desde = db.Column(db.DateTime(timezone=True), nullable=True)
+    publicado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
     comentario_revision = db.Column(db.Text)
     comentario_aprobacion = db.Column(db.Text)
     comentario_rechazo = db.Column(db.Text)
@@ -406,6 +466,7 @@ class DocumentoVersion(TenantMixin, BaseModel):
     aprobado_por = db.relationship("Usuario", foreign_keys=[aprobado_por_id])
     rechazado_por = db.relationship("Usuario", foreign_keys=[rechazado_por_id])
     obsoletado_por = db.relationship("Usuario", foreign_keys=[obsoletado_por_id])
+    publicado_por = db.relationship("Usuario", foreign_keys=[publicado_por_id])
 
     aprobaciones = db.relationship(
         "DocumentoAprobacion",
@@ -476,7 +537,7 @@ class DocumentoAprobacion(TenantMixin, BaseModel):
     __tablename__ = "documento_aprobaciones"
     __table_args__ = (
         db.CheckConstraint(
-            "accion IN ('CREAR_VERSION', 'ENVIAR_REVISION', 'DAR_CONFORMIDAD', 'APROBAR', 'RECHAZAR', 'SOLICITAR_CORRECCIONES', 'RECHAZAR_APROBACION', 'DEVOLVER_BORRADOR', 'OBSOLETAR', 'SUSTITUIR_VERSION')",
+            "accion IN ('CREAR_VERSION', 'ENVIAR_REVISION', 'DAR_CONFORMIDAD', 'APROBAR', 'RECHAZAR', 'SOLICITAR_CORRECCIONES', 'RECHAZAR_APROBACION', 'DEVOLVER_BORRADOR', 'OBSOLETAR', 'SUSTITUIR_VERSION', 'PUBLICAR_VIGENTE', 'VERSION_ANTERIOR_OBSOLETA', 'PUBLICACION_PREPARADA', 'QR_GENERADO', 'PDF_QR_GENERADO', 'DISTRIBUCION_ENCOLADA', 'PUBLICACION_CONSULTADA', 'PDF_VIGENTE_DESCARGADO', 'PUBLICACION_REVOCADA')",
             name="ck_documento_eventos_accion_valida",
         ),
         db.Index("ix_documento_eventos_documento_id", "documento_id"),
@@ -487,7 +548,7 @@ class DocumentoAprobacion(TenantMixin, BaseModel):
     documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
     usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
 
-    accion = db.Column(db.String(30), nullable=False)
+    accion = db.Column(db.String(60), nullable=False)
     fecha_accion = db.Column(db.DateTime(timezone=True), nullable=False)
     estado_anterior = db.Column(db.String(30))
     estado_nuevo = db.Column(db.String(30), nullable=False)
@@ -593,7 +654,7 @@ class DocumentoArtefacto(TenantMixin, BaseModel):
     __tablename__ = "documento_artefactos"
     __table_args__ = (
         db.CheckConstraint(
-            "tipo IN ('PDF_APROBADO', 'PDF_FIRMADO_PARCIAL', 'PDF_FIRMADO_FINAL')",
+            "tipo IN ('PDF_APROBADO', 'PDF_APROBADO_CON_QR', 'PDF_FIRMADO_PARCIAL', 'PDF_FIRMADO_FINAL')",
             name="ck_documento_artefactos_tipo_valido",
         ),
         db.CheckConstraint(
@@ -905,6 +966,147 @@ class DocumentoFirmaEvento(TenantMixin, BaseModel):
     paso = db.relationship("DocumentoFirmaPaso", foreign_keys=[paso_id])
     documento = db.relationship("Documento", foreign_keys=[documento_id])
     documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    usuario = db.relationship("Usuario", foreign_keys=[usuario_id])
+
+
+class DocumentoPublicacion(TenantMixin, BaseModel):
+    __tablename__ = "documento_publicaciones"
+    __table_args__ = (
+        db.CheckConstraint(
+            "estado IN ('PREPARADA', 'ACTIVA', 'OBSOLETA', 'REVOCADA')",
+            name="ck_documento_publicaciones_estado_valido",
+        ),
+        db.CheckConstraint(
+            "modo_acceso IN ('AUTENTICADO', 'TOKEN_PUBLICO')",
+            name="ck_documento_publicaciones_modo_acceso_valido",
+        ),
+        db.UniqueConstraint("public_id", name="uq_documento_publicaciones_public_id"),
+        db.UniqueConstraint("token", name="uq_documento_publicaciones_token"),
+        db.Index("ix_documento_publicaciones_documento_id", "documento_id"),
+        db.Index("ix_documento_publicaciones_documento_version_id", "documento_version_id"),
+        db.Index("ix_documento_publicaciones_estado", "estado"),
+        db.Index(
+            "uq_documento_publicacion_vigente_activa",
+            "empresa_id",
+            "documento_id",
+            unique=True,
+            postgresql_where=db.text("estado = 'ACTIVA' AND activa = true"),
+            sqlite_where=db.text("estado = 'ACTIVA' AND activa = 1"),
+        ),
+        db.Index(
+            "uq_documento_publicacion_version_activa",
+            "documento_version_id",
+            unique=True,
+            postgresql_where=db.text("activa = true"),
+            sqlite_where=db.text("activa = 1"),
+        ),
+    )
+
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
+    documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
+    public_id = db.Column(db.String(64), nullable=False)
+    token = db.Column(db.String(128), nullable=False)
+    modo_acceso = db.Column(db.String(30), nullable=False, default=PUBLICACION_ACCESO_AUTENTICADO)
+    estado = db.Column(db.String(30), nullable=False, default=PUBLICACION_PREPARADA)
+    activa = db.Column(db.Boolean, nullable=False, default=False)
+    qr_payload = db.Column(db.String(1000))
+    qr_storage_key = db.Column(db.String(500))
+    qr_sha256 = db.Column(db.String(64))
+    pdf_fuente_storage_key = db.Column(db.String(500))
+    pdf_fuente_sha256 = db.Column(db.String(64))
+    pdf_publicado_id = db.Column(db.BigInteger, db.ForeignKey("documento_artefactos.id"), nullable=True)
+    pdf_aprobado_original_id = db.Column(db.BigInteger, db.ForeignKey("documento_artefactos.id"), nullable=True)
+    pdf_qr_artifact_id = db.Column(db.BigInteger, db.ForeignKey("documento_artefactos.id"), nullable=True)
+    qr_embebido = db.Column(db.Boolean, nullable=False, default=False)
+    vigente_desde = db.Column(db.DateTime(timezone=True))
+    publicado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    revocado_en = db.Column(db.DateTime(timezone=True))
+    revocado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    motivo_revocacion = db.Column(db.Text)
+    metadata_json = db.Column(db.JSON)
+
+    empresa = db.relationship("Empresa")
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    pdf_publicado = db.relationship("DocumentoArtefacto", foreign_keys=[pdf_publicado_id])
+    pdf_aprobado_original = db.relationship("DocumentoArtefacto", foreign_keys=[pdf_aprobado_original_id])
+    pdf_qr_artifact = db.relationship("DocumentoArtefacto", foreign_keys=[pdf_qr_artifact_id])
+    publicado_por = db.relationship("Usuario", foreign_keys=[publicado_por_id])
+    revocado_por = db.relationship("Usuario", foreign_keys=[revocado_por_id])
+    entregas = db.relationship("DocumentoDistribucionEntrega", back_populates="publicacion", lazy=True)
+
+
+class DocumentoDistribucionDestinatario(TenantMixin, BaseModel):
+    __tablename__ = "documento_distribucion_destinatarios"
+    __table_args__ = (
+        db.CheckConstraint("tipo IN ('INTERNO', 'EXTERNO')", name="ck_documento_distribucion_destinatarios_tipo_valido"),
+        db.Index("ix_documento_destinatarios_documento_id", "documento_id"),
+        db.Index("ix_documento_destinatarios_usuario_id", "usuario_id"),
+        db.Index("ix_documento_destinatarios_email", "email"),
+        db.Index("ix_documento_destinatarios_activo", "activo"),
+        db.Index(
+            "uq_documento_destinatario_email_activo",
+            "empresa_id",
+            "documento_id",
+            "email",
+            unique=True,
+            postgresql_where=db.text("activo = true"),
+            sqlite_where=db.text("activo = 1"),
+        ),
+    )
+
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
+    usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=True)
+    nombre = db.Column(db.String(200), nullable=False)
+    email = db.Column(db.String(255), nullable=False)
+    tipo = db.Column(db.String(30), nullable=False)
+    activo = db.Column(db.Boolean, nullable=False, default=True)
+    grupo = db.Column(db.String(120))
+    creado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
+    actualizado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    desactivado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    desactivado_en = db.Column(db.DateTime(timezone=True))
+    motivo_desactivacion = db.Column(db.Text)
+
+    empresa = db.relationship("Empresa")
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    usuario = db.relationship("Usuario", foreign_keys=[usuario_id])
+    creado_por = db.relationship("Usuario", foreign_keys=[creado_por_id])
+    actualizado_por = db.relationship("Usuario", foreign_keys=[actualizado_por_id])
+    desactivado_por = db.relationship("Usuario", foreign_keys=[desactivado_por_id])
+
+
+class DocumentoDistribucionEntrega(TenantMixin, BaseModel):
+    __tablename__ = "documento_distribucion_entregas"
+    __table_args__ = (
+        db.CheckConstraint(
+            "estado_envio IN ('PENDIENTE', 'PROCESANDO', 'ENVIADO', 'FALLIDO', 'OMITIDO')",
+            name="ck_documento_distribucion_entregas_estado_valido",
+        ),
+        db.CheckConstraint("intentos >= 0", name="ck_documento_distribucion_entregas_intentos_valido"),
+        db.UniqueConstraint("publicacion_id", "email_snapshot", name="uq_documento_entrega_publicacion_email"),
+        db.Index("ix_documento_entregas_publicacion_id", "publicacion_id"),
+        db.Index("ix_documento_entregas_estado_envio", "estado_envio"),
+        db.Index("ix_documento_entregas_email_snapshot", "email_snapshot"),
+    )
+
+    publicacion_id = db.Column(db.BigInteger, db.ForeignKey("documento_publicaciones.id"), nullable=False)
+    destinatario_original_id = db.Column(db.BigInteger, db.ForeignKey("documento_distribucion_destinatarios.id"), nullable=True)
+    usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=True)
+    nombre_snapshot = db.Column(db.String(200), nullable=False)
+    email_snapshot = db.Column(db.String(255), nullable=False)
+    tipo_snapshot = db.Column(db.String(30), nullable=False)
+    estado_envio = db.Column(db.String(30), nullable=False, default=ENTREGA_PENDIENTE)
+    intentos = db.Column(db.Integer, nullable=False, default=0)
+    ultimo_error = db.Column(db.Text)
+    enviado_en = db.Column(db.DateTime(timezone=True))
+    message_id = db.Column(db.String(255))
+    ultimo_intento_en = db.Column(db.DateTime(timezone=True))
+    metadata_json = db.Column(db.JSON)
+
+    empresa = db.relationship("Empresa")
+    publicacion = db.relationship("DocumentoPublicacion", back_populates="entregas", foreign_keys=[publicacion_id])
+    destinatario_original = db.relationship("DocumentoDistribucionDestinatario", foreign_keys=[destinatario_original_id])
     usuario = db.relationship("Usuario", foreign_keys=[usuario_id])
 
 

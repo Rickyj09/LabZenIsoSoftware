@@ -71,7 +71,7 @@ def get_current_version(documento):
     if (
         version_doc.documento_id != documento.id
         or version_doc.empresa_id != documento.empresa_id
-        or version_doc.estado != "APROBADO"
+        or version_doc.estado not in ("APROBADO", "VIGENTE")
     ):
         return None
     return version_doc

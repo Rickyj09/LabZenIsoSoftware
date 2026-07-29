@@ -13,6 +13,7 @@ from app.extensions import db
 from app.models.documentos import (
     ARTEFACTO_DISPONIBLE,
     ARTEFACTO_PDF_APROBADO,
+    ARTEFACTO_PDF_APROBADO_CON_QR,
     ARTEFACTO_PDF_FIRMADO_FINAL,
     ARTEFACTO_PDF_FIRMADO_PARCIAL,
     ESTADO_APROBADO,
@@ -54,6 +55,7 @@ from app.models.documentos import (
 )
 from app.security.permissions import user_has_permission
 from app.services.document_pdf_service import DocumentPdfError, DocumentPdfService, PDF_MIME
+from app.services.document_publication_service import DocumentPublicationError, DocumentPublicationService
 from app.services.office_document_profile import get_onlyoffice_document_profile
 from app.services.storage_service import (
     DocumentStorageError,
@@ -579,10 +581,20 @@ class DocumentSignatureService:
         )
         if existing:
             return existing
-        pdf_origen = self.pdf_service.available_artifact_for_version(version_doc)
+        try:
+            prepared_publication = DocumentPublicationService(app=self.app).prepare_publication_for_signature(
+                documento=documento,
+                version_doc=version_doc,
+                usuario=usuario,
+            )
+            pdf_origen = prepared_publication.artifact
+        except DocumentPublicationError as exc:
+            raise DocumentSignatureError(str(exc)) from exc
         if not pdf_origen:
             raise DocumentSignatureError("No existe PDF aprobado disponible para iniciar la firma.")
-        self.pdf_service.validate_artifact_file(pdf_origen)
+        self._validate_available_pdf_artifact(pdf_origen)
+        if pdf_origen.tipo != ARTEFACTO_PDF_APROBADO_CON_QR:
+            raise DocumentSignatureError("La firma debe iniciar desde PDF_APROBADO_CON_QR.")
 
         assignments = self._required_assignments(version_doc)
         proceso = DocumentoFirmaProceso(
@@ -597,7 +609,13 @@ class DocumentSignatureService:
             solicitado_en=_now(),
             iniciado_en=_now(),
             vence_en=_now() + timedelta(days=int(self.app.config.get("DOCUMENT_SIGNATURE_PROCESS_TTL_DAYS", 15))),
-            metadata_json={"document_state_preserved": ESTADO_APROBADO},
+            metadata_json={
+                "document_state_preserved": ESTADO_APROBADO,
+                "publication_id": prepared_publication.publicacion.id,
+                "publication_public_id": prepared_publication.publicacion.public_id,
+                "qr_sha256": prepared_publication.qr_sha256,
+                "pdf_origen_tipo": pdf_origen.tipo,
+            },
         )
         db.session.add(proceso)
         db.session.flush()
@@ -633,7 +651,7 @@ class DocumentSignatureService:
     def downloadable_artifact_for_step(self, *, paso, usuario, ip=None, user_agent=None):
         self._assert_step_owner_enabled(paso, usuario)
         artifact = paso.artifact_entrada or self._input_artifact_for_step(paso)
-        if artifact.tipo not in (ARTEFACTO_PDF_APROBADO, ARTEFACTO_PDF_FIRMADO_PARCIAL):
+        if artifact.tipo not in (ARTEFACTO_PDF_APROBADO, ARTEFACTO_PDF_APROBADO_CON_QR, ARTEFACTO_PDF_FIRMADO_PARCIAL):
             raise DocumentSignatureError("El artefacto de entrada no es valido para firma.")
         self._validate_available_pdf_artifact(artifact)
         if paso.artifact_entrada_id != artifact.id:
@@ -943,7 +961,7 @@ class DocumentSignatureService:
     def _validate_available_pdf_artifact(self, artifact):
         if artifact.estado != ARTEFACTO_DISPONIBLE or not artifact.inmutable:
             raise DocumentSignatureError("El PDF de entrada no esta disponible.")
-        if artifact.tipo == ARTEFACTO_PDF_APROBADO:
+        if artifact.tipo in (ARTEFACTO_PDF_APROBADO, ARTEFACTO_PDF_APROBADO_CON_QR):
             return self.pdf_service.validate_artifact_file(artifact)
         if artifact.tipo != ARTEFACTO_PDF_FIRMADO_PARCIAL:
             raise DocumentSignatureError("Tipo de artefacto de entrada no valido.")
