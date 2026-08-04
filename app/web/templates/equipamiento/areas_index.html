@@ -1,0 +1,25 @@
+{% extends "base_admin.html" %}
+{% block title %}Areas y ambientes{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li><li class="breadcrumb-item active">Areas y ambientes</li></ol></nav>
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div><h1 class="mb-1">Areas y ambientes</h1><p class="text-muted mb-0">Ambientes por instalacion, preparados para control ambiental y equipos</p></div>
+        {% if can('areas.crear') %}<a href="{{ url_for('equipamiento.nueva_area') }}" class="btn btn-primary">Nueva area</a>{% endif %}
+    </div>
+    <form method="get" class="row g-3 mb-4">
+        <div class="col-md-4"><label class="form-label">Buscar</label><input name="q" class="form-control" value="{{ q or '' }}" placeholder="Codigo, nombre, tipo o responsable"></div>
+        <div class="col-md-3"><label class="form-label">Instalacion</label><select name="instalacion_id" class="form-select"><option value="">Todas</option>{% for inst in instalaciones %}<option value="{{ inst.id }}" {% if instalacion_id|string == inst.id|string %}selected{% endif %}>{{ inst.codigo }} - {{ inst.nombre }}</option>{% endfor %}</select></div>
+        <div class="col-md-3"><label class="form-label">Estado</label><select name="estado" class="form-select"><option value="activos" {% if estado == 'activos' %}selected{% endif %}>Activas</option><option value="inactivos" {% if estado == 'inactivos' %}selected{% endif %}>Inactivas</option><option value="todos" {% if estado == 'todos' %}selected{% endif %}>Todas</option></select></div>
+        <div class="col-md-2 d-flex align-items-end"><button class="btn btn-outline-primary w-100">Filtrar</button></div>
+    </form>
+    <div class="table-responsive"><table class="table table-hover align-middle"><thead class="table-light"><tr><th>Codigo</th><th>Nombre</th><th>Instalacion</th><th>Tipo</th><th>Control ambiental</th><th>Estado</th><th></th></tr></thead><tbody>
+    {% for item in items %}
+        <tr><td>{{ item.codigo }}</td><td>{{ item.nombre }}</td><td>{{ item.instalacion.codigo }} - {{ item.instalacion.nombre }}</td><td>{{ item.tipo or '' }}</td><td>{% if item.requiere_control_ambiental %}<span class="badge text-bg-info">Si</span>{% else %}<span class="badge text-bg-light">No</span>{% endif %}</td><td><span class="badge {% if item.estado == 'activo' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ item.estado }}</span></td><td class="text-end">{% if can('areas.editar') %}<a href="{{ url_for('equipamiento.editar_area', item_id=item.id) }}" class="btn btn-sm btn-outline-primary">Editar</a>{% endif %}{% if item.estado == 'activo' and can('areas.inactivar') %}<form method="post" action="{{ url_for('equipamiento.inactivar_area', item_id=item.id) }}" class="d-inline" onsubmit="return confirm('Inactivar area?');"><button class="btn btn-sm btn-outline-danger">Inactivar</button></form>{% endif %}</td></tr>
+    {% else %}
+        <tr><td colspan="7" class="text-center text-muted py-4">No hay areas con los filtros seleccionados.</td></tr>
+    {% endfor %}
+    </tbody></table></div>
+</div>
+{% endblock %}

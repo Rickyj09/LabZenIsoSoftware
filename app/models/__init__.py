@@ -11,7 +11,15 @@ from app.models.laboratorio import (
     Resultado,
     CadenaCustodia,
 )
-from app.models.equipos import Equipo, EquipoCalibracion, EquipoMantenimiento, EquipoDocumento
+from app.models.equipos import (
+    AreaAmbiente,
+    Equipo,
+    EquipoCalibracion,
+    EquipoDocumento,
+    EquipoHistorial,
+    EquipoMantenimiento,
+    Instalacion,
+)
 from app.models.documentos import (
     CarpetaDocumental,
     Documento,

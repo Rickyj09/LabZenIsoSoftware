@@ -1,0 +1,24 @@
+{% extends "base_admin.html" %}
+{% block title %}{% if item %}Editar instalacion{% else %}Nueva instalacion{% endif %}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li>
+        <li class="breadcrumb-item"><a href="{{ url_for('equipamiento.instalaciones') }}">Instalaciones</a></li>
+        <li class="breadcrumb-item active">{% if item %}Editar{% else %}Nueva{% endif %}</li>
+    </ol>
+</nav>
+<div class="page-card">
+    <h1 class="mb-4">{% if item %}Editar instalacion{% else %}Nueva instalacion{% endif %}</h1>
+    <form method="post" class="row g-3">
+        <div class="col-md-3"><label class="form-label">Codigo</label><input name="codigo" class="form-control" required value="{{ form_data.get('codigo') or (item.codigo if item else '') }}"></div>
+        <div class="col-md-6"><label class="form-label">Nombre</label><input name="nombre" class="form-control" required value="{{ form_data.get('nombre') or (item.nombre if item else '') }}"></div>
+        <div class="col-md-3"><label class="form-label">Estado</label><select name="estado" class="form-select">{% set selected_estado = form_data.get('estado') or (item.estado if item else 'activo') %}<option value="activo" {% if selected_estado == 'activo' %}selected{% endif %}>Activo</option><option value="inactivo" {% if selected_estado == 'inactivo' %}selected{% endif %}>Inactivo</option></select></div>
+        <div class="col-md-8"><label class="form-label">Direccion o ubicacion</label><input name="direccion" class="form-control" value="{{ form_data.get('direccion') or (item.direccion if item else '') }}"></div>
+        <div class="col-md-4"><label class="form-label">Responsable</label><input name="responsable" class="form-control" value="{{ form_data.get('responsable') or (item.responsable if item else '') }}"></div>
+        <div class="col-12"><label class="form-label">Descripcion</label><textarea name="descripcion" class="form-control" rows="3">{{ form_data.get('descripcion') or (item.descripcion if item else '') }}</textarea></div>
+        <div class="col-12 d-flex gap-2"><button class="btn btn-primary">Guardar</button><a href="{{ url_for('equipamiento.instalaciones') }}" class="btn btn-outline-secondary">Cancelar</a></div>
+    </form>
+</div>
+{% endblock %}

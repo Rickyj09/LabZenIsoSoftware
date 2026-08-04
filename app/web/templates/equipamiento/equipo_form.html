@@ -1,0 +1,36 @@
+{% extends "base_admin.html" %}
+{% block title %}{% if item %}Editar equipo{% else %}Nuevo equipo{% endif %}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.equipos') }}">Equipos</a></li><li class="breadcrumb-item active">{% if item %}Editar{% else %}Nuevo{% endif %}</li></ol></nav>
+<div class="page-card">
+    <h1 class="mb-4">{% if item %}Editar equipo{% else %}Nuevo equipo{% endif %}</h1>
+    <form method="post" class="row g-3">
+        {% set selected_instalacion = form_data.get('instalacion_id') or (item.instalacion_id if item else '') %}
+        {% set selected_area = form_data.get('area_ambiente_id') or (item.area_ambiente_id if item else '') %}
+        <div class="col-md-3"><label class="form-label">Codigo interno</label><input name="codigo" class="form-control" required value="{{ form_data.get('codigo') or (item.codigo if item else '') }}"></div>
+        <div class="col-md-5"><label class="form-label">Nombre del equipo</label><input name="nombre" class="form-control" required value="{{ form_data.get('nombre') or (item.nombre if item else '') }}"></div>
+        <div class="col-md-4"><label class="form-label">Tipo o categoria</label><input name="tipo" class="form-control" value="{{ form_data.get('tipo') or (item.tipo if item else '') }}"></div>
+        <div class="col-md-3"><label class="form-label">Marca</label><input name="marca" class="form-control" value="{{ form_data.get('marca') or (item.marca if item else '') }}"></div>
+        <div class="col-md-3"><label class="form-label">Modelo</label><input name="modelo" class="form-control" value="{{ form_data.get('modelo') or (item.modelo if item else '') }}"></div>
+        <div class="col-md-3"><label class="form-label">Numero de serie</label><input name="serie" class="form-control" value="{{ form_data.get('serie') or (item.serie if item else '') }}"></div>
+        <div class="col-md-3"><label class="form-label">Fabricante</label><input name="fabricante" class="form-control" value="{{ form_data.get('fabricante') or (item.fabricante if item else '') }}"></div>
+        <div class="col-md-4"><label class="form-label">Instalacion</label><select name="instalacion_id" class="form-select" required><option value="">Selecciona</option>{% for inst in instalaciones %}<option value="{{ inst.id }}" {% if selected_instalacion|string == inst.id|string %}selected{% endif %}>{{ inst.codigo }} - {{ inst.nombre }}</option>{% endfor %}</select></div>
+        <div class="col-md-4"><label class="form-label">Area o ambiente</label><select name="area_ambiente_id" class="form-select"><option value="">Sin area</option>{% for area in areas %}<option value="{{ area.id }}" {% if selected_area|string == area.id|string %}selected{% endif %}>{{ area.codigo }} - {{ area.nombre }}</option>{% endfor %}</select></div>
+        <div class="col-md-4"><label class="form-label">Ubicacion especifica</label><input name="ubicacion_especifica" class="form-control" value="{{ form_data.get('ubicacion_especifica') or (item.ubicacion_especifica if item else '') }}"></div>
+        <div class="col-md-4"><label class="form-label">Responsable o custodio</label><input name="responsable" class="form-control" value="{{ form_data.get('responsable') or (item.responsable if item else '') }}"></div>
+        <div class="col-md-2"><label class="form-label">Adquisicion</label><input type="date" name="fecha_adquisicion" class="form-control" value="{{ form_data.get('fecha_adquisicion') or (item.fecha_adquisicion if item and item.fecha_adquisicion else '') }}"></div>
+        <div class="col-md-2"><label class="form-label">Puesta en servicio</label><input type="date" name="fecha_puesta_servicio" class="form-control" value="{{ form_data.get('fecha_puesta_servicio') or (item.fecha_puesta_servicio if item and item.fecha_puesta_servicio else '') }}"></div>
+        {% set selected_operativo = form_data.get('estado_operativo') or (item.estado_operativo if item else 'OPERATIVO') %}
+        <div class="col-md-2"><label class="form-label">Estado operativo</label><select name="estado_operativo" class="form-select">{% for status in estados_operativos %}<option value="{{ status }}" {% if selected_operativo == status %}selected{% endif %}>{{ status.replace('_', ' ') }}</option>{% endfor %}</select></div>
+        {% set selected_criticidad = form_data.get('criticidad') or (item.criticidad if item else 'MEDIA') %}
+        <div class="col-md-2"><label class="form-label">Criticidad</label><select name="criticidad" class="form-select">{% for level in criticidades %}<option value="{{ level }}" {% if selected_criticidad == level %}selected{% endif %}>{{ level }}</option>{% endfor %}</select></div>
+        {% set selected_estado = form_data.get('estado') or (item.estado if item else 'activo') %}
+        <div class="col-md-2"><label class="form-label">Activo</label><select name="estado" class="form-select"><option value="activo" {% if selected_estado == 'activo' %}selected{% endif %}>Activo</option><option value="inactivo" {% if selected_estado == 'inactivo' %}selected{% endif %}>Inactivo</option></select></div>
+        <div class="col-md-3"><label class="form-label">Requiere calibracion</label><select name="requiere_calibracion" class="form-select">{% set cal = form_data.get('requiere_calibracion') or ('1' if item and item.requiere_calibracion else '0') %}<option value="0" {% if cal != '1' %}selected{% endif %}>No</option><option value="1" {% if cal == '1' %}selected{% endif %}>Si</option></select></div>
+        <div class="col-md-3"><label class="form-label">Requiere mantenimiento</label><select name="requiere_mantenimiento" class="form-select">{% set mant = form_data.get('requiere_mantenimiento') or ('1' if item and item.requiere_mantenimiento else '0') %}<option value="0" {% if mant != '1' %}selected{% endif %}>No</option><option value="1" {% if mant == '1' %}selected{% endif %}>Si</option></select></div>
+        <div class="col-12"><label class="form-label">Observaciones</label><textarea name="observaciones" class="form-control" rows="3">{{ form_data.get('observaciones') or (item.observaciones if item else '') }}</textarea></div>
+        <div class="col-12 d-flex gap-2"><button class="btn btn-primary">Guardar</button><a href="{{ url_for('equipamiento.equipos') }}" class="btn btn-outline-secondary">Cancelar</a></div>
+    </form>
+</div>
+{% endblock %}

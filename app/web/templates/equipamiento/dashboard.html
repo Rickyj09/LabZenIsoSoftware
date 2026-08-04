@@ -1,0 +1,59 @@
+{% extends "base_admin.html" %}
+{% block title %}Instalaciones y Equipamiento{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('dashboard.index') }}">Dashboard</a></li>
+        <li class="breadcrumb-item active">Instalaciones y Equipamiento</li>
+    </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+    <div>
+        <h2 class="mb-1">Instalaciones y Equipamiento</h2>
+        <div class="text-muted">Indicadores reales de infraestructura, areas y equipos de la empresa actual.</div>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        {% if can('instalaciones.ver') %}<a href="{{ url_for('equipamiento.instalaciones') }}" class="btn btn-outline-primary">Instalaciones</a>{% endif %}
+        {% if can('areas.ver') %}<a href="{{ url_for('equipamiento.areas') }}" class="btn btn-outline-primary">Areas</a>{% endif %}
+        {% if can('equipos.ver') %}<a href="{{ url_for('equipamiento.equipos') }}" class="btn btn-primary">Equipos</a>{% endif %}
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    {% for label, value in [
+        ('Instalaciones activas', stats.instalaciones_activas),
+        ('Areas activas', stats.areas_activas),
+        ('Equipos activos', stats.equipos_activos),
+        ('Criticidad alta', stats.criticidad_alta)
+    ] %}
+    <div class="col-md-3 col-sm-6">
+        <div class="page-card h-100">
+            <div class="text-muted small">{{ label }}</div>
+            <div class="display-6">{{ value }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="page-card">
+    <h5 class="mb-3">Estado operativo de equipos</h5>
+    <div class="row g-3">
+        {% for status, label, badge in [
+            ('OPERATIVO', 'Operativos', 'bg-success'),
+            ('FUERA_DE_SERVICIO', 'Fuera de servicio', 'bg-danger'),
+            ('EN_MANTENIMIENTO', 'En mantenimiento', 'bg-warning text-dark'),
+            ('EN_CALIBRACION', 'En calibracion', 'bg-info text-dark'),
+            ('RETIRADO', 'Retirados', 'bg-secondary')
+        ] %}
+        <div class="col-md col-sm-6">
+            <div class="border rounded p-3 h-100">
+                <div class="small text-muted">{{ label }}</div>
+                <span class="badge {{ badge }} fs-6">{{ stats.estado_operativo[status] }}</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

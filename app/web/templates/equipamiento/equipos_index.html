@@ -1,0 +1,42 @@
+{% extends "base_admin.html" %}
+{% block title %}Equipos{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li><li class="breadcrumb-item active">Equipos</li></ol></nav>
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div><h1 class="mb-1">Equipos</h1><p class="text-muted mb-0">Registro maestro de equipos e instrumentos</p></div>
+        {% if can('equipos.crear') %}<a href="{{ url_for('equipamiento.nuevo_equipo') }}" class="btn btn-primary">Nuevo equipo</a>{% endif %}
+    </div>
+    <form method="get" class="row g-3 mb-4">
+        <div class="col-md-3"><label class="form-label">Texto libre</label><input name="q" class="form-control" value="{{ filters.q }}" placeholder="Codigo, nombre, marca, modelo o serie"></div>
+        <div class="col-md-2"><label class="form-label">Codigo</label><input name="codigo" class="form-control" value="{{ filters.codigo }}"></div>
+        <div class="col-md-2"><label class="form-label">Nombre</label><input name="nombre" class="form-control" value="{{ filters.nombre }}"></div>
+        <div class="col-md-3"><label class="form-label">Instalacion</label><select name="instalacion_id" class="form-select"><option value="">Todas</option>{% for inst in instalaciones %}<option value="{{ inst.id }}" {% if filters.instalacion_id|string == inst.id|string %}selected{% endif %}>{{ inst.codigo }} - {{ inst.nombre }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label">Area</label><select name="area_ambiente_id" class="form-select"><option value="">Todas</option>{% for area in areas %}<option value="{{ area.id }}" {% if filters.area_ambiente_id|string == area.id|string %}selected{% endif %}>{{ area.codigo }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label">Estado operativo</label><select name="estado_operativo" class="form-select"><option value="">Todos</option>{% for status in estados_operativos %}<option value="{{ status }}" {% if filters.estado_operativo == status %}selected{% endif %}>{{ status.replace('_', ' ') }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label">Criticidad</label><select name="criticidad" class="form-select"><option value="">Todas</option>{% for item in criticidades %}<option value="{{ item }}" {% if filters.criticidad == item %}selected{% endif %}>{{ item }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label">Responsable</label><input name="responsable" class="form-control" value="{{ filters.responsable }}"></div>
+        <div class="col-md-2"><label class="form-label">Activo</label><select name="estado" class="form-select"><option value="">Todos</option><option value="activo" {% if filters.estado == 'activo' %}selected{% endif %}>Activos</option><option value="inactivo" {% if filters.estado == 'inactivo' %}selected{% endif %}>Inactivos</option></select></div>
+        <div class="col-md-2"><label class="form-label">Calibracion</label><select name="requiere_calibracion" class="form-select"><option value="">Todos</option><option value="1" {% if filters.requiere_calibracion == '1' %}selected{% endif %}>Requiere</option><option value="0" {% if filters.requiere_calibracion == '0' %}selected{% endif %}>No requiere</option></select></div>
+        <div class="col-md-2"><label class="form-label">Mantenimiento</label><select name="requiere_mantenimiento" class="form-select"><option value="">Todos</option><option value="1" {% if filters.requiere_mantenimiento == '1' %}selected{% endif %}>Requiere</option><option value="0" {% if filters.requiere_mantenimiento == '0' %}selected{% endif %}>No requiere</option></select></div>
+        <div class="col-md-2 d-flex align-items-end"><button class="btn btn-outline-primary w-100">Filtrar</button></div>
+    </form>
+    <div class="table-responsive"><table class="table table-hover align-middle"><thead class="table-light"><tr><th>Codigo</th><th>Equipo</th><th>Ubicacion</th><th>Responsable</th><th>Estado</th><th>Criticidad</th><th>Requisitos</th><th></th></tr></thead><tbody>
+    {% for item in items %}
+        <tr>
+            <td>{{ item.codigo }}</td>
+            <td><a href="{{ url_for('equipamiento.detalle_equipo', item_id=item.id) }}">{{ item.nombre }}</a><div class="text-muted small">{{ item.marca or '' }} {{ item.modelo or '' }} {{ item.serie or '' }}</div></td>
+            <td>{{ item.instalacion.codigo if item.instalacion else '' }}{% if item.area_ambiente %}<div class="text-muted small">{{ item.area_ambiente.codigo }} - {{ item.area_ambiente.nombre }}</div>{% endif %}</td>
+            <td>{{ item.responsable or '' }}</td>
+            <td><span class="badge {% if item.estado_operativo == 'OPERATIVO' %}text-bg-success{% elif item.estado_operativo == 'FUERA_DE_SERVICIO' %}text-bg-danger{% elif item.estado_operativo in ['EN_MANTENIMIENTO', 'EN_CALIBRACION'] %}text-bg-warning{% else %}text-bg-secondary{% endif %}">{{ item.estado_operativo.replace('_', ' ') }}</span></td>
+            <td><span class="badge {% if item.criticidad == 'ALTA' %}text-bg-danger{% elif item.criticidad == 'MEDIA' %}text-bg-warning{% else %}text-bg-light{% endif %}">{{ item.criticidad or '' }}</span></td>
+            <td>{% if item.requiere_calibracion %}<span class="badge text-bg-info">Calibracion</span>{% endif %} {% if item.requiere_mantenimiento %}<span class="badge text-bg-primary">Mantenimiento</span>{% endif %}</td>
+            <td class="text-end">{% if can('equipos.editar') %}<a href="{{ url_for('equipamiento.editar_equipo', item_id=item.id) }}" class="btn btn-sm btn-outline-primary">Editar</a>{% endif %}</td>
+        </tr>
+    {% else %}
+        <tr><td colspan="8" class="text-center text-muted py-4">No hay equipos con los filtros seleccionados.</td></tr>
+    {% endfor %}
+    </tbody></table></div>
+</div>
+{% endblock %}

@@ -136,6 +136,49 @@
             </a>
         </div>
 
+        <!-- INSTALACIONES Y EQUIPAMIENTO -->
+        {% if can('equipamiento.dashboard.ver') or can('instalaciones.ver') or can('areas.ver') or can('equipos.ver') %}
+        <button class="sidebar-group-btn"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#menuEquipamiento"
+                aria-expanded="{% if request.endpoint and request.endpoint.startswith('equipamiento.') %}true{% else %}false{% endif %}">
+            <span>Instalaciones y Equipamiento</span>
+            <span>▾</span>
+        </button>
+
+        <div class="collapse {% if request.endpoint and request.endpoint.startswith('equipamiento.') %}show{% endif %}"
+             id="menuEquipamiento">
+            {% if can('equipamiento.dashboard.ver') %}
+            <a class="sidebar-link {% if request.endpoint == 'equipamiento.dashboard' %}active{% endif %}"
+               href="{{ url_for('equipamiento.dashboard') }}">
+                Dashboard
+            </a>
+            {% endif %}
+
+            {% if can('instalaciones.ver') %}
+            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('equipamiento.instalacion') %}active{% endif %}"
+               href="{{ url_for('equipamiento.instalaciones') }}">
+                Instalaciones
+            </a>
+            {% endif %}
+
+            {% if can('areas.ver') %}
+            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('equipamiento.area') %}active{% endif %}"
+               href="{{ url_for('equipamiento.areas') }}">
+                Areas y ambientes
+            </a>
+            {% endif %}
+
+            {% if can('equipos.ver') %}
+            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('equipamiento.equipo') %}active{% endif %}"
+               href="{{ url_for('equipamiento.equipos') }}">
+                Equipos
+            </a>
+            {% endif %}
+        </div>
+        {% endif %}
+
         <!-- SISTEMA DE GESTIÓN -->
         <button class="sidebar-group-btn"
                 type="button"

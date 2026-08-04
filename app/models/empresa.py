@@ -24,6 +24,8 @@ class Empresa(BaseModel):
     muestras = db.relationship("Muestra", back_populates="empresa", lazy=True)
     ensayos_catalogo = db.relationship("EnsayoCatalogo", back_populates="empresa", lazy=True)
     metodos = db.relationship("Metodo", back_populates="empresa", lazy=True)
+    instalaciones = db.relationship("Instalacion", back_populates="empresa", lazy=True)
+    areas_ambientes = db.relationship("AreaAmbiente", back_populates="empresa", lazy=True)
     equipos = db.relationship("Equipo", back_populates="empresa", lazy=True)
     documentos = db.relationship("Documento", back_populates="empresa", lazy=True)
     no_conformidades = db.relationship("NoConformidad", back_populates="empresa", lazy=True)

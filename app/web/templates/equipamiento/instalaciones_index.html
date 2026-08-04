@@ -1,0 +1,66 @@
+{% extends "base_admin.html" %}
+{% block title %}Instalaciones{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li>
+        <li class="breadcrumb-item active">Instalaciones</li>
+    </ol>
+</nav>
+
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div>
+            <h1 class="mb-1">Instalaciones</h1>
+            <p class="text-muted mb-0">Catalogo de infraestructura de la empresa actual</p>
+        </div>
+        {% if can('instalaciones.crear') %}
+        <a href="{{ url_for('equipamiento.nueva_instalacion') }}" class="btn btn-primary">Nueva instalacion</a>
+        {% endif %}
+    </div>
+
+    <form method="get" class="row g-3 mb-4">
+        <div class="col-md-7">
+            <label class="form-label">Buscar</label>
+            <input type="text" name="q" class="form-control" value="{{ q or '' }}" placeholder="Codigo, nombre o responsable">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Estado</label>
+            <select name="estado" class="form-select">
+                <option value="activos" {% if estado == 'activos' %}selected{% endif %}>Activas</option>
+                <option value="inactivos" {% if estado == 'inactivos' %}selected{% endif %}>Inactivas</option>
+                <option value="todos" {% if estado == 'todos' %}selected{% endif %}>Todas</option>
+            </select>
+        </div>
+        <div class="col-md-2 d-flex align-items-end"><button type="submit" class="btn btn-outline-primary w-100">Filtrar</button></div>
+    </form>
+
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead class="table-light"><tr><th>Codigo</th><th>Nombre</th><th>Ubicacion</th><th>Responsable</th><th>Estado</th><th></th></tr></thead>
+            <tbody>
+            {% for item in items %}
+                <tr>
+                    <td>{{ item.codigo }}</td>
+                    <td>{{ item.nombre }}</td>
+                    <td>{{ item.direccion or '' }}</td>
+                    <td>{{ item.responsable or '' }}</td>
+                    <td><span class="badge {% if item.estado == 'activo' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ item.estado }}</span></td>
+                    <td class="text-end">
+                        {% if can('instalaciones.editar') %}<a href="{{ url_for('equipamiento.editar_instalacion', item_id=item.id) }}" class="btn btn-sm btn-outline-primary">Editar</a>{% endif %}
+                        {% if item.estado == 'activo' and can('instalaciones.inactivar') %}
+                        <form method="post" action="{{ url_for('equipamiento.inactivar_instalacion', item_id=item.id) }}" class="d-inline" onsubmit="return confirm('Inactivar instalacion?');">
+                            <button class="btn btn-sm btn-outline-danger">Inactivar</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="6" class="text-center text-muted py-4">No hay instalaciones con los filtros seleccionados.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
