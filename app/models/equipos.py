@@ -12,6 +12,12 @@ ESTADOS_OPERATIVOS_EQUIPO = (
 
 CRITICIDADES_EQUIPO = ("BAJA", "MEDIA", "ALTA")
 
+ESTADOS_PLAN_MANTENIMIENTO = ("ACTIVO", "INACTIVO")
+
+TIPOS_MANTENIMIENTO_EQUIPO = ("PREVENTIVO", "CORRECTIVO")
+
+ESTADOS_MANTENIMIENTO_EQUIPO = ("PROGRAMADO", "EN_PROCESO", "COMPLETADO", "CANCELADO")
+
 TIPOS_EVENTO_EQUIPO = (
     "CREACION",
     "ACTUALIZACION",
@@ -21,6 +27,16 @@ TIPOS_EVENTO_EQUIPO = (
     "RETIRO",
     "REACTIVACION",
     "VINCULO_DOCUMENTO",
+    "PLAN_MANTENIMIENTO_CREADO",
+    "PLAN_MANTENIMIENTO_ACTUALIZADO",
+    "PLAN_MANTENIMIENTO_INACTIVADO",
+    "MANTENIMIENTO_PROGRAMADO",
+    "MANTENIMIENTO_CORRECTIVO_CREADO",
+    "MANTENIMIENTO_INICIADO",
+    "MANTENIMIENTO_COMPLETADO",
+    "MANTENIMIENTO_CANCELADO",
+    "EVIDENCIA_MANTENIMIENTO_VINCULADA",
+    "EVIDENCIA_MANTENIMIENTO_DESVINCULADA",
 )
 
 
@@ -125,6 +141,12 @@ class Equipo(TenantMixin, BaseModel):
         lazy=True,
         cascade="all, delete-orphan"
     )
+    planes_mantenimiento = db.relationship(
+        "EquipoPlanMantenimiento",
+        back_populates="equipo",
+        lazy=True,
+        cascade="all, delete-orphan"
+    )
     documentos = db.relationship(
         "EquipoDocumento",
         back_populates="equipo",
@@ -156,20 +178,101 @@ class EquipoCalibracion(TenantMixin, BaseModel):
     equipo = db.relationship("Equipo", back_populates="calibraciones")
 
 
-class EquipoMantenimiento(TenantMixin, BaseModel):
-    __tablename__ = "equipo_mantenimientos"
+class EquipoPlanMantenimiento(TenantMixin, BaseModel):
+    __tablename__ = "equipo_planes_mantenimiento"
+    __table_args__ = (
+        db.UniqueConstraint("empresa_id", "codigo", name="uq_equipo_plan_mantenimiento_empresa_codigo"),
+        db.CheckConstraint("periodicidad_meses > 0", name="ck_equipo_plan_mantenimiento_periodicidad_positiva"),
+        db.CheckConstraint("estado IN ('ACTIVO', 'INACTIVO')", name="ck_equipo_plan_mantenimiento_estado_valido"),
+        db.Index("ix_equipo_plan_mantenimiento_empresa_equipo", "empresa_id", "equipo_id"),
+        db.Index("ix_equipo_plan_mantenimiento_empresa_estado", "empresa_id", "estado"),
+        db.Index("ix_equipo_plan_mantenimiento_empresa_proxima", "empresa_id", "proxima_fecha"),
+    )
 
     equipo_id = db.Column(db.BigInteger, db.ForeignKey("equipos.id"), nullable=False)
+    codigo = db.Column(db.String(50), nullable=False)
+    nombre = db.Column(db.String(150), nullable=False)
+    descripcion = db.Column(db.Text)
+    periodicidad_meses = db.Column(db.Integer, nullable=False)
+    fecha_inicio = db.Column(db.Date, nullable=False)
+    proxima_fecha = db.Column(db.Date)
+    responsable_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    proveedor = db.Column(db.String(150))
+    estado = db.Column(db.String(20), nullable=False, default="ACTIVO")
+
+    empresa = db.relationship("Empresa")
+    equipo = db.relationship("Equipo", back_populates="planes_mantenimiento")
+    responsable = db.relationship("Usuario", foreign_keys=[responsable_id])
+    mantenimientos = db.relationship("EquipoMantenimiento", back_populates="plan", lazy=True)
+
+
+class EquipoMantenimiento(TenantMixin, BaseModel):
+    __tablename__ = "equipo_mantenimientos"
+    __table_args__ = (
+        db.UniqueConstraint("empresa_id", "codigo", name="uq_equipo_mantenimiento_empresa_codigo"),
+        db.CheckConstraint("tipo_mantenimiento IN ('PREVENTIVO', 'CORRECTIVO')", name="ck_equipo_mantenimiento_tipo_valido"),
+        db.CheckConstraint("estado IN ('PROGRAMADO', 'EN_PROCESO', 'COMPLETADO', 'CANCELADO')", name="ck_equipo_mantenimiento_estado_valido"),
+        db.CheckConstraint("costo IS NULL OR costo >= 0", name="ck_equipo_mantenimiento_costo_no_negativo"),
+        db.Index("ix_equipo_mantenimiento_empresa_estado", "empresa_id", "estado"),
+        db.Index("ix_equipo_mantenimiento_empresa_fecha_planificada", "empresa_id", "fecha_planificada"),
+        db.Index("ix_equipo_mantenimiento_empresa_equipo_estado", "empresa_id", "equipo_id", "estado"),
+        db.Index("ix_equipo_mantenimiento_plan_id", "plan_id"),
+    )
+
+    equipo_id = db.Column(db.BigInteger, db.ForeignKey("equipos.id"), nullable=False)
+    plan_id = db.Column(db.BigInteger, db.ForeignKey("equipo_planes_mantenimiento.id"))
+    codigo = db.Column(db.String(50), nullable=False)
     tipo_mantenimiento = db.Column(db.String(50), nullable=False)
-    fecha_mantenimiento = db.Column(db.Date, nullable=False)
+    estado = db.Column(db.String(30), nullable=False, default="PROGRAMADO")
+    fecha_planificada = db.Column(db.Date, nullable=False)
+    fecha_mantenimiento = db.Column(db.Date)
+    fecha_inicio = db.Column(db.Date)
+    fecha_finalizacion = db.Column(db.Date)
     fecha_proxima = db.Column(db.Date)
+    descripcion_trabajo = db.Column(db.Text)
+    responsable_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
     proveedor = db.Column(db.String(150))
     resultado = db.Column(db.String(50))
+    costo = db.Column(db.Numeric(12, 2))
+    moneda = db.Column(db.String(3))
+    cancelado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    motivo_cancelacion = db.Column(db.Text)
     observaciones = db.Column(db.Text)
     archivo_url = db.Column(db.String(255))
 
     empresa = db.relationship("Empresa")
     equipo = db.relationship("Equipo", back_populates="mantenimientos")
+    plan = db.relationship("EquipoPlanMantenimiento", back_populates="mantenimientos")
+    responsable = db.relationship("Usuario", foreign_keys=[responsable_id])
+    cancelado_por = db.relationship("Usuario", foreign_keys=[cancelado_por_id])
+    evidencias = db.relationship(
+        "EquipoMantenimientoDocumento",
+        back_populates="mantenimiento",
+        lazy=True,
+        cascade="all, delete-orphan"
+    )
+
+
+class EquipoMantenimientoDocumento(TenantMixin, BaseModel):
+    __tablename__ = "equipo_mantenimiento_documentos"
+    __table_args__ = (
+        db.UniqueConstraint("mantenimiento_id", "documento_version_id", name="uq_equipo_mantenimiento_documento_version"),
+        db.Index("ix_equipo_mantenimiento_documentos_empresa_mantenimiento", "empresa_id", "mantenimiento_id"),
+        db.Index("ix_equipo_mantenimiento_documentos_documento_version_id", "documento_version_id"),
+    )
+
+    mantenimiento_id = db.Column(db.BigInteger, db.ForeignKey("equipo_mantenimientos.id"), nullable=False)
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
+    documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
+    tipo_evidencia = db.Column(db.String(50), nullable=False)
+    observaciones = db.Column(db.Text)
+    vinculado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+
+    empresa = db.relationship("Empresa")
+    mantenimiento = db.relationship("EquipoMantenimiento", back_populates="evidencias")
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    vinculado_por = db.relationship("Usuario", foreign_keys=[vinculado_por_id])
 
 
 class EquipoDocumento(TenantMixin, BaseModel):
@@ -203,7 +306,7 @@ class EquipoHistorial(TenantMixin, BaseModel):
     __tablename__ = "equipo_historial"
     __table_args__ = (
         db.CheckConstraint(
-            "tipo_evento IN ('CREACION', 'ACTUALIZACION', 'CAMBIO_UBICACION', 'CAMBIO_RESPONSABLE', 'CAMBIO_ESTADO_OPERATIVO', 'RETIRO', 'REACTIVACION', 'VINCULO_DOCUMENTO')",
+            "tipo_evento IN ('CREACION', 'ACTUALIZACION', 'CAMBIO_UBICACION', 'CAMBIO_RESPONSABLE', 'CAMBIO_ESTADO_OPERATIVO', 'RETIRO', 'REACTIVACION', 'VINCULO_DOCUMENTO', 'PLAN_MANTENIMIENTO_CREADO', 'PLAN_MANTENIMIENTO_ACTUALIZADO', 'PLAN_MANTENIMIENTO_INACTIVADO', 'MANTENIMIENTO_PROGRAMADO', 'MANTENIMIENTO_CORRECTIVO_CREADO', 'MANTENIMIENTO_INICIADO', 'MANTENIMIENTO_COMPLETADO', 'MANTENIMIENTO_CANCELADO', 'EVIDENCIA_MANTENIMIENTO_VINCULADA', 'EVIDENCIA_MANTENIMIENTO_DESVINCULADA')",
             name="ck_equipo_historial_tipo_evento_valido",
         ),
         db.Index("ix_equipo_historial_equipo_id", "equipo_id"),

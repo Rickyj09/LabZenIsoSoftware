@@ -18,6 +18,8 @@ from app.models.equipos import (
     EquipoDocumento,
     EquipoHistorial,
     EquipoMantenimiento,
+    EquipoMantenimientoDocumento,
+    EquipoPlanMantenimiento,
     Instalacion,
 )
 from app.models.documentos import (
