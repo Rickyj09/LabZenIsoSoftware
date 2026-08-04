@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import datetime
 
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +20,7 @@ from app.services.equipamiento_service import (
     create_area,
     create_equipo,
     create_instalacion,
+    equipo_history_change_labels,
     link_document_version,
     update_equipo,
 )
@@ -203,6 +205,69 @@ class Equipamiento5ATest(unittest.TestCase):
         self.assertIn("CAMBIO_RESPONSABLE", events)
         self.assertIn("CAMBIO_ESTADO_OPERATIVO", events)
 
+    def test_location_history_stores_readable_values_and_preserves_previous_and_new_values(self):
+        installation, area = self.create_basic_location()
+        equipment = create_equipo(self.user(), self.equipo_data(installation, area))
+        db.session.commit()
+
+        update_data = self.equipo_data(installation, area)
+        update_data["ubicacion_especifica"] = "Mesa 2"
+        update_equipo(self.user(), equipment, update_data)
+        db.session.commit()
+
+        event = EquipoHistorial.query.filter_by(
+            equipo_id=equipment.id,
+            tipo_evento="CAMBIO_UBICACION",
+        ).one()
+        previous, current = equipo_history_change_labels(event)
+
+        self.assertIn("Mesa 1", previous)
+        self.assertIn("Mesa 2", current)
+        self.assertNotIn(f"{installation.id}:{area.id}:", previous)
+        self.assertNotIn(f"{installation.id}:{area.id}:", current)
+
+    def test_location_history_renders_legacy_serialized_location_cleanly(self):
+        event = EquipoHistorial(
+            empresa_id=101,
+            equipo_id=999,
+            tipo_evento="CAMBIO_UBICACION",
+            estado_anterior="2:4:Mesa de balanzas 1",
+            estado_nuevo="2:4:Mesa de balanzas 2",
+        )
+
+        previous, current = equipo_history_change_labels(event)
+
+        self.assertEqual(previous, "Mesa de balanzas 1")
+        self.assertEqual(current, "Mesa de balanzas 2")
+
+    def test_detail_route_renders_persisted_legacy_location_history_cleanly(self):
+        installation, area = self.create_basic_location()
+        equipment = create_equipo(self.user(), self.equipo_data(installation, area, code="EQ-PRUEBA-01"))
+        db.session.flush()
+        event = EquipoHistorial(
+            empresa_id=101,
+            equipo_id=equipment.id,
+            tipo_evento="CAMBIO_UBICACION",
+            descripcion="Ubicacion del equipo actualizada.",
+            estado_anterior="2:4:Mesa de balanzas 1",
+            estado_nuevo="2:4:Mesa de balanzas 2",
+            usuario_id=201,
+            created_at=datetime(2026, 8, 4, 12, 56),
+        )
+        db.session.add(event)
+        db.session.commit()
+
+        response = self.login(201).get(f"/equipamiento/equipos/{equipment.id}")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Mesa de balanzas 1", body)
+        self.assertIn("Mesa de balanzas 2", body)
+        self.assertNotIn("2:4:Mesa", body)
+        self.assertIn("CAMBIO UBICACION", body)
+        self.assertIn("2026-08-04 12:56", body)
+        self.assertIn("Calidad", body)
+
     def test_equipment_code_unique_per_company_and_repeat_allowed_between_companies(self):
         installation, area = self.create_basic_location()
         create_equipo(self.user(), self.equipo_data(installation, area, code="EQ-001"))
@@ -294,6 +359,109 @@ class Equipamiento5ATest(unittest.TestCase):
         self.assertEqual(link.documento_version_id, version.id)
         self.assertIsNone(link.archivo_url)
         self.assertTrue(EquipoHistorial.query.filter_by(equipo_id=equipment.id, tipo_evento="VINCULO_DOCUMENTO").first())
+
+    def add_document_version(self, document_id=501, code="DOC-EQ", title="Manual de equipo"):
+        document = Documento(
+            id=document_id,
+            empresa_id=101,
+            codigo=code,
+            titulo=title,
+            tipo_documento="MANUAL",
+            estado="APROBADO",
+            version_actual="1",
+            elaborado_por_id=201,
+        )
+        version = DocumentoVersion(
+            id=document_id + 1000,
+            empresa_id=101,
+            documento_id=document_id,
+            version="1",
+            estado="APROBADO",
+            elaborado_por_id=201,
+        )
+        db.session.add_all([document, version])
+        db.session.commit()
+        return document, version
+
+    def test_document_link_form_renders_filter_and_available_versions(self):
+        installation, area = self.create_basic_location()
+        equipment = create_equipo(self.user(), self.equipo_data(installation, area))
+        _document, version = self.add_document_version(title="Manual visible")
+
+        response = self.login(201).get(f"/equipamiento/equipos/{equipment.id}")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Buscar documento", body)
+        self.assertIn("data-document-version-filter", body)
+        self.assertIn("name=\"documento_version_id\"", body)
+        self.assertIn(f"value=\"{version.id}\"", body)
+        self.assertIn("DOC-EQ v1 - Manual visible", body)
+
+    def test_technician_document_link_form_renders_filter_and_available_versions(self):
+        installation, area = self.create_basic_location()
+        equipment = create_equipo(self.user(), self.equipo_data(installation, area))
+        _document, version = self.add_document_version(title="Manual tecnico")
+
+        response = self.login(202).get(f"/equipamiento/equipos/{equipment.id}")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Buscar documento", body)
+        self.assertIn("id=\"document-version-filter\"", body)
+        self.assertIn("data-document-version-select", body)
+        self.assertIn(f"value=\"{version.id}\"", body)
+        self.assertIn("DOC-EQ v1 - Manual tecnico", body)
+
+    def test_document_link_post_still_links_after_selector_improvement(self):
+        installation, area = self.create_basic_location()
+        equipment = create_equipo(self.user(), self.equipo_data(installation, area))
+        _document, version = self.add_document_version()
+
+        response = self.login(201).post(
+            f"/equipamiento/equipos/{equipment.id}/documentos",
+            data={
+                "documento_version_id": str(version.id),
+                "tipo_documento": "MANUAL",
+                "observaciones": "Manual vigente",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(equipment.documentos[0].documento_version_id, version.id)
+
+    def test_consultation_user_cannot_render_or_post_document_link_form(self):
+        installation, area = self.create_basic_location()
+        equipment = create_equipo(self.user(), self.equipo_data(installation, area))
+        _document, version = self.add_document_version()
+        client = self.login(203)
+
+        detail = client.get(f"/equipamiento/equipos/{equipment.id}")
+        body = detail.get_data(as_text=True)
+        post = client.post(
+            f"/equipamiento/equipos/{equipment.id}/documentos",
+            data={"documento_version_id": str(version.id), "tipo_documento": "MANUAL"},
+        )
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertNotIn("Buscar documento", body)
+        self.assertEqual(post.status_code, 403)
+
+    def test_equipment_role_permissions_remain_expected(self):
+        admin = self.user(201)
+        technician = self.user(202)
+        consultation = self.user(203)
+
+        self.assertTrue(user_has_permission(admin, "equipos.documentos.vincular"))
+        self.assertTrue(user_has_permission(admin, "equipos.cambiar_estado"))
+        self.assertTrue(user_has_permission(technician, "equipos.documentos.vincular"))
+        self.assertTrue(user_has_permission(technician, "equipos.cambiar_estado"))
+        self.assertTrue(user_has_permission(consultation, "equipos.ver"))
+        self.assertTrue(user_has_permission(consultation, "equipos.historial.ver"))
+        self.assertFalse(user_has_permission(consultation, "equipos.documentos.vincular"))
+        self.assertFalse(user_has_permission(consultation, "equipos.cambiar_estado"))
+        self.assertFalse(user_has_permission(consultation, "equipos.editar"))
 
     def test_document_module_regression_basic_view_still_loads(self):
         response = self.login(201).get("/documentacion/")

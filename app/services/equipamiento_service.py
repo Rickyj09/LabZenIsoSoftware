@@ -18,6 +18,35 @@ class EquipamientoError(ValueError):
     pass
 
 
+def _split_legacy_location(value):
+    value = _clean(value)
+    if not value:
+        return ""
+    parts = value.split(":", 2)
+    if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
+        return parts[2] or ""
+    return value
+
+
+def equipo_location_label(equipo, instalacion=None, area=None, ubicacion=None):
+    instalacion = instalacion if instalacion is not None else getattr(equipo, "instalacion", None)
+    area = area if area is not None else getattr(equipo, "area_ambiente", None)
+    if ubicacion is None:
+        ubicacion = getattr(equipo, "ubicacion_especifica", None) or getattr(equipo, "ubicacion", None)
+    parts = [
+        getattr(instalacion, "nombre", None),
+        getattr(area, "nombre", None),
+        ubicacion,
+    ]
+    return " / ".join(part for part in (_clean(item) for item in parts) if part)
+
+
+def equipo_history_change_labels(event):
+    previous = _split_legacy_location(getattr(event, "estado_anterior", None))
+    current = _split_legacy_location(getattr(event, "estado_nuevo", None))
+    return previous, current
+
+
 def _clean(value, upper=False):
     value = (value or "").strip()
     if upper:
@@ -263,7 +292,7 @@ def create_equipo(user, data):
 
 def update_equipo(user, item, data):
     ensure_permission(user, "equipos.editar")
-    previous_location = f"{item.instalacion_id}:{item.area_ambiente_id}:{item.ubicacion_especifica or ''}"
+    previous_location = equipo_location_label(item)
     previous_responsible = item.responsable or ""
     previous_state = item.estado_operativo
     codigo = _clean(data.get("codigo"), upper=True)
@@ -274,7 +303,7 @@ def update_equipo(user, item, data):
     _apply_equipo_data(item, data)
     _validate_equipo_required(item)
     record_equipo_event(user, item, "ACTUALIZACION", "Datos maestros actualizados.")
-    new_location = f"{item.instalacion_id}:{item.area_ambiente_id}:{item.ubicacion_especifica or ''}"
+    new_location = equipo_location_label(item, instalacion=instalacion, area=area)
     if new_location != previous_location:
         record_equipo_event(user, item, "CAMBIO_UBICACION", "Ubicacion del equipo actualizada.", previous_location, new_location)
     if (item.responsable or "") != previous_responsible:

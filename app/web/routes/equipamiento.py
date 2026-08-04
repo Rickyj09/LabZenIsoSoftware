@@ -20,6 +20,7 @@ from app.services.equipamiento_service import (
     create_area,
     create_equipo,
     create_instalacion,
+    equipo_history_change_labels,
     get_area,
     get_equipo,
     get_instalacion,
@@ -296,6 +297,7 @@ def detalle_equipo(item_id):
         item=item,
         estados_operativos=ESTADOS_OPERATIVOS_EQUIPO,
         document_versions=document_versions,
+        equipo_history_change_labels=equipo_history_change_labels,
     )
 
 
