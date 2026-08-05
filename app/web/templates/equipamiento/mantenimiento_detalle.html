@@ -1,0 +1,105 @@
+{% extends "base_admin.html" %}
+{% block title %}{{ item.codigo }}{% endblock %}
+
+{% block content %}
+{% set overdue = is_overdue(item, today) %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.mantenimientos') }}">Mantenimientos</a></li><li class="breadcrumb-item active">{{ item.codigo }}</li></ol></nav>
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+    <div><h2 class="mb-1">{{ item.codigo }}</h2><div class="text-muted">{{ item.equipo.codigo }} - {{ item.equipo.nombre }}</div></div>
+    <a href="{{ url_for('equipamiento.mantenimientos') }}" class="btn btn-outline-secondary">Volver</a>
+</div>
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="page-card h-100">
+            <h5 class="mb-3">Datos del mantenimiento</h5>
+            <dl class="row mb-0">
+                <dt class="col-sm-5">Tipo</dt><dd class="col-sm-7">{{ item.tipo_mantenimiento.title() }}</dd>
+                <dt class="col-sm-5">Estado</dt><dd class="col-sm-7"><span class="badge {{ estado_badge_class(item.estado) }}">{{ item.estado.replace('_', ' ') }}</span>{% if overdue %} <span class="badge text-bg-danger">Vencido</span>{% endif %}</dd>
+                <dt class="col-sm-5">Plan</dt><dd class="col-sm-7">{% if item.plan %}<a href="{{ url_for('equipamiento.detalle_plan_mantenimiento', plan_id=item.plan.id) }}">{{ item.plan.codigo }}</a>{% else %}-{% endif %}</dd>
+                <dt class="col-sm-5">Fecha planificada</dt><dd class="col-sm-7">{{ item.fecha_planificada or '-' }}</dd>
+                <dt class="col-sm-5">Inicio</dt><dd class="col-sm-7">{{ item.fecha_inicio or '-' }}</dd>
+                <dt class="col-sm-5">Finalizacion</dt><dd class="col-sm-7">{{ item.fecha_finalizacion or '-' }}</dd>
+                <dt class="col-sm-5">Responsable</dt><dd class="col-sm-7">{{ item.responsable.nombre if item.responsable else '-' }}</dd>
+                <dt class="col-sm-5">Proveedor</dt><dd class="col-sm-7">{{ item.proveedor or '-' }}</dd>
+                <dt class="col-sm-5">Descripcion</dt><dd class="col-sm-7">{{ item.descripcion_trabajo or '-' }}</dd>
+                <dt class="col-sm-5">Resultado</dt><dd class="col-sm-7">{{ item.resultado or '-' }}</dd>
+                <dt class="col-sm-5">Costo</dt><dd class="col-sm-7">{% if item.costo is not none %}{{ item.costo }} {{ item.moneda or '' }}{% else %}-{% endif %}</dd>
+                {% if item.motivo_cancelacion %}<dt class="col-sm-5">Motivo cancelacion</dt><dd class="col-sm-7">{{ item.motivo_cancelacion }}</dd>{% endif %}
+            </dl>
+        </div>
+    </div>
+    <div class="col-lg-7">
+        {% if item.estado == 'PROGRAMADO' and can('equipos.mantenimientos.iniciar') %}
+        <div class="page-card mb-4">
+            <h5 class="mb-3">Iniciar mantenimiento</h5>
+            <form method="post" action="{{ url_for('equipamiento.iniciar_mantenimiento', item_id=item.id) }}" class="row g-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="col-md-8"><input type="date" name="fecha_inicio" class="form-control" value="{{ today }}"></div>
+                <div class="col-md-4"><button class="btn btn-primary w-100">Iniciar</button></div>
+            </form>
+        </div>
+        {% endif %}
+        {% if item.estado == 'EN_PROCESO' and can('equipos.mantenimientos.completar') %}
+        <div class="page-card mb-4">
+            <h5 class="mb-3">Completar mantenimiento</h5>
+            <form method="post" action="{{ url_for('equipamiento.completar_mantenimiento', item_id=item.id) }}" class="row g-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="col-md-4"><label class="form-label">Fecha finalizacion</label><input type="date" name="fecha_finalizacion" class="form-control" value="{{ today }}" required></div>
+                <div class="col-md-4"><label class="form-label">Resultado</label><input name="resultado" class="form-control" required></div>
+                <div class="col-md-2"><label class="form-label">Costo</label><input type="number" step="0.01" min="0" name="costo" class="form-control"></div>
+                <div class="col-md-2"><label class="form-label">Moneda</label><input name="moneda" class="form-control" placeholder="USD"></div>
+                <div class="col-12"><label class="form-label">Trabajo realizado</label><textarea name="descripcion_trabajo" class="form-control" rows="3" required></textarea></div>
+                <div class="col-12"><button class="btn btn-success">Completar</button></div>
+            </form>
+        </div>
+        {% endif %}
+        {% if item.estado in ['PROGRAMADO', 'EN_PROCESO'] and can('equipos.mantenimientos.cancelar') %}
+        <div class="page-card mb-4">
+            <h5 class="mb-3">Cancelar mantenimiento</h5>
+            <form method="post" action="{{ url_for('equipamiento.cancelar_mantenimiento', item_id=item.id) }}" class="row g-2" onsubmit="return confirm('Cancelar este mantenimiento?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="col-md-9"><input name="motivo" class="form-control" placeholder="Motivo obligatorio" required></div>
+                <div class="col-md-3"><button class="btn btn-outline-danger w-100">Cancelar</button></div>
+            </form>
+        </div>
+        {% endif %}
+        <div class="page-card mb-4">
+            <h5 class="mb-3">Evidencias documentales</h5>
+            {% if item.estado != 'CANCELADO' and can('equipos.mantenimientos.evidencias.vincular') %}
+            <form method="post" action="{{ url_for('equipamiento.vincular_evidencia_mantenimiento', item_id=item.id) }}" class="row g-2 mb-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="col-md-5"><label class="form-label">Documento</label><select name="documento_id" class="form-select" required><option value="">Selecciona documento</option>{% for doc in documentos %}<option value="{{ doc.id }}">{{ doc.codigo }} - {{ doc.titulo }}</option>{% endfor %}</select></div>
+                <div class="col-md-4"><label class="form-label">Version</label><select name="documento_version_id" class="form-select" required><option value="">Selecciona version</option>{% for version in document_versions %}<option value="{{ version.id }}">{{ version.documento.codigo }} v{{ version.version }} - {{ version.documento.titulo }}</option>{% endfor %}</select></div>
+                <div class="col-md-3"><label class="form-label">Tipo</label><input name="tipo_evidencia" class="form-control" required></div>
+                <div class="col-md-9"><input name="observaciones" class="form-control" placeholder="Observaciones"></div>
+                <div class="col-md-3"><button class="btn btn-outline-primary w-100">Vincular</button></div>
+            </form>
+            {% endif %}
+            <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Documento</th><th>Version</th><th>Tipo</th><th>Usuario</th><th>Fecha</th><th></th></tr></thead><tbody>
+            {% for evidence in item.evidencias %}
+                <tr>
+                    <td>{% if evidence.documento %}<a href="{{ url_for('documentacion.detalle', item_id=evidence.documento.id) }}">{{ evidence.documento.codigo }} - {{ evidence.documento.titulo }}</a>{% else %}-{% endif %}<div class="text-muted small">{{ evidence.observaciones or '' }}</div></td>
+                    <td>{{ evidence.documento_version.version if evidence.documento_version else '-' }}</td>
+                    <td>{{ evidence.tipo_evidencia }}</td>
+                    <td>{{ evidence.vinculado_por.nombre if evidence.vinculado_por else '-' }}</td>
+                    <td>{{ evidence.created_at.strftime('%Y-%m-%d') if evidence.created_at else '' }}</td>
+                    <td class="text-end">{% if can('equipos.mantenimientos.evidencias.desvincular') %}<form method="post" action="{{ url_for('equipamiento.desvincular_evidencia_mantenimiento', evidencia_id=evidence.id) }}" onsubmit="return confirm('Desvincular esta evidencia?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="motivo" value="Desvinculacion desde detalle"><button class="btn btn-sm btn-outline-danger">Desvincular</button></form>{% endif %}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="6" class="text-center text-muted py-3">Sin evidencias vinculadas.</td></tr>
+            {% endfor %}
+            </tbody></table></div>
+        </div>
+        <div class="page-card">
+            <h5 class="mb-3">Historial auditable</h5>
+            <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Fecha</th><th>Evento</th><th>Descripcion</th><th>Usuario</th></tr></thead><tbody>
+            {% for event in history %}
+                <tr><td>{{ event.created_at.strftime('%Y-%m-%d %H:%M') if event.created_at else '' }}</td><td>{{ event.tipo_evento.replace('_', ' ') }}</td><td>{{ event.descripcion or '' }}</td><td>{{ event.usuario.nombre if event.usuario else '' }}</td></tr>
+            {% else %}
+                <tr><td colspan="4" class="text-center text-muted py-3">Sin historial registrado.</td></tr>
+            {% endfor %}
+            </tbody></table></div>
+        </div>
+    </div>
+</div>
+{% endblock %}

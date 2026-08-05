@@ -142,6 +142,17 @@ class Equipamiento5BModelsTest(unittest.TestCase):
     def user(self, user_id):
         return db.session.get(Usuario, user_id)
 
+    def login(self, user_id):
+        client = self.app.test_client()
+        with client.session_transaction() as session:
+            session["_user_id"] = str(user_id)
+            session["_fresh"] = True
+        return client
+
+    def csrf_token(self, client):
+        with client.session_transaction() as session:
+            return session["equipamiento_mantenimiento_csrf"]
+
     def add_plan(self, empresa_id=101, equipo_id=401, codigo="PLAN-MANT"):
         plan = EquipoPlanMantenimiento(
             empresa_id=empresa_id,
@@ -811,6 +822,246 @@ class Equipamiento5BModelsTest(unittest.TestCase):
 
         self.assertEqual(order.estado, "COMPLETADO")
         self.assertEqual(new_plan.estado, "ACTIVO")
+
+    def test_web_lists_plans_and_maintenances_with_filters_and_navigation(self):
+        plan = self.add_plan(codigo="PM-WEB")
+        past = self.add_maintenance(codigo="MANT-WEB-PAST", plan=plan)
+        future = self.add_maintenance(codigo="MANT-WEB-FUTURE")
+        other = self.add_maintenance(empresa_id=102, equipo_id=402, codigo="MANT-WEB-OTHER")
+        past.fecha_planificada = date(2020, 1, 1)
+        future.fecha_planificada = date.today()
+        other.fecha_planificada = date.today()
+        db.session.commit()
+
+        client = self.login(201)
+        plans = client.get("/equipamiento/planes-mantenimiento")
+        body = plans.get_data(as_text=True)
+        self.assertEqual(plans.status_code, 200)
+        self.assertIn("PM-WEB", body)
+        self.assertIn("Planes de mantenimiento", body)
+        self.assertIn("Mantenimientos", body)
+
+        vencidos = client.get("/equipamiento/mantenimientos?vista=vencidos").get_data(as_text=True)
+        self.assertIn("MANT-WEB-PAST", vencidos)
+        self.assertIn("Vencido", vencidos)
+        self.assertNotIn("MANT-WEB-OTHER", vencidos)
+
+        proximos = client.get("/equipamiento/mantenimientos?vista=proximos").get_data(as_text=True)
+        self.assertIn("MANT-WEB-FUTURE", proximos)
+        self.assertNotIn("MANT-WEB-OTHER", proximos)
+        self.assertEqual(db.session.get(EquipoMantenimiento, past.id).estado, "PROGRAMADO")
+
+    def test_web_consultation_can_view_but_cannot_create_or_execute(self):
+        plan = self.add_plan(codigo="PM-CONSULTA")
+        maintenance = self.add_maintenance(codigo="MANT-CONSULTA", plan=plan)
+        db.session.commit()
+
+        client = self.login(204)
+        self.assertEqual(client.get("/equipamiento/planes-mantenimiento").status_code, 200)
+        detail = client.get(f"/equipamiento/mantenimientos/{maintenance.id}")
+        self.assertEqual(detail.status_code, 200)
+        body = detail.get_data(as_text=True)
+        self.assertNotIn("Iniciar mantenimiento", body)
+        self.assertNotIn("Cancelar mantenimiento", body)
+        self.assertEqual(client.get("/equipamiento/planes-mantenimiento/nuevo").status_code, 403)
+        self.assertEqual(client.get("/equipamiento/mantenimientos/correctivo/nuevo").status_code, 403)
+
+    def test_web_blocks_cross_company_direct_ids(self):
+        plan = self.add_plan(empresa_id=102, equipo_id=402, codigo="PM-OTRA")
+        maintenance = self.add_maintenance(empresa_id=102, equipo_id=402, codigo="MANT-OTRA", plan=plan)
+        db.session.commit()
+
+        client = self.login(201)
+        self.assertEqual(client.get(f"/equipamiento/planes-mantenimiento/{plan.id}").status_code, 404)
+        self.assertEqual(client.get(f"/equipamiento/mantenimientos/{maintenance.id}").status_code, 404)
+
+    def test_web_plan_create_edit_inactivate_and_schedule_use_service_and_csrf(self):
+        client = self.login(201)
+        form = client.get("/equipamiento/planes-mantenimiento/nuevo")
+        self.assertEqual(form.status_code, 200)
+        token = self.csrf_token(client)
+
+        missing_csrf = client.post("/equipamiento/planes-mantenimiento/nuevo", data={
+            "equipo_id": 401,
+            "codigo": "PM-CSRF",
+            "nombre": "Sin csrf",
+            "periodicidad_meses": 1,
+            "fecha_inicio": "2026-08-01",
+        })
+        self.assertEqual(missing_csrf.status_code, 403)
+
+        response = client.post("/equipamiento/planes-mantenimiento/nuevo", data={
+            "csrf_token": token,
+            "equipo_id": 401,
+            "codigo": "PM-WEB-CREATE",
+            "nombre": "Plan web",
+            "periodicidad_meses": 2,
+            "fecha_inicio": "2026-08-01",
+            "proxima_fecha": "2026-08-01",
+            "responsable_id": 201,
+            "proveedor": "Proveedor web",
+        })
+        self.assertEqual(response.status_code, 302)
+        plan = EquipoPlanMantenimiento.query.filter_by(codigo="PM-WEB-CREATE").first()
+        self.assertIsNotNone(plan)
+        self.assertTrue(EquipoHistorial.query.filter_by(tipo_evento="PLAN_MANTENIMIENTO_CREADO").first())
+
+        response = client.post(f"/equipamiento/planes-mantenimiento/{plan.id}/editar", data={
+            "csrf_token": token,
+            "equipo_id": 401,
+            "codigo": "PM-WEB-EDIT",
+            "nombre": "Plan web editado",
+            "periodicidad_meses": 3,
+            "fecha_inicio": "2026-08-01",
+            "proxima_fecha": "2026-09-01",
+            "responsable_id": 201,
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(plan.codigo, "PM-WEB-EDIT")
+
+        response = client.post(f"/equipamiento/planes-mantenimiento/{plan.id}/programar", data={
+            "csrf_token": token,
+            "fecha_planificada": "2026-09-01",
+            "observaciones": "Programacion web",
+        })
+        self.assertEqual(response.status_code, 302)
+        order = EquipoMantenimiento.query.filter_by(plan_id=plan.id, fecha_planificada=date(2026, 9, 1)).first()
+        self.assertIsNotNone(order)
+
+        response = client.post(f"/equipamiento/planes-mantenimiento/{plan.id}/inactivar", data={
+            "csrf_token": token,
+            "motivo": "Cierre temporal",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(plan.estado, "INACTIVO")
+        self.assertEqual(client.get(f"/equipamiento/planes-mantenimiento/{plan.id}/inactivar").status_code, 405)
+
+    def test_web_corrective_transitions_cancel_and_protected_state_field(self):
+        client = self.login(201)
+        client.get("/equipamiento/mantenimientos/correctivo/nuevo")
+        token = self.csrf_token(client)
+        response = client.post("/equipamiento/mantenimientos/correctivo/nuevo", data={
+            "csrf_token": token,
+            "equipo_id": 401,
+            "fecha_planificada": "2026-08-20",
+            "descripcion_trabajo": "Falla web",
+            "responsable_id": 201,
+            "proveedor": "Proveedor web",
+            "estado": "COMPLETADO",
+            "empresa_id": 102,
+        })
+        self.assertEqual(response.status_code, 302)
+        maintenance = EquipoMantenimiento.query.filter_by(descripcion_trabajo="Falla web").first()
+        self.assertEqual(maintenance.estado, "PROGRAMADO")
+        self.assertEqual(maintenance.empresa_id, 101)
+        original_state = maintenance.equipo.estado_operativo
+
+        response = client.post(f"/equipamiento/mantenimientos/{maintenance.id}/iniciar", data={
+            "csrf_token": token,
+            "fecha_inicio": "2026-08-20",
+            "estado": "CANCELADO",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(maintenance.estado, "EN_PROCESO")
+
+        response = client.post(f"/equipamiento/mantenimientos/{maintenance.id}/completar", data={
+            "csrf_token": token,
+            "fecha_finalizacion": "2026-08-20",
+            "descripcion_trabajo": "Trabajo web realizado",
+            "resultado": "OK",
+            "costo": "10",
+            "moneda": "USD",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(maintenance.estado, "COMPLETADO")
+        self.assertEqual(maintenance.equipo.estado_operativo, original_state)
+        self.assertEqual(client.get(f"/equipamiento/mantenimientos/{maintenance.id}/iniciar").status_code, 405)
+
+        cancelable = self.add_maintenance(codigo="MANT-WEB-CANCEL")
+        db.session.commit()
+        response = client.post(f"/equipamiento/mantenimientos/{cancelable.id}/cancelar", data={
+            "csrf_token": token,
+            "motivo": "",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(cancelable.estado, "PROGRAMADO")
+        response = client.post(f"/equipamiento/mantenimientos/{cancelable.id}/cancelar", data={
+            "csrf_token": token,
+            "motivo": "Cancelacion solicitada",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(cancelable.estado, "CANCELADO")
+
+    def test_web_evidence_link_unlink_permissions_and_document_integrity(self):
+        tech_client = self.login(203)
+        maintenance = self.add_maintenance(codigo="MANT-WEB-EVID")
+        document, version = self.add_document_version()
+        other_document, other_version = self.add_other_company_document_version()
+        db.session.commit()
+
+        tech_client.get(f"/equipamiento/mantenimientos/{maintenance.id}")
+        token = self.csrf_token(tech_client)
+        bad = tech_client.post(f"/equipamiento/mantenimientos/{maintenance.id}/evidencias", data={
+            "csrf_token": token,
+            "documento_id": document.id,
+            "documento_version_id": other_version.id,
+            "tipo_evidencia": "INFORME",
+        })
+        self.assertEqual(bad.status_code, 302)
+        self.assertEqual(EquipoMantenimientoDocumento.query.count(), 0)
+
+        response = tech_client.post(f"/equipamiento/mantenimientos/{maintenance.id}/evidencias", data={
+            "csrf_token": token,
+            "documento_id": document.id,
+            "documento_version_id": version.id,
+            "tipo_evidencia": "INFORME",
+            "observaciones": "Evidencia web",
+        })
+        self.assertEqual(response.status_code, 302)
+        evidence = EquipoMantenimientoDocumento.query.filter_by(mantenimiento_id=maintenance.id).first()
+        self.assertIsNotNone(evidence)
+        detail = tech_client.get(f"/equipamiento/mantenimientos/{maintenance.id}").get_data(as_text=True)
+        self.assertIn("DOC-MANT", detail)
+        self.assertNotIn("Desvincular", detail)
+        self.assertEqual(tech_client.post(f"/equipamiento/mantenimientos/evidencias/{evidence.id}/desvincular", data={"csrf_token": token}).status_code, 403)
+
+        cancelled = self.add_maintenance(codigo="MANT-WEB-EVID-CANCEL")
+        cancelled.estado = "CANCELADO"
+        db.session.commit()
+        response = tech_client.post(f"/equipamiento/mantenimientos/{cancelled.id}/evidencias", data={
+            "csrf_token": token,
+            "documento_id": document.id,
+            "documento_version_id": version.id,
+            "tipo_evidencia": "INFORME",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNone(EquipoMantenimientoDocumento.query.filter_by(mantenimiento_id=cancelled.id).first())
+
+    def test_web_admin_unlinks_evidence_without_deleting_document_or_version(self):
+        admin_client = self.login(201)
+        maintenance = self.add_maintenance(codigo="MANT-WEB-UNLINK")
+        document, version = self.add_document_version()
+        evidence = EquipoMantenimientoDocumento(
+            empresa_id=101,
+            mantenimiento_id=maintenance.id,
+            documento_id=document.id,
+            documento_version_id=version.id,
+            tipo_evidencia="INFORME",
+            vinculado_por_id=201,
+        )
+        db.session.add(evidence)
+        db.session.commit()
+
+        admin_client.get(f"/equipamiento/mantenimientos/{maintenance.id}")
+        token = self.csrf_token(admin_client)
+        response = admin_client.post(f"/equipamiento/mantenimientos/evidencias/{evidence.id}/desvincular", data={
+            "csrf_token": token,
+            "motivo": "Retiro web",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNone(db.session.get(EquipoMantenimientoDocumento, evidence.id))
+        self.assertIsNotNone(db.session.get(Documento, document.id))
+        self.assertIsNotNone(db.session.get(DocumentoVersion, version.id))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,35 @@
+{% extends "base_admin.html" %}
+{% block title %}Planes de mantenimiento{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li><li class="breadcrumb-item active">Planes de mantenimiento</li></ol></nav>
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div><h1 class="mb-1">Planes de mantenimiento</h1><p class="text-muted mb-0">Planes preventivos recurrentes por equipo</p></div>
+        {% if can('equipos.mantenimientos.planes.crear') %}<a href="{{ url_for('equipamiento.nuevo_plan_mantenimiento') }}" class="btn btn-primary">Nuevo plan</a>{% endif %}
+    </div>
+    <form method="get" class="row g-3 mb-4">
+        <div class="col-md-4"><label class="form-label">Texto</label><input name="q" class="form-control" value="{{ filters.q }}" placeholder="Codigo, nombre o equipo"></div>
+        <div class="col-md-4"><label class="form-label">Equipo</label><select name="equipo_id" class="form-select"><option value="">Todos</option>{% for equipo in equipos %}<option value="{{ equipo.id }}" {% if filters.equipo_id|string == equipo.id|string %}selected{% endif %}>{{ equipo.codigo }} - {{ equipo.nombre }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label">Estado</label><select name="estado" class="form-select"><option value="">Todos</option><option value="ACTIVO" {% if filters.estado == 'ACTIVO' %}selected{% endif %}>Activo</option><option value="INACTIVO" {% if filters.estado == 'INACTIVO' %}selected{% endif %}>Inactivo</option></select></div>
+        <div class="col-md-2 d-flex align-items-end"><button class="btn btn-outline-primary w-100">Filtrar</button></div>
+    </form>
+    <div class="table-responsive"><table class="table table-hover align-middle"><thead class="table-light"><tr><th>Codigo</th><th>Equipo</th><th>Nombre</th><th>Periodicidad</th><th>Inicio</th><th>Proxima</th><th>Responsable</th><th>Estado</th><th></th></tr></thead><tbody>
+        {% for item in items %}
+        <tr>
+            <td><a href="{{ url_for('equipamiento.detalle_plan_mantenimiento', plan_id=item.id) }}">{{ item.codigo }}</a></td>
+            <td>{{ item.equipo.codigo }} - {{ item.equipo.nombre }}</td>
+            <td>{{ item.nombre }}</td>
+            <td>{{ item.periodicidad_meses }} meses</td>
+            <td>{{ item.fecha_inicio }}</td>
+            <td>{{ item.proxima_fecha or '-' }}</td>
+            <td>{{ item.responsable.nombre if item.responsable else '-' }}</td>
+            <td><span class="badge {% if item.estado == 'ACTIVO' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ item.estado }}</span></td>
+            <td class="text-end"><a href="{{ url_for('equipamiento.detalle_plan_mantenimiento', plan_id=item.id) }}" class="btn btn-sm btn-outline-primary">Ver</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="text-center text-muted py-4">No hay planes con los filtros seleccionados.</td></tr>
+        {% endfor %}
+    </tbody></table></div>
+</div>
+{% endblock %}

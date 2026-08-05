@@ -1,4 +1,7 @@
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+import secrets
+from datetime import date
+
+from flask import Blueprint, abort, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import or_
 
@@ -8,10 +11,17 @@ from app.models.equipos import (
     AreaAmbiente,
     CRITICIDADES_EQUIPO,
     Equipo,
+    EquipoHistorial,
+    EquipoMantenimiento,
+    EquipoMantenimientoDocumento,
+    EquipoPlanMantenimiento,
     ESTADOS_OPERATIVOS_EQUIPO,
     Instalacion,
 )
-from app.security.permissions import require_permission
+from app.models.seguridad import Usuario
+from app.security.permissions import current_user_can, require_permission
+from app.services import equipo_mantenimiento_service as mantenimiento_service
+from app.services.equipo_mantenimiento_service import EquipoMantenimientoError
 from app.services.equipamiento_service import (
     EquipamientoError,
     active_areas,
@@ -31,6 +41,105 @@ from app.services.equipamiento_service import (
 )
 
 bp = Blueprint("equipamiento", __name__, url_prefix="/equipamiento")
+
+MAINTENANCE_CSRF_SESSION_KEY = "equipamiento_mantenimiento_csrf"
+
+
+def _maintenance_csrf_token():
+    token = session.get(MAINTENANCE_CSRF_SESSION_KEY)
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session[MAINTENANCE_CSRF_SESSION_KEY] = token
+    return token
+
+
+def _validate_maintenance_csrf():
+    expected = session.get(MAINTENANCE_CSRF_SESSION_KEY)
+    provided = request.form.get("csrf_token", "")
+    if not expected or not secrets.compare_digest(expected, provided):
+        abort(403)
+
+
+def _maintenance_template_context(**extra):
+    context = {
+        "csrf_token": _maintenance_csrf_token(),
+        "today": date.today(),
+        "is_overdue": mantenimiento_service.esta_vencido,
+        "estado_badge_class": _estado_mantenimiento_badge_class,
+    }
+    context.update(extra)
+    return context
+
+
+def _estado_mantenimiento_badge_class(estado):
+    return {
+        "PROGRAMADO": "text-bg-primary",
+        "EN_PROCESO": "text-bg-warning",
+        "COMPLETADO": "text-bg-success",
+        "CANCELADO": "text-bg-secondary",
+    }.get(estado, "text-bg-light")
+
+
+def _active_equipment():
+    return (
+        Equipo.query
+        .filter(
+            Equipo.empresa_id == current_user.empresa_id,
+            Equipo.estado == "activo",
+            Equipo.estado_operativo != "RETIRADO",
+        )
+        .order_by(Equipo.codigo.asc())
+        .all()
+    )
+
+
+def _active_users():
+    return (
+        Usuario.query
+        .filter_by(empresa_id=current_user.empresa_id, activo=True)
+        .order_by(Usuario.nombre.asc(), Usuario.apellido.asc())
+        .all()
+    )
+
+
+def _documents_for_evidence():
+    return (
+        Documento.query
+        .filter(Documento.empresa_id == current_user.empresa_id)
+        .order_by(Documento.codigo.asc())
+        .all()
+    )
+
+
+def _document_versions_for_evidence():
+    return (
+        DocumentoVersion.query
+        .join(Documento, Documento.id == DocumentoVersion.documento_id)
+        .filter(
+            DocumentoVersion.empresa_id == current_user.empresa_id,
+            Documento.empresa_id == current_user.empresa_id,
+        )
+        .order_by(Documento.codigo.asc(), DocumentoVersion.version.asc())
+        .all()
+    )
+
+
+def _get_plan_or_404(plan_id):
+    plan = EquipoPlanMantenimiento.query.filter_by(id=plan_id, empresa_id=current_user.empresa_id).first()
+    if not plan:
+        abort(404)
+    return plan
+
+
+def _get_maintenance_or_404(item_id):
+    item = EquipoMantenimiento.query.filter_by(id=item_id, empresa_id=current_user.empresa_id).first()
+    if not item:
+        abort(404)
+    return item
+
+
+def _redirect_back_to_maintenance(item):
+    return redirect(url_for("equipamiento.detalle_mantenimiento", item_id=item.id))
 
 
 def _estado_filter(query, model, estado):
@@ -259,6 +368,334 @@ def _equipo_form_context(item=None, form_data=None):
         "estados_operativos": ESTADOS_OPERATIVOS_EQUIPO,
         "criticidades": CRITICIDADES_EQUIPO,
     }
+
+
+@bp.route("/mantenimientos")
+@login_required
+@require_permission(mantenimiento_service.PERM_VER)
+def mantenimientos():
+    filters = {key: request.args.get(key, "").strip() for key in (
+        "q", "equipo_id", "tipo", "estado", "vista", "fecha_desde", "fecha_hasta",
+    )}
+    query = EquipoMantenimiento.query.filter_by(empresa_id=current_user.empresa_id)
+    if filters["vista"] == "vencidos":
+        items = mantenimiento_service.mantenimientos_vencidos(current_user)
+        query = None
+    elif filters["vista"] == "proximos":
+        items = mantenimiento_service.mantenimientos_proximos(current_user)
+        query = None
+    else:
+        items = None
+    if query is not None:
+        if filters["q"]:
+            like = f"%{filters['q']}%"
+            query = query.join(Equipo, Equipo.id == EquipoMantenimiento.equipo_id).filter(
+                Equipo.empresa_id == current_user.empresa_id,
+                or_(
+                    EquipoMantenimiento.codigo.ilike(like),
+                    Equipo.codigo.ilike(like),
+                    Equipo.nombre.ilike(like),
+                    EquipoMantenimiento.proveedor.ilike(like),
+                ),
+            )
+        if filters["equipo_id"]:
+            query = query.filter(EquipoMantenimiento.equipo_id == int(filters["equipo_id"]))
+        if filters["tipo"]:
+            query = query.filter(EquipoMantenimiento.tipo_mantenimiento == filters["tipo"])
+        if filters["estado"]:
+            query = query.filter(EquipoMantenimiento.estado == filters["estado"])
+        if filters["fecha_desde"]:
+            query = query.filter(EquipoMantenimiento.fecha_planificada >= date.fromisoformat(filters["fecha_desde"]))
+        if filters["fecha_hasta"]:
+            query = query.filter(EquipoMantenimiento.fecha_planificada <= date.fromisoformat(filters["fecha_hasta"]))
+        items = query.order_by(EquipoMantenimiento.fecha_planificada.asc(), EquipoMantenimiento.codigo.asc()).all()
+    return render_template(
+        "equipamiento/mantenimientos_index.html",
+        **_maintenance_template_context(
+            items=items,
+            filters=filters,
+            equipos=Equipo.query.filter_by(empresa_id=current_user.empresa_id).order_by(Equipo.codigo.asc()).all(),
+        ),
+    )
+
+
+@bp.route("/mantenimientos/correctivo/nuevo", methods=["GET", "POST"])
+@login_required
+@require_permission(mantenimiento_service.PERM_CREAR_CORRECTIVO)
+def nuevo_mantenimiento_correctivo():
+    if request.method == "POST":
+        _validate_maintenance_csrf()
+        try:
+            item = mantenimiento_service.crear_mantenimiento_correctivo(
+                current_user,
+                request.form.get("equipo_id"),
+                request.form,
+            )
+            db.session.commit()
+            flash("Mantenimiento correctivo creado correctamente.", "success")
+            return redirect(url_for("equipamiento.detalle_mantenimiento", item_id=item.id))
+        except (EquipoMantenimientoError, ValueError) as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template(
+                "equipamiento/mantenimiento_correctivo_form.html",
+                **_maintenance_template_context(form_data=request.form, equipos=_active_equipment(), responsables=_active_users()),
+            )
+    return render_template(
+        "equipamiento/mantenimiento_correctivo_form.html",
+        **_maintenance_template_context(form_data={}, equipos=_active_equipment(), responsables=_active_users()),
+    )
+
+
+@bp.route("/mantenimientos/<int:item_id>")
+@login_required
+@require_permission(mantenimiento_service.PERM_VER)
+def detalle_mantenimiento(item_id):
+    item = _get_maintenance_or_404(item_id)
+    history = (
+        EquipoHistorial.query
+        .filter_by(empresa_id=current_user.empresa_id, equipo_id=item.equipo_id)
+        .filter(EquipoHistorial.tipo_evento.in_([
+            "MANTENIMIENTO_PROGRAMADO",
+            "MANTENIMIENTO_CORRECTIVO_CREADO",
+            "MANTENIMIENTO_INICIADO",
+            "MANTENIMIENTO_COMPLETADO",
+            "MANTENIMIENTO_CANCELADO",
+            "EVIDENCIA_MANTENIMIENTO_VINCULADA",
+            "EVIDENCIA_MANTENIMIENTO_DESVINCULADA",
+        ]))
+        .order_by(EquipoHistorial.created_at.desc(), EquipoHistorial.id.desc())
+        .all()
+    )
+    return render_template(
+        "equipamiento/mantenimiento_detalle.html",
+        **_maintenance_template_context(
+            item=item,
+            history=history,
+            documentos=_documents_for_evidence(),
+            document_versions=_document_versions_for_evidence(),
+        ),
+    )
+
+
+@bp.route("/mantenimientos/<int:item_id>/iniciar", methods=["POST"])
+@login_required
+@require_permission(mantenimiento_service.PERM_INICIAR)
+def iniciar_mantenimiento(item_id):
+    _validate_maintenance_csrf()
+    item = _get_maintenance_or_404(item_id)
+    try:
+        mantenimiento_service.iniciar_mantenimiento(current_user, item.id, request.form.get("fecha_inicio"))
+        db.session.commit()
+        flash("Mantenimiento iniciado correctamente.", "success")
+    except EquipoMantenimientoError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_back_to_maintenance(item)
+
+
+@bp.route("/mantenimientos/<int:item_id>/completar", methods=["POST"])
+@login_required
+@require_permission(mantenimiento_service.PERM_COMPLETAR)
+def completar_mantenimiento(item_id):
+    _validate_maintenance_csrf()
+    item = _get_maintenance_or_404(item_id)
+    try:
+        mantenimiento_service.completar_mantenimiento(current_user, item.id, request.form)
+        db.session.commit()
+        flash("Mantenimiento completado correctamente.", "success")
+    except EquipoMantenimientoError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_back_to_maintenance(item)
+
+
+@bp.route("/mantenimientos/<int:item_id>/cancelar", methods=["POST"])
+@login_required
+@require_permission(mantenimiento_service.PERM_CANCELAR)
+def cancelar_mantenimiento(item_id):
+    _validate_maintenance_csrf()
+    item = _get_maintenance_or_404(item_id)
+    try:
+        mantenimiento_service.cancelar_mantenimiento(current_user, item.id, request.form.get("motivo"))
+        db.session.commit()
+        flash("Mantenimiento cancelado correctamente.", "warning")
+    except EquipoMantenimientoError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_back_to_maintenance(item)
+
+
+@bp.route("/mantenimientos/<int:item_id>/evidencias", methods=["POST"])
+@login_required
+@require_permission(mantenimiento_service.PERM_VINCULAR_EVIDENCIA)
+def vincular_evidencia_mantenimiento(item_id):
+    _validate_maintenance_csrf()
+    item = _get_maintenance_or_404(item_id)
+    try:
+        mantenimiento_service.vincular_evidencia_documental(
+            current_user,
+            item.id,
+            request.form.get("documento_id"),
+            request.form.get("documento_version_id"),
+            request.form.get("tipo_evidencia"),
+            request.form.get("observaciones"),
+        )
+        db.session.commit()
+        flash("Evidencia vinculada correctamente.", "success")
+    except EquipoMantenimientoError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_back_to_maintenance(item)
+
+
+@bp.route("/mantenimientos/evidencias/<int:evidencia_id>/desvincular", methods=["POST"])
+@login_required
+@require_permission(mantenimiento_service.PERM_DESVINCULAR_EVIDENCIA)
+def desvincular_evidencia_mantenimiento(evidencia_id):
+    _validate_maintenance_csrf()
+    evidence = EquipoMantenimientoDocumento.query.filter_by(id=evidencia_id, empresa_id=current_user.empresa_id).first()
+    if not evidence:
+        abort(404)
+    maintenance_id = evidence.mantenimiento_id
+    try:
+        mantenimiento_service.desvincular_evidencia_documental(current_user, evidence.id, request.form.get("motivo"))
+        db.session.commit()
+        flash("Evidencia desvinculada correctamente.", "warning")
+    except EquipoMantenimientoError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return redirect(url_for("equipamiento.detalle_mantenimiento", item_id=maintenance_id))
+
+
+@bp.route("/planes-mantenimiento")
+@login_required
+@require_permission(mantenimiento_service.PERM_VER)
+def planes_mantenimiento():
+    filters = {key: request.args.get(key, "").strip() for key in ("q", "equipo_id", "estado")}
+    query = EquipoPlanMantenimiento.query.filter_by(empresa_id=current_user.empresa_id)
+    if filters["q"]:
+        like = f"%{filters['q']}%"
+        query = query.join(Equipo, Equipo.id == EquipoPlanMantenimiento.equipo_id).filter(
+            Equipo.empresa_id == current_user.empresa_id,
+            or_(
+                EquipoPlanMantenimiento.codigo.ilike(like),
+                EquipoPlanMantenimiento.nombre.ilike(like),
+                Equipo.codigo.ilike(like),
+                Equipo.nombre.ilike(like),
+            ),
+        )
+    if filters["equipo_id"]:
+        query = query.filter(EquipoPlanMantenimiento.equipo_id == int(filters["equipo_id"]))
+    if filters["estado"]:
+        query = query.filter(EquipoPlanMantenimiento.estado == filters["estado"])
+    items = query.order_by(EquipoPlanMantenimiento.codigo.asc()).all()
+    return render_template(
+        "equipamiento/planes_mantenimiento_index.html",
+        **_maintenance_template_context(
+            items=items,
+            filters=filters,
+            equipos=Equipo.query.filter_by(empresa_id=current_user.empresa_id).order_by(Equipo.codigo.asc()).all(),
+        ),
+    )
+
+
+def _plan_form_context(item=None, form_data=None):
+    return _maintenance_template_context(
+        item=item,
+        form_data=form_data or {},
+        equipos=_active_equipment(),
+        responsables=_active_users(),
+    )
+
+
+@bp.route("/planes-mantenimiento/nuevo", methods=["GET", "POST"])
+@login_required
+@require_permission(mantenimiento_service.PERM_CREAR_PLAN)
+def nuevo_plan_mantenimiento():
+    if request.method == "POST":
+        _validate_maintenance_csrf()
+        try:
+            plan = mantenimiento_service.crear_plan_preventivo(current_user, request.form)
+            db.session.commit()
+            flash("Plan de mantenimiento creado correctamente.", "success")
+            return redirect(url_for("equipamiento.detalle_plan_mantenimiento", plan_id=plan.id))
+        except (EquipoMantenimientoError, ValueError) as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template("equipamiento/plan_mantenimiento_form.html", **_plan_form_context(form_data=request.form))
+    return render_template("equipamiento/plan_mantenimiento_form.html", **_plan_form_context())
+
+
+@bp.route("/planes-mantenimiento/<int:plan_id>")
+@login_required
+@require_permission(mantenimiento_service.PERM_VER)
+def detalle_plan_mantenimiento(plan_id):
+    plan = _get_plan_or_404(plan_id)
+    return render_template(
+        "equipamiento/plan_mantenimiento_detalle.html",
+        **_maintenance_template_context(plan=plan, form_data={}),
+    )
+
+
+@bp.route("/planes-mantenimiento/<int:plan_id>/editar", methods=["GET", "POST"])
+@login_required
+@require_permission(mantenimiento_service.PERM_EDITAR_PLAN)
+def editar_plan_mantenimiento(plan_id):
+    plan = _get_plan_or_404(plan_id)
+    if request.method == "POST":
+        _validate_maintenance_csrf()
+        try:
+            mantenimiento_service.actualizar_plan_preventivo(current_user, plan.id, request.form)
+            db.session.commit()
+            flash("Plan de mantenimiento actualizado correctamente.", "success")
+            return redirect(url_for("equipamiento.detalle_plan_mantenimiento", plan_id=plan.id))
+        except (EquipoMantenimientoError, ValueError) as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template("equipamiento/plan_mantenimiento_form.html", **_plan_form_context(item=plan, form_data=request.form))
+    if plan.estado != "ACTIVO":
+        flash("Los planes inactivos no se pueden editar.", "warning")
+        return redirect(url_for("equipamiento.detalle_plan_mantenimiento", plan_id=plan.id))
+    return render_template("equipamiento/plan_mantenimiento_form.html", **_plan_form_context(item=plan))
+
+
+@bp.route("/planes-mantenimiento/<int:plan_id>/inactivar", methods=["POST"])
+@login_required
+@require_permission(mantenimiento_service.PERM_EDITAR_PLAN)
+def inactivar_plan_mantenimiento(plan_id):
+    _validate_maintenance_csrf()
+    plan = _get_plan_or_404(plan_id)
+    try:
+        mantenimiento_service.inactivar_plan_preventivo(current_user, plan.id, request.form.get("motivo"))
+        db.session.commit()
+        flash("Plan de mantenimiento inactivado correctamente.", "warning")
+    except EquipoMantenimientoError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return redirect(url_for("equipamiento.detalle_plan_mantenimiento", plan_id=plan.id))
+
+
+@bp.route("/planes-mantenimiento/<int:plan_id>/programar", methods=["POST"])
+@login_required
+@require_permission(mantenimiento_service.PERM_PROGRAMAR)
+def programar_plan_mantenimiento(plan_id):
+    _validate_maintenance_csrf()
+    plan = _get_plan_or_404(plan_id)
+    try:
+        item = mantenimiento_service.programar_mantenimiento_desde_plan(
+            current_user,
+            plan.id,
+            request.form.get("fecha_planificada"),
+            request.form.get("observaciones"),
+        )
+        db.session.commit()
+        flash("Mantenimiento preventivo programado correctamente.", "success")
+        return redirect(url_for("equipamiento.detalle_mantenimiento", item_id=item.id))
+    except EquipoMantenimientoError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return redirect(url_for("equipamiento.detalle_plan_mantenimiento", plan_id=plan.id))
 
 
 @bp.route("/equipos/nuevo", methods=["GET", "POST"])

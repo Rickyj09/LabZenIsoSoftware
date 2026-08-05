@@ -1,0 +1,40 @@
+{% extends "base_admin.html" %}
+{% block title %}Mantenimientos{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li><li class="breadcrumb-item active">Mantenimientos</li></ol></nav>
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div><h1 class="mb-1">Mantenimientos</h1><p class="text-muted mb-0">Ordenes preventivas y correctivas de equipos</p></div>
+        {% if can('equipos.mantenimientos.correctivos.crear') %}<a href="{{ url_for('equipamiento.nuevo_mantenimiento_correctivo') }}" class="btn btn-primary">Nuevo correctivo</a>{% endif %}
+    </div>
+    <form method="get" class="row g-3 mb-4">
+        <div class="col-md-3"><label class="form-label">Texto</label><input name="q" class="form-control" value="{{ filters.q }}" placeholder="Codigo, equipo o proveedor"></div>
+        <div class="col-md-3"><label class="form-label">Equipo</label><select name="equipo_id" class="form-select"><option value="">Todos</option>{% for equipo in equipos %}<option value="{{ equipo.id }}" {% if filters.equipo_id|string == equipo.id|string %}selected{% endif %}>{{ equipo.codigo }} - {{ equipo.nombre }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label">Tipo</label><select name="tipo" class="form-select"><option value="">Todos</option><option value="PREVENTIVO" {% if filters.tipo == 'PREVENTIVO' %}selected{% endif %}>Preventivo</option><option value="CORRECTIVO" {% if filters.tipo == 'CORRECTIVO' %}selected{% endif %}>Correctivo</option></select></div>
+        <div class="col-md-2"><label class="form-label">Estado</label><select name="estado" class="form-select"><option value="">Todos</option>{% for estado in ['PROGRAMADO', 'EN_PROCESO', 'COMPLETADO', 'CANCELADO'] %}<option value="{{ estado }}" {% if filters.estado == estado %}selected{% endif %}>{{ estado.replace('_', ' ') }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label">Vista</label><select name="vista" class="form-select"><option value="">Todas</option><option value="vencidos" {% if filters.vista == 'vencidos' %}selected{% endif %}>Vencidos</option><option value="proximos" {% if filters.vista == 'proximos' %}selected{% endif %}>Proximos 30 dias</option></select></div>
+        <div class="col-md-2"><label class="form-label">Desde</label><input type="date" name="fecha_desde" class="form-control" value="{{ filters.fecha_desde }}"></div>
+        <div class="col-md-2"><label class="form-label">Hasta</label><input type="date" name="fecha_hasta" class="form-control" value="{{ filters.fecha_hasta }}"></div>
+        <div class="col-md-2 d-flex align-items-end"><button class="btn btn-outline-primary w-100">Filtrar</button></div>
+    </form>
+    <div class="table-responsive"><table class="table table-hover align-middle"><thead class="table-light"><tr><th>Codigo</th><th>Equipo</th><th>Tipo</th><th>Plan</th><th>Fecha</th><th>Estado</th><th>Responsable</th><th>Proveedor</th><th></th></tr></thead><tbody>
+        {% for item in items %}
+        {% set overdue = is_overdue(item, today) %}
+        <tr>
+            <td><a href="{{ url_for('equipamiento.detalle_mantenimiento', item_id=item.id) }}">{{ item.codigo }}</a>{% if overdue %}<div><span class="badge text-bg-danger">Vencido</span></div>{% endif %}</td>
+            <td>{{ item.equipo.codigo }} - {{ item.equipo.nombre }}</td>
+            <td>{{ item.tipo_mantenimiento.title() }}</td>
+            <td>{% if item.plan %}<a href="{{ url_for('equipamiento.detalle_plan_mantenimiento', plan_id=item.plan.id) }}">{{ item.plan.codigo }}</a>{% else %}-{% endif %}</td>
+            <td>{{ item.fecha_planificada or '-' }}</td>
+            <td><span class="badge {{ estado_badge_class(item.estado) }}">{{ item.estado.replace('_', ' ') }}</span></td>
+            <td>{{ item.responsable.nombre if item.responsable else '-' }}</td>
+            <td>{{ item.proveedor or '-' }}</td>
+            <td class="text-end"><a href="{{ url_for('equipamiento.detalle_mantenimiento', item_id=item.id) }}" class="btn btn-sm btn-outline-primary">Ver</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="text-center text-muted py-4">No hay mantenimientos con los filtros seleccionados.</td></tr>
+        {% endfor %}
+    </tbody></table></div>
+</div>
+{% endblock %}

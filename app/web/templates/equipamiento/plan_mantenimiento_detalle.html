@@ -1,0 +1,64 @@
+{% extends "base_admin.html" %}
+{% block title %}{{ plan.codigo }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.planes_mantenimiento') }}">Planes de mantenimiento</a></li><li class="breadcrumb-item active">{{ plan.codigo }}</li></ol></nav>
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+    <div><h2 class="mb-1">{{ plan.codigo }} - {{ plan.nombre }}</h2><div class="text-muted">{{ plan.equipo.codigo }} - {{ plan.equipo.nombre }}</div></div>
+    <div class="d-flex gap-2">
+        {% if plan.estado == 'ACTIVO' and can('equipos.mantenimientos.planes.editar') %}<a href="{{ url_for('equipamiento.editar_plan_mantenimiento', plan_id=plan.id) }}" class="btn btn-outline-primary">Editar</a>{% endif %}
+        <a href="{{ url_for('equipamiento.planes_mantenimiento') }}" class="btn btn-outline-secondary">Volver</a>
+    </div>
+</div>
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="page-card h-100">
+            <h5 class="mb-3">Datos del plan</h5>
+            <dl class="row mb-0">
+                <dt class="col-sm-5">Estado</dt><dd class="col-sm-7"><span class="badge {% if plan.estado == 'ACTIVO' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ plan.estado }}</span></dd>
+                <dt class="col-sm-5">Periodicidad</dt><dd class="col-sm-7">{{ plan.periodicidad_meses }} meses</dd>
+                <dt class="col-sm-5">Inicio</dt><dd class="col-sm-7">{{ plan.fecha_inicio }}</dd>
+                <dt class="col-sm-5">Proxima fecha</dt><dd class="col-sm-7">{{ plan.proxima_fecha or '-' }}</dd>
+                <dt class="col-sm-5">Responsable</dt><dd class="col-sm-7">{{ plan.responsable.nombre if plan.responsable else '-' }}</dd>
+                <dt class="col-sm-5">Proveedor</dt><dd class="col-sm-7">{{ plan.proveedor or '-' }}</dd>
+                <dt class="col-sm-5">Descripcion</dt><dd class="col-sm-7">{{ plan.descripcion or '-' }}</dd>
+            </dl>
+        </div>
+    </div>
+    <div class="col-lg-7">
+        <div class="page-card mb-4">
+            <h5 class="mb-3">Programar ejecucion</h5>
+            {% if plan.estado == 'ACTIVO' and can('equipos.mantenimientos.programar') %}
+            <form method="post" action="{{ url_for('equipamiento.programar_plan_mantenimiento', plan_id=plan.id) }}" class="row g-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="col-md-4"><label class="form-label">Fecha planificada</label><input type="date" name="fecha_planificada" class="form-control" value="{{ plan.proxima_fecha or '' }}" required></div>
+                <div class="col-md-6"><label class="form-label">Observaciones</label><input name="observaciones" class="form-control"></div>
+                <div class="col-md-2 d-flex align-items-end"><button class="btn btn-primary w-100">Programar</button></div>
+            </form>
+            {% else %}
+            <p class="text-muted mb-0">Este plan no admite nueva programacion.</p>
+            {% endif %}
+        </div>
+        {% if plan.estado == 'ACTIVO' and can('equipos.mantenimientos.planes.editar') %}
+        <div class="page-card mb-4">
+            <h5 class="mb-3">Inactivar plan</h5>
+            <form method="post" action="{{ url_for('equipamiento.inactivar_plan_mantenimiento', plan_id=plan.id) }}" class="row g-2" onsubmit="return confirm('Inactivar este plan?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="col-md-9"><input name="motivo" class="form-control" placeholder="Motivo"></div>
+                <div class="col-md-3"><button class="btn btn-outline-danger w-100">Inactivar</button></div>
+            </form>
+        </div>
+        {% endif %}
+        <div class="page-card">
+            <h5 class="mb-3">Ordenes del plan</h5>
+            <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Codigo</th><th>Fecha</th><th>Estado</th><th></th></tr></thead><tbody>
+            {% for order in plan.mantenimientos %}
+                <tr><td>{{ order.codigo }}</td><td>{{ order.fecha_planificada }}</td><td><span class="badge {{ estado_badge_class(order.estado) }}">{{ order.estado.replace('_', ' ') }}</span></td><td class="text-end"><a href="{{ url_for('equipamiento.detalle_mantenimiento', item_id=order.id) }}" class="btn btn-sm btn-outline-primary">Ver</a></td></tr>
+            {% else %}
+                <tr><td colspan="4" class="text-center text-muted py-3">Sin ordenes programadas.</td></tr>
+            {% endfor %}
+            </tbody></table></div>
+        </div>
+    </div>
+</div>
+{% endblock %}

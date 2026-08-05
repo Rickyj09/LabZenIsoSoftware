@@ -1,0 +1,22 @@
+{% extends "base_admin.html" %}
+{% block title %}{% if item %}Editar plan{% else %}Nuevo plan{% endif %}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.planes_mantenimiento') }}">Planes de mantenimiento</a></li><li class="breadcrumb-item active">{% if item %}Editar{% else %}Nuevo{% endif %}</li></ol></nav>
+<div class="page-card">
+    <h1 class="mb-4">{% if item %}Editar plan preventivo{% else %}Nuevo plan preventivo{% endif %}</h1>
+    <form method="post" class="row g-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="col-md-6"><label class="form-label">Equipo</label><select name="equipo_id" class="form-select" required><option value="">Selecciona equipo</option>{% for equipo in equipos %}<option value="{{ equipo.id }}" {% if (form_data.equipo_id or item.equipo_id if item else '')|string == equipo.id|string %}selected{% endif %}>{{ equipo.codigo }} - {{ equipo.nombre }}</option>{% endfor %}</select></div>
+        <div class="col-md-3"><label class="form-label">Codigo</label><input name="codigo" class="form-control" value="{{ form_data.codigo if form_data else (item.codigo if item else '') }}" placeholder="Opcional"></div>
+        <div class="col-md-3"><label class="form-label">Periodicidad meses</label><input type="number" min="1" name="periodicidad_meses" class="form-control" value="{{ form_data.periodicidad_meses if form_data else (item.periodicidad_meses if item else '') }}" required></div>
+        <div class="col-md-6"><label class="form-label">Nombre</label><input name="nombre" class="form-control" value="{{ form_data.nombre if form_data else (item.nombre if item else '') }}" required></div>
+        <div class="col-md-3"><label class="form-label">Fecha inicio</label><input type="date" name="fecha_inicio" class="form-control" value="{{ form_data.fecha_inicio if form_data else (item.fecha_inicio if item else '') }}" required></div>
+        <div class="col-md-3"><label class="form-label">Proxima fecha inicial</label><input type="date" name="proxima_fecha" class="form-control" value="{{ form_data.proxima_fecha if form_data else (item.proxima_fecha if item else '') }}"></div>
+        <div class="col-md-6"><label class="form-label">Responsable</label><select name="responsable_id" class="form-select"><option value="">Sin responsable</option>{% for user in responsables %}<option value="{{ user.id }}" {% if (form_data.responsable_id or item.responsable_id if item else '')|string == user.id|string %}selected{% endif %}>{{ user.nombre }} {{ user.apellido }}</option>{% endfor %}</select></div>
+        <div class="col-md-6"><label class="form-label">Proveedor</label><input name="proveedor" class="form-control" value="{{ form_data.proveedor if form_data else (item.proveedor if item else '') }}"></div>
+        <div class="col-12"><label class="form-label">Descripcion</label><textarea name="descripcion" class="form-control" rows="3">{{ form_data.descripcion if form_data else (item.descripcion if item else '') }}</textarea></div>
+        <div class="col-12 d-flex gap-2"><button class="btn btn-primary">Guardar</button><a href="{{ url_for('equipamiento.planes_mantenimiento') }}" class="btn btn-outline-secondary">Cancelar</a></div>
+    </form>
+</div>
+{% endblock %}
