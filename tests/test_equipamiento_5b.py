@@ -20,6 +20,8 @@ from app.models.equipos import (
 )
 from app.models.seguridad import Permiso, Rol, RolPermiso, Usuario, UsuarioRol
 from app.security.permissions import user_has_permission
+from app.services import equipo_mantenimiento_service as maintenance_service
+from app.services.equipo_mantenimiento_service import EquipoMantenimientoError
 from migrations.versions import f2b3c4d5e6a7_paquete_5b1_mantenimiento_modelos_permisos as migration_5b1
 
 
@@ -117,6 +119,24 @@ class Equipamiento5BModelsTest(unittest.TestCase):
                 estado_operativo="OPERATIVO",
                 requiere_mantenimiento=True,
             ),
+            Equipo(
+                id=403,
+                empresa_id=101,
+                codigo="EQ-INACTIVO",
+                nombre="Equipo inactivo",
+                estado="inactivo",
+                estado_operativo="OPERATIVO",
+                requiere_mantenimiento=True,
+            ),
+            Equipo(
+                id=404,
+                empresa_id=101,
+                codigo="EQ-RETIRADO",
+                nombre="Equipo retirado",
+                estado="activo",
+                estado_operativo="RETIRADO",
+                requiere_mantenimiento=True,
+            ),
         ])
 
     def user(self, user_id):
@@ -177,6 +197,30 @@ class Equipamiento5BModelsTest(unittest.TestCase):
             estado="APROBADO",
             elaborado_por_id=201,
             archivo_storage_path="empresa_101/documento/evidencia.pdf",
+        )
+        db.session.add_all([document, version])
+        db.session.flush()
+        return document, version
+
+    def add_other_company_document_version(self):
+        document = Documento(
+            id=502,
+            empresa_id=102,
+            codigo="DOC-OTRA",
+            titulo="Documento otra empresa",
+            tipo_documento="REGISTRO",
+            estado="APROBADO",
+            version_actual="1",
+            elaborado_por_id=205,
+        )
+        version = DocumentoVersion(
+            id=1502,
+            empresa_id=102,
+            documento_id=502,
+            version="1",
+            estado="APROBADO",
+            elaborado_por_id=205,
+            archivo_storage_path="empresa_102/documento/evidencia.pdf",
         )
         db.session.add_all([document, version])
         db.session.flush()
@@ -406,6 +450,367 @@ class Equipamiento5BModelsTest(unittest.TestCase):
     def test_migration_revision_metadata_targets_5a_head(self):
         self.assertEqual(migration_5b1.down_revision, "e1a2b3c4d5f6")
         self.assertEqual(migration_5b1.revision, "f2b3c4d5e6a7")
+
+    def test_service_creates_updates_and_inactivates_plan_with_audit(self):
+        admin = self.user(201)
+        plan = maintenance_service.crear_plan_preventivo(admin, {
+            "equipo_id": 401,
+            "codigo": "PM-SERV-001",
+            "nombre": "Plan servicio",
+            "periodicidad_meses": 2,
+            "fecha_inicio": "2026-08-01",
+            "responsable_id": 201,
+            "proveedor": "Proveedor A",
+        })
+        db.session.commit()
+
+        self.assertEqual(plan.estado, "ACTIVO")
+        self.assertEqual(plan.proxima_fecha, date(2026, 8, 1))
+        self.assertTrue(EquipoHistorial.query.filter_by(tipo_evento="PLAN_MANTENIMIENTO_CREADO", usuario_id=201).first())
+
+        updated = maintenance_service.actualizar_plan_preventivo(admin, plan.id, {
+            "codigo": "PM-SERV-002",
+            "nombre": "Plan actualizado",
+            "periodicidad_meses": 3,
+            "fecha_inicio": date(2026, 8, 1),
+            "proxima_fecha": date(2026, 9, 1),
+            "responsable_id": 201,
+            "proveedor": "Proveedor B",
+        })
+        self.assertEqual(updated.codigo, "PM-SERV-002")
+        self.assertEqual(updated.periodicidad_meses, 3)
+
+        maintenance_service.inactivar_plan_preventivo(admin, plan.id, "Cambio de estrategia")
+        db.session.commit()
+        self.assertEqual(plan.estado, "INACTIVO")
+        self.assertTrue(EquipoHistorial.query.filter_by(tipo_evento="PLAN_MANTENIMIENTO_ACTUALIZADO").first())
+        self.assertTrue(EquipoHistorial.query.filter_by(tipo_evento="PLAN_MANTENIMIENTO_INACTIVADO").first())
+
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.actualizar_plan_preventivo(admin, plan.id, {"nombre": "No permitido"})
+
+    def test_service_rejects_invalid_plan_data_and_unavailable_equipment(self):
+        admin = self.user(201)
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.crear_plan_preventivo(admin, {
+                "equipo_id": 401,
+                "codigo": "PM-MALA",
+                "nombre": "Plan malo",
+                "periodicidad_meses": 0,
+                "fecha_inicio": "2026-08-01",
+            })
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.crear_plan_preventivo(admin, {
+                "equipo_id": 403,
+                "codigo": "PM-INACTIVO",
+                "nombre": "Plan inactivo",
+                "periodicidad_meses": 1,
+                "fecha_inicio": "2026-08-01",
+            })
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.crear_plan_preventivo(admin, {
+                "equipo_id": 404,
+                "codigo": "PM-RETIRADO",
+                "nombre": "Plan retirado",
+                "periodicidad_meses": 1,
+                "fecha_inicio": "2026-08-01",
+            })
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.crear_plan_preventivo(admin, {
+                "equipo_id": 401,
+                "codigo": "PM-RESP",
+                "nombre": "Plan con responsable externo",
+                "periodicidad_meses": 1,
+                "fecha_inicio": "2026-08-01",
+                "responsable_id": 205,
+            })
+
+    def test_service_schedules_preventive_and_blocks_inactive_plan_or_duplicate_open_order(self):
+        admin = self.user(201)
+        plan = self.add_plan(codigo="PM-PROG")
+        db.session.commit()
+
+        order = maintenance_service.programar_mantenimiento_desde_plan(admin, plan.id, date(2026, 8, 20))
+        db.session.commit()
+
+        self.assertEqual(order.tipo_mantenimiento, "PREVENTIVO")
+        self.assertEqual(order.estado, "PROGRAMADO")
+        self.assertEqual(order.plan_id, plan.id)
+        self.assertIsNone(order.archivo_url)
+        self.assertTrue(order.codigo.startswith("MANT-"))
+        self.assertEqual(plan.proxima_fecha, date(2027, 2, 1))
+        self.assertTrue(EquipoHistorial.query.filter_by(tipo_evento="MANTENIMIENTO_PROGRAMADO").first())
+
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.programar_mantenimiento_desde_plan(admin, plan.id, date(2026, 8, 20))
+
+        maintenance_service.inactivar_plan_preventivo(admin, plan.id)
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.programar_mantenimiento_desde_plan(admin, plan.id, date(2026, 9, 20))
+
+    def test_service_creates_corrective_without_plan_and_generates_codes_per_company(self):
+        admin = self.user(201)
+        other_admin = self.user(205)
+
+        corrective = maintenance_service.crear_mantenimiento_correctivo(admin, 401, {
+            "descripcion_trabajo": "Ruido anormal en motor",
+            "fecha_planificada": "2026-08-15",
+            "responsable_id": 201,
+        })
+        other = maintenance_service.crear_mantenimiento_correctivo(other_admin, 402, {
+            "descripcion_trabajo": "Falla de resistencia",
+            "fecha_planificada": "2026-08-15",
+            "responsable_id": 205,
+        })
+        db.session.commit()
+
+        self.assertIsNone(corrective.plan_id)
+        self.assertEqual(corrective.tipo_mantenimiento, "CORRECTIVO")
+        self.assertEqual(corrective.estado, "PROGRAMADO")
+        self.assertEqual(corrective.codigo, other.codigo)
+        self.assertEqual(EquipoMantenimiento.query.filter_by(codigo=corrective.codigo).count(), 2)
+        self.assertTrue(EquipoHistorial.query.filter_by(tipo_evento="MANTENIMIENTO_CORRECTIVO_CREADO").first())
+
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.crear_mantenimiento_correctivo(admin, 401, {"fecha_planificada": "2026-08-15"})
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.crear_mantenimiento_correctivo(admin, 402, {
+                "descripcion_trabajo": "Cruce empresa",
+                "fecha_planificada": "2026-08-15",
+            })
+
+    def test_service_transitions_validate_state_dates_cost_and_preserve_equipment_status(self):
+        admin = self.user(201)
+        maintenance = self.add_maintenance(codigo="MANT-FLUJO")
+        original_equipment_state = maintenance.equipo.estado_operativo
+        db.session.commit()
+
+        started = maintenance_service.iniciar_mantenimiento(admin, maintenance.id, date(2026, 8, 10))
+        self.assertEqual(started.estado, "EN_PROCESO")
+        self.assertEqual(started.fecha_inicio, date(2026, 8, 10))
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.iniciar_mantenimiento(admin, maintenance.id, date(2026, 8, 11))
+
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.completar_mantenimiento(admin, maintenance.id, {
+                "fecha_finalizacion": date(2026, 8, 9),
+                "descripcion_trabajo": "Trabajo",
+                "resultado": "OK",
+            })
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.completar_mantenimiento(admin, maintenance.id, {
+                "fecha_finalizacion": date(2026, 8, 10),
+                "descripcion_trabajo": "Trabajo",
+                "resultado": "OK",
+                "costo": "-1",
+                "moneda": "USD",
+            })
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.completar_mantenimiento(admin, maintenance.id, {
+                "fecha_finalizacion": date(2026, 8, 10),
+                "descripcion_trabajo": "",
+                "resultado": "OK",
+            })
+
+        completed = maintenance_service.completar_mantenimiento(admin, maintenance.id, {
+            "fecha_finalizacion": date(2026, 8, 10),
+            "descripcion_trabajo": "Trabajo realizado",
+            "resultado": "OK",
+            "costo": "25.50",
+            "moneda": "USD",
+        })
+        db.session.commit()
+
+        self.assertEqual(completed.estado, "COMPLETADO")
+        self.assertEqual(completed.fecha_mantenimiento, date(2026, 8, 10))
+        self.assertEqual(completed.equipo.estado_operativo, original_equipment_state)
+        self.assertTrue(EquipoHistorial.query.filter_by(tipo_evento="MANTENIMIENTO_INICIADO").first())
+        self.assertTrue(EquipoHistorial.query.filter_by(tipo_evento="MANTENIMIENTO_COMPLETADO").first())
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.cancelar_mantenimiento(admin, maintenance.id, "Ya termino")
+
+    def test_service_cancels_from_open_states_requires_reason_and_audits(self):
+        admin = self.user(201)
+        programmed = self.add_maintenance(codigo="MANT-CANCEL-PROG")
+        in_process = self.add_maintenance(codigo="MANT-CANCEL-PROC")
+        in_process.estado = "EN_PROCESO"
+        in_process.fecha_inicio = date(2026, 8, 10)
+        db.session.commit()
+
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.cancelar_mantenimiento(admin, programmed.id, "no")
+
+        maintenance_service.cancelar_mantenimiento(admin, programmed.id, "Proveedor no disponible")
+        maintenance_service.cancelar_mantenimiento(admin, in_process.id, "Falla externa confirmada")
+        db.session.commit()
+
+        self.assertEqual(programmed.estado, "CANCELADO")
+        self.assertEqual(programmed.cancelado_por_id, admin.id)
+        self.assertEqual(in_process.estado, "CANCELADO")
+        self.assertEqual(EquipoHistorial.query.filter_by(tipo_evento="MANTENIMIENTO_CANCELADO").count(), 2)
+
+    def test_service_dynamic_due_pending_and_next_30_days_queries_are_company_scoped(self):
+        admin = self.user(201)
+        today = date(2026, 8, 4)
+        past = self.add_maintenance(codigo="MANT-PAST")
+        today_order = self.add_maintenance(codigo="MANT-TODAY")
+        future_30 = self.add_maintenance(codigo="MANT-30")
+        future_31 = self.add_maintenance(codigo="MANT-31")
+        completed = self.add_maintenance(codigo="MANT-DONE")
+        other = self.add_maintenance(empresa_id=102, equipo_id=402, codigo="MANT-OTHER")
+        past.fecha_planificada = date(2026, 8, 3)
+        today_order.fecha_planificada = today
+        future_30.fecha_planificada = date(2026, 9, 3)
+        future_31.fecha_planificada = date(2026, 9, 4)
+        completed.fecha_planificada = date(2026, 8, 3)
+        completed.estado = "COMPLETADO"
+        other.fecha_planificada = date(2026, 8, 3)
+        db.session.commit()
+
+        self.assertTrue(maintenance_service.esta_vencido(past, today=today))
+        self.assertFalse(maintenance_service.esta_vencido(today_order, today=today))
+        self.assertEqual([item.codigo for item in maintenance_service.mantenimientos_vencidos(admin, today=today)], ["MANT-PAST"])
+        self.assertEqual(
+            [item.codigo for item in maintenance_service.mantenimientos_proximos(admin, today=today)],
+            ["MANT-TODAY", "MANT-30"],
+        )
+        pending_codes = {item.codigo for item in maintenance_service.mantenimientos_pendientes(admin)}
+        self.assertIn("MANT-PAST", pending_codes)
+        self.assertNotIn("MANT-DONE", pending_codes)
+        self.assertNotIn("MANT-OTHER", pending_codes)
+
+    def test_service_monthly_next_date_handles_end_of_month_and_leap_year(self):
+        admin = self.user(201)
+        plan = self.add_plan(codigo="PM-FIN-MES")
+        plan.periodicidad_meses = 1
+        order = self.add_maintenance(codigo="MANT-FIN-MES", plan=plan)
+        order.estado = "EN_PROCESO"
+        order.fecha_inicio = date(2026, 1, 31)
+        db.session.commit()
+
+        maintenance_service.completar_mantenimiento(admin, order.id, {
+            "fecha_finalizacion": date(2026, 1, 31),
+            "descripcion_trabajo": "Preventivo mensual",
+            "resultado": "OK",
+        })
+        self.assertEqual(plan.proxima_fecha, date(2026, 2, 28))
+        self.assertEqual(order.fecha_proxima, date(2026, 2, 28))
+
+        plan.proxima_fecha = date(2024, 2, 29)
+        order2 = self.add_maintenance(codigo="MANT-BISIESTO", plan=plan)
+        order2.estado = "EN_PROCESO"
+        order2.fecha_inicio = date(2024, 2, 29)
+        db.session.commit()
+        maintenance_service.completar_mantenimiento(admin, order2.id, {
+            "fecha_finalizacion": date(2024, 2, 29),
+            "descripcion_trabajo": "Preventivo bisiesto",
+            "resultado": "OK",
+        })
+        self.assertEqual(plan.proxima_fecha, date(2024, 3, 29))
+        self.assertEqual(EquipoMantenimiento.query.filter_by(plan_id=plan.id).count(), 2)
+
+    def test_service_links_and_unlinks_document_evidence_with_permissions_and_audit(self):
+        admin = self.user(201)
+        technician = self.user(203)
+        maintenance = self.add_maintenance(codigo="MANT-EVID")
+        maintenance.estado = "COMPLETADO"
+        document, version = self.add_document_version()
+        db.session.commit()
+
+        evidence = maintenance_service.vincular_evidencia_documental(
+            technician,
+            maintenance.id,
+            document.id,
+            version.id,
+            "INFORME",
+            "Informe final",
+        )
+        db.session.commit()
+
+        self.assertEqual(evidence.mantenimiento_id, maintenance.id)
+        self.assertEqual(evidence.documento_version_id, version.id)
+        self.assertEqual(evidence.vinculado_por_id, technician.id)
+        self.assertEqual(maintenance.archivo_url, "legacy/mantenimiento.pdf")
+        self.assertTrue(EquipoHistorial.query.filter_by(tipo_evento="EVIDENCIA_MANTENIMIENTO_VINCULADA").first())
+
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.vincular_evidencia_documental(technician, maintenance.id, document.id, version.id, "DUP")
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.desvincular_evidencia_documental(technician, evidence.id)
+
+        maintenance_service.desvincular_evidencia_documental(admin, evidence.id, "Correccion de evidencia")
+        db.session.commit()
+        self.assertIsNone(db.session.get(EquipoMantenimientoDocumento, evidence.id))
+        self.assertIsNotNone(db.session.get(Documento, document.id))
+        self.assertIsNotNone(db.session.get(DocumentoVersion, version.id))
+        self.assertTrue(EquipoHistorial.query.filter_by(tipo_evento="EVIDENCIA_MANTENIMIENTO_DESVINCULADA").first())
+
+    def test_service_rejects_invalid_evidence_company_version_cancelled_and_consultation_actions(self):
+        admin = self.user(201)
+        consultation = self.user(204)
+        maintenance = self.add_maintenance(codigo="MANT-EVID-ERR")
+        document, version = self.add_document_version()
+        other_document, other_version = self.add_other_company_document_version()
+        db.session.commit()
+
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.vincular_evidencia_documental(admin, maintenance.id, other_document.id, other_version.id, "INFORME")
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.vincular_evidencia_documental(admin, maintenance.id, document.id, other_version.id, "INFORME")
+
+        maintenance.estado = "CANCELADO"
+        db.session.commit()
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.vincular_evidencia_documental(admin, maintenance.id, document.id, version.id, "INFORME")
+
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.crear_mantenimiento_correctivo(consultation, 401, {
+                "descripcion_trabajo": "Consulta sin permiso",
+                "fecha_planificada": "2026-08-15",
+            })
+        self.assertEqual(maintenance_service.mantenimientos_pendientes(consultation), [])
+
+    def test_service_enforces_technician_admin_and_quality_permissions(self):
+        admin = self.user(201)
+        quality = self.user(202)
+        technician = self.user(203)
+        plan = self.add_plan(codigo="PM-PERM")
+        db.session.commit()
+
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.crear_plan_preventivo(technician, {
+                "equipo_id": 401,
+                "codigo": "PM-TEC",
+                "nombre": "Plan tecnico",
+                "periodicidad_meses": 1,
+                "fecha_inicio": "2026-08-01",
+            })
+
+        order = maintenance_service.programar_mantenimiento_desde_plan(technician, plan.id, date(2026, 8, 18))
+        maintenance_service.iniciar_mantenimiento(technician, order.id, date(2026, 8, 18))
+        maintenance_service.completar_mantenimiento(technician, order.id, {
+            "fecha_finalizacion": date(2026, 8, 18),
+            "descripcion_trabajo": "Trabajo tecnico",
+            "resultado": "OK",
+        })
+        evidence_doc, evidence_version = self.add_document_version()
+        evidence = maintenance_service.vincular_evidencia_documental(
+            technician, order.id, evidence_doc.id, evidence_version.id, "REGISTRO"
+        )
+        with self.assertRaises(EquipoMantenimientoError):
+            maintenance_service.desvincular_evidencia_documental(technician, evidence.id)
+        maintenance_service.desvincular_evidencia_documental(quality, evidence.id, "Retiro autorizado")
+        new_plan = maintenance_service.crear_plan_preventivo(admin, {
+            "equipo_id": 401,
+            "codigo": "PM-ADMIN",
+            "nombre": "Plan admin",
+            "periodicidad_meses": 1,
+            "fecha_inicio": "2026-08-01",
+        })
+        db.session.commit()
+
+        self.assertEqual(order.estado, "COMPLETADO")
+        self.assertEqual(new_plan.estado, "ACTIVO")
 
 
 if __name__ == "__main__":
