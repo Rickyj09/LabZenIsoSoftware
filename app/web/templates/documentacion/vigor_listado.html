@@ -1,0 +1,263 @@
+{% extends "base_admin.html" %}
+
+{% macro empty_value(value) -%}
+    {{ value if value not in (none, '') else '—' }}
+{%- endmacro %}
+
+{% macro page_link(page, label, disabled=false, active=false) -%}
+<li class="page-item {% if disabled %}disabled{% endif %} {% if active %}active{% endif %}">
+    {% if disabled %}
+    <span class="page-link">{{ label }}</span>
+    {% else %}
+    <a class="page-link" href="{{ url_for(meta.endpoint, page=page, per_page=filters.per_page, q=filters.q, revision=filters.revision, seccion=filters.seccion) }}">{{ label }}</a>
+    {% endif %}
+</li>
+{%- endmacro %}
+
+{% block title %}{{ meta.title }}{% endblock %}
+
+{% block extra_css %}
+<style>
+    .vigor-page {
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .vigor-heading {
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .vigor-heading-main {
+        flex: 1 1 420px;
+        min-width: 0;
+    }
+
+    .vigor-heading-summary {
+        flex: 0 1 auto;
+        max-width: 100%;
+        white-space: nowrap;
+    }
+
+    .vigor-filter-actions {
+        min-width: 0;
+    }
+
+    .vigor-filter-actions .btn {
+        min-width: 120px;
+    }
+
+    .vigor-table-wrap {
+        max-width: 100%;
+        overflow-x: auto;
+    }
+
+    .vigor-table {
+        min-width: 1180px;
+        table-layout: fixed;
+    }
+
+    .vigor-col-code {
+        width: 170px;
+    }
+
+    .vigor-col-title {
+        width: 300px;
+    }
+
+    .vigor-col-revision {
+        width: 90px;
+    }
+
+    .vigor-col-date {
+        width: 135px;
+    }
+
+    .vigor-col-custodian {
+        width: 150px;
+    }
+
+    .vigor-col-section {
+        width: 220px;
+    }
+
+    .vigor-col-meta {
+        width: 115px;
+    }
+
+    .vigor-code {
+        white-space: normal;
+        overflow-wrap: normal;
+        word-break: normal;
+        line-break: loose;
+    }
+
+    .vigor-metadata {
+        max-width: 100%;
+    }
+
+    .vigor-metadata summary {
+        cursor: pointer;
+        color: var(--lz-primary);
+        font-weight: 600;
+        list-style-position: inside;
+    }
+
+    .vigor-metadata[open] summary {
+        margin-bottom: 0.5rem;
+    }
+
+    .vigor-metadata-body {
+        min-width: 260px;
+        max-width: 340px;
+    }
+
+    @media (max-width: 991.98px) {
+        .vigor-heading {
+            align-items: stretch !important;
+        }
+
+        .vigor-heading-summary {
+            text-align: left !important;
+            white-space: normal;
+        }
+
+        .vigor-filter-actions .btn {
+            flex: 1 1 160px;
+        }
+    }
+
+    @media (max-width: 575.98px) {
+        .vigor-filter-actions {
+            flex-direction: column;
+        }
+
+        .vigor-filter-actions .btn {
+            width: 100%;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="vigor-page">
+    <div class="vigor-heading d-flex justify-content-between align-items-start mb-4 flex-wrap gap-3">
+        <div class="vigor-heading-main">
+            <h2 class="mb-1 text-break">{{ meta.title }}</h2>
+            <div class="text-muted">{{ meta.description }}</div>
+        </div>
+        <div class="vigor-heading-summary text-end">
+            <span class="badge bg-primary">{{ tipo_listado }}</span>
+            <div class="small text-muted mt-1">{{ pagination.total }} registro(s) encontrado(s)</div>
+        </div>
+    </div>
+
+    <div class="page-card mb-4">
+        <form method="get" class="row g-3 align-items-end">
+            <div class="col-xl-4 col-lg-6 col-md-6">
+                <label class="form-label">Buscar</label>
+                <input type="text" name="q" class="form-control" value="{{ filters.q }}" placeholder="Código, título o custodio">
+            </div>
+            <div class="col-xl-2 col-lg-3 col-md-3">
+                <label class="form-label">Revisión</label>
+                <input type="text" name="revision" class="form-control" value="{{ filters.revision }}">
+            </div>
+            <div class="col-xl-3 col-lg-6 col-md-6">
+                <label class="form-label">Sección</label>
+                <select name="seccion" class="form-select">
+                    <option value="">Todas</option>
+                    {% for section in sections %}
+                    <option value="{{ section }}" {% if filters.seccion == section %}selected{% endif %}>{{ section }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-xl-1 col-lg-3 col-md-3">
+                <label class="form-label">Mostrar</label>
+                <select name="per_page" class="form-select">
+                    {% for option in per_page_options %}
+                    <option value="{{ option }}" {% if filters.per_page == option %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-xl-2 col-lg-12 d-flex flex-wrap gap-2 vigor-filter-actions">
+                <button type="submit" class="btn btn-outline-primary flex-fill">Filtrar</button>
+                <a href="{{ url_for(meta.endpoint) }}" class="btn btn-outline-secondary flex-fill">Limpiar filtros</a>
+            </div>
+        </form>
+    </div>
+
+    <div class="page-card">
+        <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <div class="min-w-0">
+                <h5 class="mb-0">{{ meta.title }}</h5>
+                <div class="small text-muted">Ordenado por sección, fila fuente e identificador interno.</div>
+            </div>
+            <div class="small text-muted">
+                Página {{ pagination.page }} de {{ pagination.pages or 1 }}
+            </div>
+        </div>
+
+        <div class="table-responsive vigor-table-wrap">
+            <table class="table table-hover align-middle vigor-table">
+                <thead>
+                    <tr>
+                        <th class="vigor-col-code">Código</th>
+                        <th class="vigor-col-title">Título</th>
+                        <th class="vigor-col-revision">Revisión</th>
+                        <th class="vigor-col-date">Fecha de vigencia</th>
+                        <th class="vigor-col-custodian">Custodio</th>
+                        <th class="vigor-col-section">Sección</th>
+                        <th class="vigor-col-meta">Metadatos</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td><code class="vigor-code">{{ empty_value(item.codigo) }}</code></td>
+                        <td class="text-break">{{ empty_value(item.titulo) }}</td>
+                        <td>{{ empty_value(item.revision) }}</td>
+                        <td>{{ item.fecha_vigencia.strftime('%Y-%m-%d') if item.fecha_vigencia else '—' }}</td>
+                        <td class="text-break">{{ empty_value(item.custodio) }}</td>
+                        <td class="text-break">{{ empty_value(item.seccion) }}</td>
+                        <td>
+                            <details class="vigor-metadata">
+                                <summary>Ver</summary>
+                                <div class="vigor-metadata-body small text-muted">
+                                    <div><strong>Acceso:</strong> {{ empty_value(item.acceso_documento) }}</div>
+                                    <div><strong>Lugar:</strong> {{ empty_value(item.lugar_almacenamiento) }}</div>
+                                    <div><strong>Protección:</strong> {{ empty_value(item.proteccion) }}</div>
+                                    <div><strong>Medio:</strong> {{ empty_value(item.medio) }}</div>
+                                    <div><strong>Destino:</strong> {{ empty_value(item.destino_final) }}</div>
+                                </div>
+                            </details>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center text-muted py-4">
+                            No existen registros para los filtros seleccionados.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if pagination.pages > 1 %}
+        <nav aria-label="Paginación de listados en vigor" class="mt-3">
+            <ul class="pagination flex-wrap mb-0">
+                {{ page_link(pagination.prev_num, 'Anterior', disabled=not pagination.has_prev) }}
+                {% for page in pagination.iter_pages(left_edge=1, left_current=2, right_current=2, right_edge=1) %}
+                    {% if page %}
+                        {{ page_link(page, page, active=page == pagination.page) }}
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">…</span></li>
+                    {% endif %}
+                {% endfor %}
+                {{ page_link(pagination.next_num, 'Siguiente', disabled=not pagination.has_next) }}
+            </ul>
+        </nav>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -23,6 +23,10 @@ from app.models.documentos import (
     DocumentoVersion,
     DocumentoVersionAnexo,
     DocumentoAprobacion,
+    DocumentoVigorCatalogo,
+    DOCUMENTO_VIGOR_EXTERNO,
+    DOCUMENTO_VIGOR_FORMATO,
+    DOCUMENTO_VIGOR_INTERNO,
     ESTADOS_DOCUMENTO,
     DocumentoFirmaProceso,
     DocumentoFirmaPaso,
@@ -141,6 +145,24 @@ TIPOS_DOCUMENTO = [
 ]
 
 PREVIEWABLE_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
+VIGOR_PER_PAGE_OPTIONS = (25, 50, 100)
+VIGOR_LISTING_META = {
+    DOCUMENTO_VIGOR_INTERNO: {
+        "title": "Documentos internos en vigor",
+        "description": "Listado controlado de documentos internos vigentes para la empresa actual.",
+        "endpoint": "documentacion.vigor_internos",
+    },
+    DOCUMENTO_VIGOR_EXTERNO: {
+        "title": "Documentos externos en vigor",
+        "description": "Listado controlado de documentos externos vigentes para la empresa actual.",
+        "endpoint": "documentacion.vigor_externos",
+    },
+    DOCUMENTO_VIGOR_FORMATO: {
+        "title": "Formatos en vigor",
+        "description": "Listado controlado de formatos vigentes para la empresa actual.",
+        "endpoint": "documentacion.vigor_formatos",
+    },
+}
 
 
 def _responsables_documentales():
@@ -195,6 +217,93 @@ def _optional_int(value):
         return int(value)
     except ValueError as exc:
         raise DocumentFolderError("La carpeta indicada no es valida.") from exc
+
+
+def _safe_positive_int(value, default):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _vigor_per_page(value):
+    parsed = _safe_positive_int(value, 25)
+    return parsed if parsed in VIGOR_PER_PAGE_OPTIONS else 25
+
+
+def _vigor_filters_from_request():
+    return {
+        "q": request.args.get("q", "").strip(),
+        "revision": request.args.get("revision", "").strip(),
+        "seccion": request.args.get("seccion", "").strip(),
+        "page": _safe_positive_int(request.args.get("page"), 1),
+        "per_page": _vigor_per_page(request.args.get("per_page")),
+    }
+
+
+def _vigor_base_query(tipo_listado):
+    return DocumentoVigorCatalogo.query.filter_by(
+        empresa_id=current_user.empresa_id,
+        tipo_listado=tipo_listado,
+        activo=True,
+    )
+
+
+def _apply_vigor_filters(query, filters):
+    if filters["q"]:
+        like = f"%{filters['q'].lower()}%"
+        query = query.filter(db.or_(
+            db.func.lower(db.func.coalesce(DocumentoVigorCatalogo.codigo, "")).like(like),
+            db.func.lower(db.func.coalesce(DocumentoVigorCatalogo.titulo, "")).like(like),
+            db.func.lower(db.func.coalesce(DocumentoVigorCatalogo.custodio, "")).like(like),
+        ))
+    if filters["revision"]:
+        query = query.filter(DocumentoVigorCatalogo.revision == filters["revision"])
+    if filters["seccion"]:
+        query = query.filter(DocumentoVigorCatalogo.seccion == filters["seccion"])
+    return query
+
+
+def _vigor_sections(tipo_listado):
+    return [
+        section
+        for section, in (
+            _vigor_base_query(tipo_listado)
+            .filter(DocumentoVigorCatalogo.seccion.isnot(None))
+            .with_entities(DocumentoVigorCatalogo.seccion)
+            .distinct()
+            .order_by(DocumentoVigorCatalogo.seccion.asc())
+            .all()
+        )
+    ]
+
+
+def _render_vigor_listing(tipo_listado):
+    if not getattr(current_user, "empresa_id", None):
+        abort(403)
+    filters = _vigor_filters_from_request()
+    query = _apply_vigor_filters(_vigor_base_query(tipo_listado), filters)
+    query = query.order_by(
+        db.func.coalesce(DocumentoVigorCatalogo.seccion, "").asc(),
+        DocumentoVigorCatalogo.fuente_fila.asc(),
+        DocumentoVigorCatalogo.id.asc(),
+    )
+    pagination = query.paginate(
+        page=filters["page"],
+        per_page=filters["per_page"],
+        error_out=False,
+    )
+    return render_template(
+        "documentacion/vigor_listado.html",
+        meta=VIGOR_LISTING_META[tipo_listado],
+        tipo_listado=tipo_listado,
+        filters=filters,
+        sections=_vigor_sections(tipo_listado),
+        pagination=pagination,
+        items=pagination.items,
+        per_page_options=VIGOR_PER_PAGE_OPTIONS,
+    )
 
 
 def ruta_archivo_legacy(version_doc):
@@ -361,6 +470,27 @@ def dashboard():
         "documentacion/dashboard.html",
         stats=get_document_dashboard_stats(current_user),
     )
+
+
+@bp.route("/vigor/internos")
+@login_required
+@require_permission("documentos.ver")
+def vigor_internos():
+    return _render_vigor_listing(DOCUMENTO_VIGOR_INTERNO)
+
+
+@bp.route("/vigor/externos")
+@login_required
+@require_permission("documentos.ver")
+def vigor_externos():
+    return _render_vigor_listing(DOCUMENTO_VIGOR_EXTERNO)
+
+
+@bp.route("/vigor/formatos")
+@login_required
+@require_permission("documentos.ver")
+def vigor_formatos():
+    return _render_vigor_listing(DOCUMENTO_VIGOR_FORMATO)
 
 
 def _render_explorer(folder_id=None, uncategorized=False):
