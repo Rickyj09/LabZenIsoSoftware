@@ -21,6 +21,11 @@
             <a href="{{ url_for('documentacion.index') }}" class="btn btn-primary">Vista actual</a>
             <a href="{{ url_for('documentacion.explorador') }}" class="btn btn-outline-secondary">Vista explorador</a>
         </div>
+        {% if vista == 'documentos' and can('documentos.editar') %}
+        <a href="{{ url_for('documentacion.clasificacion_pendientes') }}" class="btn btn-outline-warning">
+            Clasificacion pendiente
+        </a>
+        {% endif %}
         {% if can('documentos.crear') %}
         <a href="{{ url_for('documentacion.nuevo') }}" class="btn btn-primary">Nuevo documento</a>
         {% endif %}
@@ -103,6 +108,7 @@
                     <th>Código</th>
                     <th>Título</th>
                     <th>Tipo</th>
+                    <th>Clasificacion</th>
                     <th>Proceso</th>
                     <th>Estado</th>
                     <th>Versión vigente aprobada</th>
@@ -115,6 +121,13 @@
                     <td>{{ item.codigo }}</td>
                     <td>{{ item.titulo }}</td>
                     <td>{{ item.tipo_documento }}</td>
+                    <td>
+                        {% if item.clasificacion_control %}
+                            {{ clasificaciones_control_labels.get(item.clasificacion_control, item.clasificacion_control) }}
+                        {% else %}
+                            <span class="badge bg-warning text-dark">Pendiente de clasificar</span>
+                        {% endif %}
+                    </td>
                     <td>{{ item.proceso or '' }}</td>
                     <td>
                         <span class="badge {{ document_state_badge_class(item.estado) }}">
@@ -144,7 +157,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="7" class="text-center text-muted py-4">
+                    <td colspan="8" class="text-center text-muted py-4">
                         No existen documentos en esta vista.
                     </td>
                 </tr>

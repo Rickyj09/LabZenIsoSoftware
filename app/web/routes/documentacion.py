@@ -20,7 +20,11 @@ from flask_login import login_required, current_user
 from app.extensions import db
 from app.security.permissions import current_user_can, require_permission
 from app.models.documentos import (
+    CLASIFICACIONES_CONTROL,
+    CLASIFICACION_CONTROL_FORMATO,
+    CLASIFICACION_CONTROL_INTERNO,
     Documento,
+    DocumentoPublicacion,
     DocumentoVersion,
     DocumentoVersionAnexo,
     DocumentoAprobacion,
@@ -145,6 +149,11 @@ TIPOS_DOCUMENTO = [
     "OTRO",
 ]
 
+CLASIFICACIONES_CONTROL_LABELS = {
+    CLASIFICACION_CONTROL_INTERNO: "Documento interno",
+    CLASIFICACION_CONTROL_FORMATO: "Formato",
+}
+
 PREVIEWABLE_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
 VIGOR_PER_PAGE_OPTIONS = (25, 50, 100)
 VIGOR_LISTING_META = {
@@ -183,6 +192,8 @@ def _document_form_context(item=None, version_item=None, form_data=None):
         "item": item,
         "version_item": version_item,
         "tipos_documento": TIPOS_DOCUMENTO,
+        "clasificaciones_control": CLASIFICACIONES_CONTROL,
+        "clasificaciones_control_labels": CLASIFICACIONES_CONTROL_LABELS,
         "estados_documento": ESTADOS_DOCUMENTO,
         "responsables_documentales": _responsables_documentales(),
         "form_data": form_data or {},
@@ -203,6 +214,72 @@ def workflow_request_metadata():
         "ip": request.headers.get("X-Forwarded-For", request.remote_addr),
         "user_agent": request.headers.get("User-Agent"),
     }
+
+
+def _validate_tipo_documento(value):
+    normalized = (value or "").strip()
+    if not normalized:
+        return None, "El tipo de documento es obligatorio."
+    if normalized not in TIPOS_DOCUMENTO:
+        return None, "El tipo de documento seleccionado no es valido."
+    return normalized, None
+
+
+def _validate_clasificacion_control(value):
+    normalized = (value or "").strip()
+    if not normalized:
+        return None, "La clasificacion de control es obligatoria."
+    if normalized not in CLASIFICACIONES_CONTROL:
+        return None, "La clasificacion de control seleccionada no es valida."
+    return normalized, None
+
+
+def _document_has_publications(documento):
+    return DocumentoPublicacion.query.filter_by(
+        empresa_id=documento.empresa_id,
+        documento_id=documento.id,
+    ).first() is not None
+
+
+def _can_update_control_classification(documento):
+    if not documento.clasificacion_control:
+        return True
+    return documento.estado == "EN_ELABORACION" and not _document_has_publications(documento)
+
+
+def _latest_document_version(documento):
+    return (
+        DocumentoVersion.query
+        .filter_by(empresa_id=documento.empresa_id, documento_id=documento.id)
+        .order_by(DocumentoVersion.id.desc())
+        .first()
+    )
+
+
+def _record_control_classification_event(documento, previous_value, new_value):
+    version_doc = _latest_document_version(documento)
+    if not version_doc:
+        current_app.logger.info(
+            "Clasificacion de control actualizada sin evento: documento %s no tiene versiones.",
+            documento.id,
+        )
+        return None
+    return record_document_event(
+        documento=documento,
+        version_doc=version_doc,
+        usuario=current_user,
+        accion="CLASIFICAR_CONTROL",
+        estado_anterior=documento.estado,
+        estado_nuevo=documento.estado,
+        comentario=f"Clasificacion de control: {previous_value or 'PENDIENTE'} -> {new_value}.",
+        **workflow_request_metadata(),
+    )
+
+
+def _control_classification_redirect(documento):
+    if request.form.get("return_to") == "clasificacion_pendientes":
+        return redirect(url_for("documentacion.clasificacion_pendientes"))
+    return redirect(url_for("documentacion.detalle", item_id=documento.id))
 
 
 def _redirect_to_explorer(folder_id=None, uncategorized=False):
@@ -402,7 +479,28 @@ def index():
         estado=estado,
         q=q,
         tipos_documento=TIPOS_DOCUMENTO,
+        clasificaciones_control_labels=CLASIFICACIONES_CONTROL_LABELS,
         vista="documentos",
+    )
+
+
+@bp.route("/clasificacion/pendientes")
+@login_required
+@require_permission("documentos.editar")
+def clasificacion_pendientes():
+    documentos = (
+        Documento.query
+        .filter_by(empresa_id=current_user.empresa_id, clasificacion_control=None)
+        .order_by(Documento.codigo.asc(), Documento.id.asc())
+        .all()
+    )
+    latest_versions = {item.id: _latest_document_version(item) for item in documentos}
+    return render_template(
+        "documentacion/clasificacion_pendientes.html",
+        documentos=documentos,
+        latest_versions=latest_versions,
+        clasificaciones_control=CLASIFICACIONES_CONTROL,
+        clasificaciones_control_labels=CLASIFICACIONES_CONTROL_LABELS,
     )
 
 
@@ -441,6 +539,7 @@ def registros():
         estado=estado,
         q=q,
         tipos_documento=TIPOS_DOCUMENTO,
+        clasificaciones_control_labels=CLASIFICACIONES_CONTROL_LABELS,
         vista="registros",
     )
 
@@ -474,6 +573,7 @@ def archivo():
         estado="",
         q=q,
         tipos_documento=TIPOS_DOCUMENTO,
+        clasificaciones_control_labels=CLASIFICACIONES_CONTROL_LABELS,
         vista="archivo",
     )
 
@@ -709,7 +809,10 @@ def nuevo():
     if request.method == "POST":
         codigo = request.form.get("codigo", "").strip().upper()
         titulo = request.form.get("titulo", "").strip()
-        tipo_documento = request.form.get("tipo_documento", "").strip()
+        tipo_documento, tipo_error = _validate_tipo_documento(request.form.get("tipo_documento"))
+        clasificacion_control, clasificacion_error = _validate_clasificacion_control(
+            request.form.get("clasificacion_control")
+        )
         proceso = request.form.get("proceso", "").strip()
         version = request.form.get("version", "").strip() or "1"
         contenido = request.form.get("contenido", "").strip()
@@ -731,8 +834,13 @@ def nuevo():
                 **_document_form_context(form_data=form_data),
             )
 
-        if not codigo or not titulo or not tipo_documento or not version:
-            flash("Código, título, tipo de documento y versión son obligatorios.", "danger")
+        if not codigo or not titulo or not version or tipo_error or clasificacion_error:
+            flash(
+                tipo_error
+                or clasificacion_error
+                or "Codigo, titulo, tipo de documento y version son obligatorios.",
+                "danger",
+            )
             return render_template(
                 "documentacion/form.html",
                 **_document_form_context(form_data=form_data),
@@ -763,6 +871,7 @@ def nuevo():
                 codigo=codigo,
                 titulo=titulo,
                 tipo_documento=tipo_documento,
+                clasificacion_control=clasificacion_control,
                 proceso=proceso or None,
                 estado="EN_ELABORACION",
                 version_actual=version,
@@ -977,6 +1086,8 @@ def detalle(item_id):
         version_publication=version_publication,
         active_publication=active_publication,
         distribution_recipients=distribution_recipients,
+        clasificaciones_control=CLASIFICACIONES_CONTROL,
+        clasificaciones_control_labels=CLASIFICACIONES_CONTROL_LABELS,
         can_publish_current=bool(
             version_vigente
             and item.estado == "APROBADO"
@@ -1396,17 +1507,30 @@ def editar(item_id):
     if request.method == "POST":
         codigo = request.form.get("codigo", "").strip().upper()
         titulo = request.form.get("titulo", "").strip()
-        tipo_documento = request.form.get("tipo_documento", "").strip()
+        tipo_documento, tipo_error = _validate_tipo_documento(request.form.get("tipo_documento"))
+        clasificacion_control, clasificacion_error = _validate_clasificacion_control(
+            request.form.get("clasificacion_control")
+        )
         proceso = request.form.get("proceso", "").strip()
+        form_data = request.form
 
-        if not codigo or not titulo or not tipo_documento:
-            flash("Código, título y tipo de documento son obligatorios.", "danger")
+        if not codigo or not titulo or tipo_error or clasificacion_error:
+            flash(
+                tipo_error
+                or clasificacion_error
+                or "Codigo, titulo y tipo de documento son obligatorios.",
+                "danger",
+            )
             return render_template(
                 "documentacion/form.html",
-                item=item,
-                version_item=None,
-                tipos_documento=TIPOS_DOCUMENTO,
-                estados_documento=ESTADOS_DOCUMENTO,
+                **_document_form_context(item=item, version_item=None, form_data=form_data),
+            )
+
+        if clasificacion_control != item.clasificacion_control and not _can_update_control_classification(item):
+            flash("La clasificacion de control no puede modificarse para este documento.", "warning")
+            return render_template(
+                "documentacion/form.html",
+                **_document_form_context(item=item, version_item=None, form_data=form_data),
             )
 
         existente = Documento.query.filter(
@@ -1419,27 +1543,54 @@ def editar(item_id):
             flash("Ya existe otro documento con ese código.", "danger")
             return render_template(
                 "documentacion/form.html",
-                item=item,
-                version_item=None,
-                tipos_documento=TIPOS_DOCUMENTO,
-                estados_documento=ESTADOS_DOCUMENTO,
+                **_document_form_context(item=item, version_item=None, form_data=form_data),
             )
 
+        previous_classification = item.clasificacion_control
         item.codigo = codigo
         item.titulo = titulo
         item.tipo_documento = tipo_documento
+        item.clasificacion_control = clasificacion_control
         item.proceso = proceso or None
+        if previous_classification != clasificacion_control:
+            _record_control_classification_event(item, previous_classification, clasificacion_control)
         db.session.commit()
         flash("Documento actualizado correctamente.", "success")
         return redirect(url_for("documentacion.detalle", item_id=item.id))
 
     return render_template(
         "documentacion/form.html",
-        item=item,
-        version_item=None,
-        tipos_documento=TIPOS_DOCUMENTO,
-        estados_documento=ESTADOS_DOCUMENTO,
+        **_document_form_context(item=item, version_item=None),
     )
+
+
+@bp.route("/<int:item_id>/clasificacion-control", methods=["POST"])
+@login_required
+@require_permission("documentos.editar")
+def clasificar_control(item_id):
+    item = Documento.query.filter_by(
+        id=item_id,
+        empresa_id=current_user.empresa_id,
+    ).first_or_404()
+    clasificacion_control, error = _validate_clasificacion_control(
+        request.form.get("clasificacion_control")
+    )
+    if error:
+        flash(error, "danger")
+        return _control_classification_redirect(item)
+    if clasificacion_control == item.clasificacion_control:
+        flash("La clasificacion de control no cambio.", "info")
+        return _control_classification_redirect(item)
+    if not _can_update_control_classification(item):
+        flash("La clasificacion de control no puede modificarse para este documento.", "warning")
+        return _control_classification_redirect(item)
+
+    previous_classification = item.clasificacion_control
+    item.clasificacion_control = clasificacion_control
+    _record_control_classification_event(item, previous_classification, clasificacion_control)
+    db.session.commit()
+    flash("Clasificacion de control actualizada.", "success")
+    return _control_classification_redirect(item)
 
 
 @bp.route("/<int:item_id>/nueva-version", methods=["GET", "POST"])

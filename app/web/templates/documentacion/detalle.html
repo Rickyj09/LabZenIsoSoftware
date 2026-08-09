@@ -6,7 +6,14 @@
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
     <div>
         <h2 class="mb-1">{{ item.titulo }}</h2>
-        <div class="text-muted">{{ item.codigo }} · {{ item.tipo_documento }}</div>
+        <div class="text-muted">
+            {{ item.codigo }} · {{ item.tipo_documento }} ·
+            {% if item.clasificacion_control %}
+                {{ clasificaciones_control_labels.get(item.clasificacion_control, item.clasificacion_control) }}
+            {% else %}
+                Clasificacion de control pendiente
+            {% endif %}
+        </div>
     </div>
 
     <div class="d-flex gap-2 flex-wrap align-items-center">
@@ -150,6 +157,41 @@
     </div>
 </div>
 
+{% if not item.clasificacion_control %}
+<div class="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-3">
+    <div>Clasificacion de control pendiente</div>
+    {% if can('documentos.editar') %}
+    <form method="post" action="{{ url_for('documentacion.clasificar_control', item_id=item.id) }}" class="d-flex gap-2 flex-wrap">
+        <select name="clasificacion_control" class="form-select form-select-sm" required>
+            <option value="">Seleccione</option>
+            {% for c in clasificaciones_control %}
+            <option value="{{ c }}">{{ clasificaciones_control_labels[c] }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-sm btn-warning">Guardar clasificacion</button>
+    </form>
+    {% endif %}
+</div>
+{% elif item.estado == 'EN_ELABORACION' and can('documentos.editar') and not active_publication and not publication %}
+<div class="page-card mb-4">
+    <form method="post" action="{{ url_for('documentacion.clasificar_control', item_id=item.id) }}" class="row g-2 align-items-end">
+        <div class="col-md-4">
+            <label class="form-label">Clasificacion de control</label>
+            <select name="clasificacion_control" class="form-select">
+                {% for c in clasificaciones_control %}
+                <option value="{{ c }}" {% if item.clasificacion_control == c %}selected{% endif %}>
+                    {{ clasificaciones_control_labels[c] }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <button type="submit" class="btn btn-outline-primary">Actualizar clasificacion</button>
+        </div>
+    </form>
+</div>
+{% endif %}
+
 <div class="row g-4 mb-4">
     <div class="col-md-3">
         <div class="page-card text-center h-100">
@@ -195,6 +237,16 @@
         <div class="col-md-4">
             <div><strong>Título:</strong></div>
             <div>{{ item.titulo }}</div>
+        </div>
+        <div class="col-md-4">
+            <div><strong>Clasificacion de control:</strong></div>
+            <div>
+                {% if item.clasificacion_control %}
+                    {{ clasificaciones_control_labels.get(item.clasificacion_control, item.clasificacion_control) }}
+                {% else %}
+                    Pendiente de clasificar
+                {% endif %}
+            </div>
         </div>
         <div class="col-md-4">
             <div><strong>Elaborado por:</strong></div>

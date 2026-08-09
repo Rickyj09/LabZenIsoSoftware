@@ -1,0 +1,92 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Clasificacion de control pendiente{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+    <div>
+        <h2 class="mb-1">Clasificacion de control pendiente</h2>
+        <div class="text-muted">
+            Documentos de la empresa actual sin clasificacion de control.
+        </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <a href="{{ url_for('documentacion.index') }}" class="btn btn-outline-secondary">Volver a documentos</a>
+    </div>
+</div>
+
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <h5 class="mb-0">Pendientes</h5>
+        <span class="badge bg-warning text-dark">{{ documentos|length }} pendiente(s)</span>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Codigo</th>
+                    <th>Titulo</th>
+                    <th>Tipo</th>
+                    <th>Estado</th>
+                    <th>Version</th>
+                    <th>Clasificacion actual</th>
+                    <th style="min-width: 260px;">Accion</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in documentos %}
+                {% set latest_version = latest_versions.get(item.id) %}
+                <tr>
+                    <td>{{ item.codigo or '&mdash;'|safe }}</td>
+                    <td>
+                        <a href="{{ url_for('documentacion.detalle', item_id=item.id) }}">
+                            {{ item.titulo or '&mdash;'|safe }}
+                        </a>
+                    </td>
+                    <td>{{ item.tipo_documento or '&mdash;'|safe }}</td>
+                    <td>
+                        <span class="badge {{ document_state_badge_class(item.estado) }}">
+                            {{ document_state_label(item.estado) }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if item.version_vigente %}
+                            Vigente {{ item.version_vigente.version }}
+                        {% elif latest_version %}
+                            Ultima {{ latest_version.version }}
+                        {% else %}
+                            &mdash;
+                        {% endif %}
+                    </td>
+                    <td><span class="badge bg-warning text-dark">Pendiente</span></td>
+                    <td>
+                        <form method="post"
+                              action="{{ url_for('documentacion.clasificar_control', item_id=item.id) }}"
+                              class="d-flex flex-wrap gap-2 align-items-center">
+                            <input type="hidden" name="return_to" value="clasificacion_pendientes">
+                            <label class="visually-hidden" for="clasificacion_control_{{ item.id }}">Clasificacion</label>
+                            <select id="clasificacion_control_{{ item.id }}"
+                                    name="clasificacion_control"
+                                    class="form-select form-select-sm"
+                                    required>
+                                <option value="">Seleccionar</option>
+                                {% for value in clasificaciones_control %}
+                                <option value="{{ value }}">{{ clasificaciones_control_labels.get(value, value) }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="btn btn-sm btn-primary">Guardar</button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="text-center text-muted py-4">
+                        No hay documentos pendientes de clasificacion.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

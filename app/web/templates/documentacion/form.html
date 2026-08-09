@@ -41,6 +41,19 @@
             </div>
 
             <div class="col-md-4">
+                <label class="form-label">Clasificacion de control</label>
+                <select name="clasificacion_control" class="form-select" required>
+                    <option value="">Seleccione</option>
+                    {% for c in clasificaciones_control %}
+                    <option value="{{ c }}" {% if fd.get('clasificacion_control', item.clasificacion_control if item else '') == c %}selected{% endif %}>
+                        {{ clasificaciones_control_labels[c] }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <div class="form-text">Define el catalogo en vigor en el que se publicara el documento.</div>
+            </div>
+
+            <div class="col-md-4">
                 <label class="form-label">Proceso</label>
                 <input type="text" name="proceso" class="form-control"
                        value="{{ fd.get('proceso', item.proceso if item else '') }}">

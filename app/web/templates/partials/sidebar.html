@@ -237,6 +237,7 @@
                 'documentacion.explorador',
                 'documentacion.explorador_sin_clasificar',
                 'documentacion.explorador_carpeta',
+                'documentacion.clasificacion_pendientes',
                 'documentacion.vigor_internos',
                 'documentacion.vigor_externos',
                 'documentacion.vigor_formatos'
@@ -246,6 +247,7 @@
                 'documentacion.explorador',
                 'documentacion.explorador_sin_clasificar',
                 'documentacion.explorador_carpeta',
+                'documentacion.clasificacion_pendientes',
                 'documentacion.vigor_internos',
                 'documentacion.vigor_externos',
                 'documentacion.vigor_formatos'
@@ -304,6 +306,12 @@
                    href="{{ url_for('documentacion.explorador') }}">
                     Vista explorador
                 </a>
+                {% if can('documentos.editar') %}
+                <a class="sidebar-link {% if request.endpoint == 'documentacion.clasificacion_pendientes' %}active{% endif %}"
+                   href="{{ url_for('documentacion.clasificacion_pendientes') }}">
+                    Clasificacion pendiente
+                </a>
+                {% endif %}
             </div>
             </div>
 

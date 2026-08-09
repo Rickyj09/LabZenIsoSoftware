@@ -249,6 +249,13 @@ DOCUMENTO_VIGOR_INTERNO = "INTERNO"
 DOCUMENTO_VIGOR_EXTERNO = "EXTERNO"
 DOCUMENTO_VIGOR_FORMATO = "FORMATO"
 
+CLASIFICACION_CONTROL_INTERNO = "INTERNO"
+CLASIFICACION_CONTROL_FORMATO = "FORMATO"
+CLASIFICACIONES_CONTROL = (
+    CLASIFICACION_CONTROL_INTERNO,
+    CLASIFICACION_CONTROL_FORMATO,
+)
+
 TIPOS_DOCUMENTO_VIGOR = (
     DOCUMENTO_VIGOR_INTERNO,
     DOCUMENTO_VIGOR_EXTERNO,
@@ -370,12 +377,17 @@ class Documento(TenantMixin, BaseModel):
             "estado IN ('EN_ELABORACION', 'EN_ACTUALIZACION', 'EN_REVISION', 'EN_APROBACION', 'APROBADO', 'VIGENTE', 'RECHAZADO', 'OBSOLETO')",
             name="ck_documentos_estado_valido",
         ),
+        db.CheckConstraint(
+            "clasificacion_control IS NULL OR clasificacion_control IN ('INTERNO', 'FORMATO')",
+            name="ck_documentos_clasificacion_control_valida",
+        ),
         db.Index("ix_documentos_carpeta_id", "carpeta_id"),
     )
 
     codigo = db.Column(db.String(50), nullable=False)
     titulo = db.Column(db.String(200), nullable=False)
     tipo_documento = db.Column(db.String(50), nullable=False)
+    clasificacion_control = db.Column(db.String(20), nullable=True)
     proceso = db.Column(db.String(100))
     estado = db.Column(db.String(30), default=ESTADO_EN_ELABORACION, nullable=False)
     version_actual = db.Column(db.String(20), nullable=False, default="1")
@@ -611,7 +623,7 @@ class DocumentoAprobacion(TenantMixin, BaseModel):
     __tablename__ = "documento_aprobaciones"
     __table_args__ = (
         db.CheckConstraint(
-            "accion IN ('CREAR_VERSION', 'ENVIAR_REVISION', 'DAR_CONFORMIDAD', 'APROBAR', 'RECHAZAR', 'SOLICITAR_CORRECCIONES', 'RECHAZAR_APROBACION', 'DEVOLVER_BORRADOR', 'OBSOLETAR', 'SUSTITUIR_VERSION', 'PUBLICAR_VIGENTE', 'VERSION_ANTERIOR_OBSOLETA', 'PUBLICACION_PREPARADA', 'QR_GENERADO', 'PDF_QR_GENERADO', 'DISTRIBUCION_ENCOLADA', 'PUBLICACION_CONSULTADA', 'PDF_VIGENTE_DESCARGADO', 'PUBLICACION_REVOCADA')",
+            "accion IN ('CREAR_VERSION', 'ENVIAR_REVISION', 'DAR_CONFORMIDAD', 'APROBAR', 'RECHAZAR', 'SOLICITAR_CORRECCIONES', 'RECHAZAR_APROBACION', 'DEVOLVER_BORRADOR', 'OBSOLETAR', 'SUSTITUIR_VERSION', 'PUBLICAR_VIGENTE', 'VERSION_ANTERIOR_OBSOLETA', 'PUBLICACION_PREPARADA', 'QR_GENERADO', 'PDF_QR_GENERADO', 'DISTRIBUCION_ENCOLADA', 'PUBLICACION_CONSULTADA', 'PDF_VIGENTE_DESCARGADO', 'PUBLICACION_REVOCADA', 'CLASIFICAR_CONTROL')",
             name="ck_documento_eventos_accion_valida",
         ),
         db.Index("ix_documento_eventos_documento_id", "documento_id"),

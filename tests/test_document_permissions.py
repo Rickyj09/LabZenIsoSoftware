@@ -203,6 +203,7 @@ class DocumentPermissionTest(unittest.TestCase):
             "codigo": "DOC-TECNICO",
             "titulo": "Documento técnico",
             "tipo_documento": "PROCEDIMIENTO",
+            "clasificacion_control": "INTERNO",
             "version": "1",
             "archivo": (self.minimal_docx("Documento tecnico"), "documento-tecnico.docx"),
             "elaborado_por_id": "202",

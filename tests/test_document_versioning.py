@@ -10,7 +10,14 @@ from sqlalchemy.orm import Session
 from app import create_app
 from app.extensions import db
 from app.models.base import BaseModel
-from app.models.documentos import Documento, DocumentoVersion
+from app.models.documentos import (
+    CLASIFICACION_CONTROL_FORMATO,
+    CLASIFICACION_CONTROL_INTERNO,
+    Documento,
+    DocumentoAprobacion,
+    DocumentoVigorCatalogo,
+    DocumentoVersion,
+)
 from app.models.empresa import Empresa
 from app.models.seguridad import Permiso, Rol, RolPermiso, Usuario, UsuarioRol
 from app.services.document_versioning_service import (
@@ -134,11 +141,18 @@ class DocumentVersioningTest(unittest.TestCase):
             nombre="Crear documentos",
             modulo="documentos",
         )
-        db.session.add_all([edit_role, edit_permission, create_permission])
+        view_permission = Permiso(
+            id=408,
+            codigo="documentos.ver",
+            nombre="Ver documentos",
+            modulo="documentos",
+        )
+        db.session.add_all([edit_role, edit_permission, create_permission, view_permission])
         db.session.flush()
         db.session.add_all([
             RolPermiso(id=403, rol_id=edit_role.id, permiso_id=edit_permission.id),
             RolPermiso(id=406, rol_id=edit_role.id, permiso_id=create_permission.id),
+            RolPermiso(id=409, rol_id=edit_role.id, permiso_id=view_permission.id),
             UsuarioRol(id=404, usuario_id=201, rol_id=edit_role.id),
         ])
         db.session.commit()
@@ -224,6 +238,7 @@ class DocumentVersioningTest(unittest.TestCase):
             "codigo": "TEST-GT.PR.SOD.PEECE-CIERRE",
             "titulo": "Documento de prueba cierre",
             "tipo_documento": "PROCEDIMIENTO",
+            "clasificacion_control": CLASIFICACION_CONTROL_INTERNO,
             "proceso": "Gestion tecnica",
             "version": "1",
             "contenido": "Contenido",
@@ -263,6 +278,7 @@ class DocumentVersioningTest(unittest.TestCase):
         document = Documento.query.filter_by(codigo="TEST-GT.PR.SOD.PEECE-CIERRE").one()
         version_doc = DocumentoVersion.query.filter_by(documento_id=document.id, version="1").one()
         self.assertEqual(document.elaborado_por_id, 201)
+        self.assertEqual(document.clasificacion_control, CLASIFICACION_CONTROL_INTERNO)
         self.assertEqual(version_doc.elaborado_por_id, 201)
         self.assertEqual(version_doc.revisado_por_id, 203)
         self.assertEqual(version_doc.aprobado_por_id, 204)
@@ -279,6 +295,47 @@ class DocumentVersioningTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Debe seleccionar un aprobador.", response.get_data(as_text=True))
+        self.assertEqual(Documento.query.filter_by(codigo="TEST-GT.PR.SOD.PEECE-CIERRE").count(), 0)
+
+    def test_post_new_document_stores_format_control_classification(self):
+        response = self.post_new_document(
+            codigo="FORM-CTRL",
+            titulo="Formato controlado",
+            tipo_documento="FORMATO",
+            clasificacion_control=CLASIFICACION_CONTROL_FORMATO,
+        )
+
+        self.assertEqual(response.status_code, 302)
+        document = Documento.query.filter_by(codigo="FORM-CTRL").one()
+        self.assertEqual(document.tipo_documento, "FORMATO")
+        self.assertEqual(document.clasificacion_control, CLASIFICACION_CONTROL_FORMATO)
+
+    def test_post_new_document_rejects_empty_control_classification(self):
+        response = self.post_new_document(clasificacion_control="")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("La clasificacion de control es obligatoria.", response.get_data(as_text=True))
+        self.assertEqual(Documento.query.filter_by(codigo="TEST-GT.PR.SOD.PEECE-CIERRE").count(), 0)
+
+    def test_post_new_document_rejects_external_control_classification(self):
+        response = self.post_new_document(clasificacion_control="EXTERNO")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("La clasificacion de control seleccionada no es valida.", response.get_data(as_text=True))
+        self.assertEqual(Documento.query.filter_by(codigo="TEST-GT.PR.SOD.PEECE-CIERRE").count(), 0)
+
+    def test_post_new_document_rejects_unknown_control_classification(self):
+        response = self.post_new_document(clasificacion_control="INVALIDO")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("La clasificacion de control seleccionada no es valida.", response.get_data(as_text=True))
+        self.assertEqual(Documento.query.filter_by(codigo="TEST-GT.PR.SOD.PEECE-CIERRE").count(), 0)
+
+    def test_post_new_document_rejects_unknown_document_type(self):
+        response = self.post_new_document(tipo_documento="MANIPULADO")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("El tipo de documento seleccionado no es valido.", response.get_data(as_text=True))
         self.assertEqual(Documento.query.filter_by(codigo="TEST-GT.PR.SOD.PEECE-CIERRE").count(), 0)
 
     def test_initial_version_rejects_cross_tenant_reviewer(self):
@@ -458,6 +515,238 @@ class DocumentVersioningTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(document.codigo, "DOC-310")
+
+    def test_draft_version_preserves_document_control_classification(self):
+        document = self.make_document(320)
+        document.clasificacion_control = CLASIFICACION_CONTROL_INTERNO
+        self.approve_initial(document)
+        db.session.commit()
+
+        draft = create_draft_version(
+            documento=document,
+            version="2",
+            cambios="Nueva version",
+            contenido="Contenido",
+            user_id=201,
+            revisado_por_id=203,
+            aprobado_por_id=204,
+        )
+        self.assign_version_id(draft)
+        db.session.flush()
+
+        self.assertEqual(document.clasificacion_control, CLASIFICACION_CONTROL_INTERNO)
+        self.assertEqual(draft.documento.clasificacion_control, CLASIFICACION_CONTROL_INTERNO)
+
+    def test_historical_document_can_receive_initial_control_classification(self):
+        document = self.make_document(321, estado="APROBADO")
+        version = self.initial(document)
+        version.estado = "APROBADO"
+        db.session.commit()
+
+        response = self.login(self.app, 201).post(
+            f"/documentacion/{document.id}/clasificacion-control",
+            data={"clasificacion_control": CLASIFICACION_CONTROL_INTERNO},
+        )
+        db.session.refresh(document)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(document.clasificacion_control, CLASIFICACION_CONTROL_INTERNO)
+        self.assertEqual(document.estado, "APROBADO")
+        self.assertEqual(DocumentoVersion.query.filter_by(documento_id=document.id).count(), 1)
+        event = DocumentoAprobacion.query.filter_by(documento_id=document.id, accion="CLASIFICAR_CONTROL").one()
+        self.assertEqual(event.documento_version_id, version.id)
+
+    def test_historical_classification_does_not_publish_or_sync_catalog(self):
+        document = self.make_document(322, estado="APROBADO")
+        self.initial(document).estado = "APROBADO"
+        db.session.commit()
+
+        self.login(self.app, 201).post(
+            f"/documentacion/{document.id}/clasificacion-control",
+            data={"clasificacion_control": CLASIFICACION_CONTROL_FORMATO},
+        )
+
+        self.assertEqual(document.estado, "APROBADO")
+        self.assertIsNone(document.version_vigente_id)
+
+    def test_user_without_edit_permission_cannot_classify(self):
+        document = self.make_document(323, estado="APROBADO")
+        self.initial(document).estado = "APROBADO"
+        db.session.commit()
+
+        response = self.login(self.app, 203).post(
+            f"/documentacion/{document.id}/clasificacion-control",
+            data={"clasificacion_control": CLASIFICACION_CONTROL_INTERNO},
+        )
+        db.session.refresh(document)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIsNone(document.clasificacion_control)
+
+    def test_user_from_other_company_cannot_classify_document(self):
+        document = self.make_document(324, estado="APROBADO")
+        self.initial(document).estado = "APROBADO"
+        db.session.add(UsuarioRol(id=407, usuario_id=202, rol_id=401))
+        db.session.commit()
+
+        response = self.login(self.app, 202).post(
+            f"/documentacion/{document.id}/clasificacion-control",
+            data={"clasificacion_control": CLASIFICACION_CONTROL_INTERNO},
+        )
+        db.session.refresh(document)
+
+        self.assertEqual(response.status_code, 404)
+        self.assertIsNone(document.clasificacion_control)
+
+    def test_vigente_document_with_classification_cannot_change_it(self):
+        document = self.make_document(325, estado="VIGENTE")
+        document.clasificacion_control = CLASIFICACION_CONTROL_INTERNO
+        self.initial(document).estado = "VIGENTE"
+        db.session.commit()
+
+        response = self.login(self.app, 201).post(
+            f"/documentacion/{document.id}/clasificacion-control",
+            data={"clasificacion_control": CLASIFICACION_CONTROL_FORMATO},
+        )
+        db.session.refresh(document)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(document.clasificacion_control, CLASIFICACION_CONTROL_INTERNO)
+
+    def test_unpublished_draft_document_can_change_control_classification(self):
+        document = self.make_document(326, estado="EN_ELABORACION")
+        document.clasificacion_control = CLASIFICACION_CONTROL_INTERNO
+        self.initial(document)
+        db.session.commit()
+
+        response = self.login(self.app, 201).post(
+            f"/documentacion/{document.id}/clasificacion-control",
+            data={"clasificacion_control": CLASIFICACION_CONTROL_FORMATO},
+        )
+        db.session.refresh(document)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(document.clasificacion_control, CLASIFICACION_CONTROL_FORMATO)
+
+    def test_detail_shows_pending_control_classification(self):
+        document = self.make_document(327, estado="APROBADO")
+        self.initial(document).estado = "APROBADO"
+        db.session.commit()
+
+        response = self.login(self.app, 201).get(f"/documentacion/{document.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Pendiente de clasificar", response.get_data(as_text=True))
+
+    def test_control_classification_pending_view_lists_only_unclassified_company_documents(self):
+        pending = self.make_document(328)
+        self.initial(pending, version="7")
+        internal = self.make_document(329)
+        internal.clasificacion_control = CLASIFICACION_CONTROL_INTERNO
+        form = self.make_document(330)
+        form.clasificacion_control = CLASIFICACION_CONTROL_FORMATO
+        other_company = self.make_document(331, empresa_id=102)
+        self.initial(other_company, user_id=202)
+        db.session.commit()
+
+        response = self.login(self.app, 201).get("/documentacion/clasificacion/pendientes")
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("DOC-328", html)
+        self.assertIn("Ultima 7", html)
+        self.assertIn("Pendiente", html)
+        self.assertNotIn("DOC-329", html)
+        self.assertNotIn("DOC-330", html)
+        self.assertNotIn("DOC-331", html)
+
+    def test_control_classification_pending_view_requires_edit_permission(self):
+        response = self.login(self.app, 203).get("/documentacion/clasificacion/pendientes")
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_classifying_internal_from_pending_view_removes_document_without_workflow_changes(self):
+        document = self.make_document(332, estado="APROBADO")
+        version = self.initial(document)
+        version.estado = "APROBADO"
+        db.session.commit()
+        version_count = DocumentoVersion.query.filter_by(documento_id=document.id).count()
+        original_state = document.estado
+
+        response = self.login(self.app, 201).post(
+            f"/documentacion/{document.id}/clasificacion-control",
+            data={
+                "clasificacion_control": CLASIFICACION_CONTROL_INTERNO,
+                "return_to": "clasificacion_pendientes",
+            },
+            follow_redirects=True,
+        )
+        db.session.refresh(document)
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(document.clasificacion_control, CLASIFICACION_CONTROL_INTERNO)
+        self.assertEqual(document.estado, original_state)
+        self.assertEqual(DocumentoVersion.query.filter_by(documento_id=document.id).count(), version_count)
+        self.assertNotIn("DOC-332", html)
+        event = DocumentoAprobacion.query.filter_by(documento_id=document.id, accion="CLASIFICAR_CONTROL").one()
+        self.assertEqual(event.documento_version_id, version.id)
+        self.assertEqual(
+            DocumentoVigorCatalogo.query.filter(
+                db.or_(
+                    DocumentoVigorCatalogo.documento_id == document.id,
+                    DocumentoVigorCatalogo.documento_version_id == version.id,
+                )
+            ).count(),
+            0,
+        )
+
+    def test_classifying_format_from_pending_view_is_allowed(self):
+        document = self.make_document(333)
+        self.initial(document)
+        db.session.commit()
+
+        response = self.login(self.app, 201).post(
+            f"/documentacion/{document.id}/clasificacion-control",
+            data={
+                "clasificacion_control": CLASIFICACION_CONTROL_FORMATO,
+                "return_to": "clasificacion_pendientes",
+            },
+        )
+        db.session.refresh(document)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/documentacion/clasificacion/pendientes", response.location)
+        self.assertEqual(document.clasificacion_control, CLASIFICACION_CONTROL_FORMATO)
+
+    def test_pending_classification_rejects_external_invalid_and_empty_values(self):
+        invalid_values = ["", "EXTERNO", "INVALIDO"]
+
+        for index, value in enumerate(invalid_values, start=334):
+            with self.subTest(value=value):
+                document = self.make_document(index)
+                self.initial(document)
+                db.session.commit()
+
+                response = self.login(self.app, 201).post(
+                    f"/documentacion/{document.id}/clasificacion-control",
+                    data={
+                        "clasificacion_control": value,
+                        "return_to": "clasificacion_pendientes",
+                    },
+                )
+                db.session.refresh(document)
+
+                self.assertEqual(response.status_code, 302)
+                self.assertIn("/documentacion/clasificacion/pendientes", response.location)
+                self.assertIsNone(document.clasificacion_control)
+                self.assertEqual(
+                    DocumentoAprobacion.query.filter_by(
+                        documento_id=document.id,
+                        accion="CLASIFICAR_CONTROL",
+                    ).count(),
+                    0,
+                )
 
     def test_approval_rejects_version_from_another_company(self):
         document_one = self.make_document(311, empresa_id=101)
