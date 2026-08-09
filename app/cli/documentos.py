@@ -5,11 +5,61 @@ from app.services.document_pdf_service import DocumentPdfError, DocumentPdfServi
 from app.services.document_signature_service import DocumentSignatureService
 from app.services.document_demo_seed_service import seed_demo_documents
 from app.services.document_migration_service import migrate_historical_document_files
+from app.services.document_vigor_import_service import DocumentVigorImportError, DocumentVigorImportService
 
 
 @click.group(name="documentos")
 def documentos_cli():
     """Operaciones administrativas del módulo documental."""
+
+
+@documentos_cli.command(name="importar-vigor")
+@click.option("--empresa-id", required=True, type=int, help="Empresa destino de la importacion.")
+@click.option("--internos", "internos_path", required=True, type=click.Path(exists=True, dir_okay=False), help="Ruta del Excel de documentos internos.")
+@click.option("--externos", "externos_path", required=True, type=click.Path(exists=True, dir_okay=False), help="Ruta del Excel de documentos externos.")
+@click.option("--formatos", "formatos_path", required=True, type=click.Path(exists=True, dir_okay=False), help="Ruta del Excel de formatos.")
+@click.option(
+    "--password",
+    envvar="DOCUMENTOS_VIGOR_EXCEL_PASSWORD",
+    help="Contrasena de los libros protegidos. Tambien puede venir de DOCUMENTOS_VIGOR_EXCEL_PASSWORD.",
+)
+@click.option("--usuario-id", type=int, default=None, help="Usuario que queda registrado como importador/actualizador.")
+def importar_vigor(empresa_id, internos_path, externos_path, formatos_path, password, usuario_id):
+    """Importa listados de documentos y formatos en vigor desde Excel."""
+    try:
+        result = DocumentVigorImportService().import_excel_files(
+            empresa_id=empresa_id,
+            internos_path=internos_path,
+            externos_path=externos_path,
+            formatos_path=formatos_path,
+            password=password,
+            usuario_id=usuario_id,
+        )
+    except DocumentVigorImportError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    for summary in result.summaries:
+        click.echo(
+            f"{summary.tipo_listado}: "
+            f"insertados={summary.insertados}, "
+            f"actualizados={summary.actualizados}, "
+            f"omitidos={summary.omitidos}, "
+            f"advertencias={len(summary.advertencias)}, "
+            f"errores={len(summary.errores)}, "
+            f"hoja={summary.fuente_hoja}"
+        )
+        for warning in summary.advertencias:
+            click.echo(f"  advertencia: {warning}")
+        for error in summary.errores:
+            click.echo(f"  error: {error}")
+    click.echo(
+        "Total: "
+        f"insertados={result.insertados}, "
+        f"actualizados={result.actualizados}, "
+        f"omitidos={result.omitidos}, "
+        f"advertencias={len(result.advertencias)}, "
+        f"errores={len(result.errores)}"
+    )
 
 
 @documentos_cli.command(name="migrar-archivos-historicos")

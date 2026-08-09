@@ -245,6 +245,16 @@ MODOS_ACCESO_DOCUMENTO_PUBLICACION = (
     PUBLICACION_ACCESO_TOKEN_PUBLICO,
 )
 
+DOCUMENTO_VIGOR_INTERNO = "INTERNO"
+DOCUMENTO_VIGOR_EXTERNO = "EXTERNO"
+DOCUMENTO_VIGOR_FORMATO = "FORMATO"
+
+TIPOS_DOCUMENTO_VIGOR = (
+    DOCUMENTO_VIGOR_INTERNO,
+    DOCUMENTO_VIGOR_EXTERNO,
+    DOCUMENTO_VIGOR_FORMATO,
+)
+
 DISTRIBUCION_TIPO_INTERNO = "INTERNO"
 DISTRIBUCION_TIPO_EXTERNO = "EXTERNO"
 
@@ -531,6 +541,70 @@ class DocumentoVersionAnexo(TenantMixin, BaseModel):
     actualizado_por = db.relationship("Usuario", foreign_keys=[actualizado_por_id])
     aprobado_por = db.relationship("Usuario", foreign_keys=[aprobado_por_id])
     eliminado_por = db.relationship("Usuario", foreign_keys=[eliminado_por_id])
+
+
+class DocumentoVigorCatalogo(TenantMixin, BaseModel):
+    __tablename__ = "documento_vigor_catalogo"
+    __table_args__ = (
+        db.CheckConstraint(
+            "tipo_listado IN ('INTERNO', 'EXTERNO', 'FORMATO')",
+            name="ck_documento_vigor_tipo_listado_valido",
+        ),
+        db.CheckConstraint("codigo IS NULL OR codigo <> ''", name="ck_documento_vigor_codigo_no_vacio"),
+        db.CheckConstraint("titulo IS NULL OR titulo <> ''", name="ck_documento_vigor_titulo_no_vacio"),
+        db.CheckConstraint("codigo IS NOT NULL OR titulo IS NOT NULL", name="ck_documento_vigor_codigo_o_titulo"),
+        db.CheckConstraint("ordinal_identidad > 0", name="ck_documento_vigor_ordinal_identidad_positivo"),
+        db.UniqueConstraint(
+            "empresa_id",
+            "tipo_listado",
+            "clave_importacion",
+            name="uq_documento_vigor_empresa_tipo_clave",
+        ),
+        db.UniqueConstraint(
+            "empresa_id",
+            "tipo_listado",
+            "identidad_estable",
+            name="uq_documento_vigor_empresa_tipo_identidad",
+        ),
+        db.Index("ix_documento_vigor_empresa_tipo", "empresa_id", "tipo_listado"),
+        db.Index("ix_documento_vigor_empresa_tipo_activo", "empresa_id", "tipo_listado", "activo"),
+        db.Index("ix_documento_vigor_empresa_codigo", "empresa_id", "codigo"),
+        db.Index("ix_documento_vigor_empresa_tipo_identidad", "empresa_id", "tipo_listado", "identidad_estable"),
+        db.Index("ix_documento_vigor_documento_id", "documento_id"),
+        db.Index("ix_documento_vigor_documento_version_id", "documento_version_id"),
+    )
+
+    tipo_listado = db.Column(db.String(20), nullable=False)
+    clave_importacion = db.Column(db.String(255), nullable=False)
+    identidad_estable = db.Column(db.String(255), nullable=False)
+    ordinal_identidad = db.Column(db.Integer, nullable=False, default=1)
+    codigo = db.Column(db.String(80), nullable=True)
+    titulo = db.Column(db.String(500), nullable=True)
+    revision = db.Column(db.String(50))
+    fecha_vigencia = db.Column(db.Date)
+    custodio = db.Column(db.String(255))
+    acceso_documento = db.Column(db.String(500))
+    lugar_almacenamiento = db.Column(db.String(500))
+    proteccion = db.Column(db.String(255))
+    medio = db.Column(db.String(120))
+    destino_final = db.Column(db.String(500))
+    seccion = db.Column(db.String(255))
+    activo = db.Column(db.Boolean, nullable=False, default=True)
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=True)
+    documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=True)
+    fuente_archivo = db.Column(db.String(255), nullable=False)
+    fuente_hoja = db.Column(db.String(255), nullable=False)
+    fuente_fila = db.Column(db.Integer, nullable=False)
+    importado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=True)
+    importado_en = db.Column(db.DateTime(timezone=True), nullable=False)
+    actualizado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=True)
+    actualizado_en = db.Column(db.DateTime(timezone=True), nullable=True)
+
+    empresa = db.relationship("Empresa")
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    importado_por = db.relationship("Usuario", foreign_keys=[importado_por_id])
+    actualizado_por = db.relationship("Usuario", foreign_keys=[actualizado_por_id])
 
 
 class DocumentoAprobacion(TenantMixin, BaseModel):

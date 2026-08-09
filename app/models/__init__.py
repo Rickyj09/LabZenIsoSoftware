@@ -27,6 +27,7 @@ from app.models.documentos import (
     Documento,
     DocumentoVersion,
     DocumentoVersionAnexo,
+    DocumentoVigorCatalogo,
     DocumentoAprobacion,
     DocumentoSnapshot,
     DocumentoArtefacto,
