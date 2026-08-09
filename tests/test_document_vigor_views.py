@@ -1,3 +1,4 @@
+import re
 import unittest
 from datetime import date, datetime
 
@@ -57,12 +58,16 @@ class DocumentVigorViewsTest(unittest.TestCase):
             Usuario(id=203, empresa_id=102, nombre="Calidad", apellido="Dos", email="calidad2@vigor", username="calidad2", password_hash="x", activo=True),
         ])
         permission = Permiso(id=1001, codigo="documentos.ver", nombre="Ver documentos", modulo="documentos")
+        pending_permission = Permiso(id=1002, codigo="documentos.ver_pendientes", nombre="Ver pendientes", modulo="documentos")
+        equipment_permission = Permiso(id=1003, codigo="equipamiento.dashboard.ver", nombre="Ver equipamiento", modulo="equipamiento")
         viewer = Rol(id=2001, nombre="CALIDAD", es_sistema=True)
         no_access = Rol(id=2002, nombre="SIN_ACCESO", es_sistema=True)
-        db.session.add_all([permission, viewer, no_access])
+        db.session.add_all([permission, pending_permission, equipment_permission, viewer, no_access])
         db.session.flush()
         db.session.add_all([
             RolPermiso(id=3001, rol_id=viewer.id, permiso_id=permission.id),
+            RolPermiso(id=3002, rol_id=viewer.id, permiso_id=pending_permission.id),
+            RolPermiso(id=3003, rol_id=viewer.id, permiso_id=equipment_permission.id),
             UsuarioRol(id=4001, usuario_id=201, rol_id=viewer.id),
             UsuarioRol(id=4002, usuario_id=203, rol_id=viewer.id),
             UsuarioRol(id=4003, usuario_id=202, rol_id=no_access.id),
@@ -124,7 +129,9 @@ class DocumentVigorViewsTest(unittest.TestCase):
             self.catalog_item(codigo="INT-INACTIVO", titulo="No visible", fuente_fila=40, activo=False),
             self.catalog_item(empresa_id=102, codigo="INT-OTRA-EMPRESA", titulo="Otra empresa", seccion="Seccion Otra", fuente_fila=1),
             self.catalog_item(tipo_listado=DOCUMENTO_VIGOR_EXTERNO, codigo="DOCEXT/LI/42", titulo=None, revision=None, custodio=None, seccion="DOCUMENTOS", fuente_fila=53),
+            self.catalog_item(tipo_listado=DOCUMENTO_VIGOR_EXTERNO, codigo="DOCEXT/LI/43", titulo=None, revision=None, custodio=None, seccion="DOCUMENTOS", fuente_fila=54),
             self.catalog_item(tipo_listado=DOCUMENTO_VIGOR_EXTERNO, codigo="EXT-ISO", titulo="Norma ISO externa", revision="2025", custodio="Responsable externo", seccion="NORMAS", fuente_fila=54),
+            self.catalog_item(tipo_listado=DOCUMENTO_VIGOR_EXTERNO, codigo="EXT-INACTIVO", titulo="Externo inactivo", seccion="NORMAS", fuente_fila=55, activo=False),
             self.catalog_item(tipo_listado=DOCUMENTO_VIGOR_EXTERNO, empresa_id=102, codigo="EXT-OTRA", titulo="Externo otra empresa", seccion="NORMAS B", fuente_fila=1),
             self.catalog_item(tipo_listado=DOCUMENTO_VIGOR_FORMATO, codigo="PGT/LI/01-FO02", titulo="Registro con fecha invalida", fecha_vigencia=None, seccion="FORMATOS", fuente_fila=48),
             self.catalog_item(tipo_listado=DOCUMENTO_VIGOR_FORMATO, codigo="PGT/LI/01-FO04", titulo="Registro de capacitaciones", seccion="FORMATOS", fuente_fila=50, ordinal=1),
@@ -146,6 +153,33 @@ class DocumentVigorViewsTest(unittest.TestCase):
         response = self.login(user_id).get(path)
         self.assertEqual(response.status_code, 200)
         return response.get_data(as_text=True)
+
+    def sidebar(self, body):
+        start = body.index('<aside class="sidebar">')
+        end = body.index('</aside>', start) + len('</aside>')
+        return body[start:end]
+
+    def assert_sidebar_has_no_mojibake(self, sidebar):
+        for token in ("Ã", "Â", "Æ", "â", "Gesti&oacute;n"):
+            self.assertNotIn(token, sidebar)
+
+    def collapse_button(self, sidebar, target):
+        match = re.search(
+            rf'<button[^>]*data-bs-target="#{target}"[^>]*>',
+            sidebar,
+            flags=re.S,
+        )
+        self.assertIsNotNone(match, target)
+        return match.group(0)
+
+    def collapse_container(self, sidebar, target):
+        match = re.search(
+            rf'<div class="([^"]*)"[^>]*id="{target}"',
+            sidebar,
+            flags=re.S,
+        )
+        self.assertIsNotNone(match, target)
+        return match.group(1)
 
     def test_unauthenticated_user_is_redirected(self):
         response = self.app.test_client().get("/documentacion/vigor/internos")
@@ -197,7 +231,7 @@ class DocumentVigorViewsTest(unittest.TestCase):
     def test_existing_document_index_uses_same_constrained_admin_layout(self):
         body = self.body("/documentacion/")
 
-        self.assertIn("Gesti", body)
+        self.assertIn("Gestión documental", body)
         self.assertIn(".layout-main", body)
         self.assertIn("max-width: calc(100% - 280px);", body)
         self.assertIn(".topbar > .d-flex:last-child", body)
@@ -207,6 +241,101 @@ class DocumentVigorViewsTest(unittest.TestCase):
 
         self.assertIn("d-flex flex-wrap gap-2 vigor-filter-actions", body)
         self.assertIn("Limpiar filtros", body)
+
+    def test_sidebar_shows_document_management_submenu_for_authorized_user(self):
+        body = self.body("/documentacion/vigor/internos")
+        sidebar = self.sidebar(body)
+
+        self.assert_sidebar_has_no_mojibake(sidebar)
+        self.assertIn("Gestión documental", sidebar)
+        self.assertIn("Operación del laboratorio", sidebar)
+        self.assertIn("Instalaciones y equipamiento", sidebar)
+        self.assertIn("Sistema de Gestión (SGC)", sidebar)
+        self.assertEqual(sidebar.count('id="menuGestionDocumental"'), 1)
+        self.assertEqual(sidebar.count('id="menuGestionDocumentos"'), 1)
+        self.assertIn("menuGestionDocumental", sidebar)
+        self.assertIn("Dashboard documental", sidebar)
+        self.assertIn("Mis pendientes", sidebar)
+        self.assertIn("Documentos", sidebar)
+        self.assertIn("menuGestionDocumentos", sidebar)
+        self.assertIn("Vista actual", sidebar)
+        self.assertIn("Vista explorador", sidebar)
+        self.assertIn("▾", sidebar)
+        self.assertNotIn("/documentacion/vigor/internos", sidebar)
+        self.assertNotIn("/documentacion/vigor/externos", sidebar)
+        self.assertNotIn("/documentacion/vigor/formatos", sidebar)
+        self.assertNotIn("Documentos internos en vigor", sidebar)
+        self.assertNotIn("Documentos externos en vigor", sidebar)
+        self.assertNotIn("Formatos en vigor", sidebar)
+
+    def test_sidebar_hides_document_management_submenu_without_permission(self):
+        response = self.login(202).get("/")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("menuGestionDocumental", body)
+        self.assertNotIn("/documentacion/vigor/internos", body)
+
+    def test_sidebar_document_management_submenu_stays_open_and_marks_active_links(self):
+        client = self.login(201)
+        for path, active_text, documents_expanded in (
+            ("/documentacion/dashboard", "Dashboard documental", False),
+            ("/documentacion/pendientes", "Mis pendientes", False),
+            ("/documentacion/", "Vista actual", True),
+            ("/documentacion/explorador", "Vista explorador", True),
+            ("/documentacion/vigor/internos", "Vista actual", True),
+            ("/documentacion/vigor/externos", "Vista actual", True),
+            ("/documentacion/vigor/formatos", "Vista actual", True),
+        ):
+            with self.subTest(path=path):
+                body = client.get(path).get_data(as_text=True)
+                sidebar = self.sidebar(body)
+                self.assert_sidebar_has_no_mojibake(sidebar)
+                self.assertIn('data-bs-target="#menuGestionDocumental"', sidebar)
+                self.assertIn('aria-controls="menuGestionDocumental"', sidebar)
+                self.assertIn('id="menuGestionDocumental"', sidebar)
+                self.assertIn('id="menuGestionDocumentos"', sidebar)
+                self.assertIn('aria-expanded="true"', self.collapse_button(sidebar, "menuGestionDocumental"))
+                self.assertIn("show", self.collapse_container(sidebar, "menuGestionDocumental"))
+                expected_documents_state = "true" if documents_expanded else "false"
+                self.assertIn(
+                    f'aria-expanded="{expected_documents_state}"',
+                    self.collapse_button(sidebar, "menuGestionDocumentos"),
+                )
+                documents_classes = self.collapse_container(sidebar, "menuGestionDocumentos")
+                if documents_expanded:
+                    self.assertIn("show", documents_classes)
+                else:
+                    self.assertNotIn("show", documents_classes)
+                self.assertIn(active_text, sidebar)
+
+    def test_existing_document_index_is_not_marked_as_vigor_submenu(self):
+        body = self.body("/documentacion/")
+        sidebar = self.sidebar(body)
+
+        self.assert_sidebar_has_no_mojibake(sidebar)
+        self.assertIn("Documentos", sidebar)
+        self.assertIn("Vista actual", sidebar)
+        self.assertIn("Vista explorador", sidebar)
+        self.assertIn("menuGestionDocumental", sidebar)
+        self.assertIn('id="menuGestionDocumental"', sidebar)
+        self.assertIn('aria-controls="menuGestionDocumental"', sidebar)
+        self.assertNotIn("Documentos internos en vigor", sidebar)
+        self.assertIn("Documentos en vigor", body)
+        self.assertIn("/documentacion/vigor/internos", body)
+        self.assertIn("/documentacion/vigor/externos", body)
+        self.assertIn("/documentacion/vigor/formatos", body)
+
+    def test_vigor_listing_keeps_return_print_and_type_navigation(self):
+        body = self.body("/documentacion/vigor/internos")
+
+        self.assertIn("Volver a Vista actual", body)
+        self.assertIn('href="/documentacion/"', body)
+        self.assertIn("Imprimir listado", body)
+        self.assertIn('aria-label="Listados de documentos en vigor"', body)
+        self.assertIn('href="/documentacion/vigor/internos"', body)
+        self.assertIn('href="/documentacion/vigor/externos"', body)
+        self.assertIn('href="/documentacion/vigor/formatos"', body)
 
     def test_endpoints_are_fixed_to_their_document_type(self):
         self.assertIn("INT-PAG-01", self.body("/documentacion/vigor/internos"))
@@ -294,6 +423,132 @@ class DocumentVigorViewsTest(unittest.TestCase):
         client.get("/documentacion/vigor/internos?q=INT")
         client.get("/documentacion/vigor/externos")
         client.get("/documentacion/vigor/formatos?per_page=50")
+        self.assertEqual(DocumentoVigorCatalogo.query.count(), before)
+
+    def test_print_buttons_are_present_and_preserve_filters(self):
+        for path, print_path in (
+            ("/documentacion/vigor/internos", "/documentacion/vigor/internos/imprimir"),
+            ("/documentacion/vigor/externos", "/documentacion/vigor/externos/imprimir"),
+            ("/documentacion/vigor/formatos", "/documentacion/vigor/formatos/imprimir"),
+        ):
+            with self.subTest(path=path):
+                body = self.body(f"{path}?q=abc&revision=01&seccion=Seccion+A&page=2&per_page=50")
+                self.assertIn("Imprimir listado", body)
+                self.assertIn(print_path, body)
+                self.assertIn("q=abc", body)
+                self.assertIn("revision=01", body)
+                self.assertIn("seccion=Seccion+A", body)
+                self.assertNotIn(f"{print_path}?page=2", body)
+
+    def test_print_routes_require_authentication(self):
+        response = self.app.test_client().get("/documentacion/vigor/internos/imprimir")
+        self.assertEqual(response.status_code, 302)
+
+    def test_print_routes_require_permission(self):
+        forbidden = self.login(202).get("/documentacion/vigor/internos/imprimir")
+        self.assertEqual(forbidden.status_code, 403)
+
+    def test_print_routes_allow_authorized_user(self):
+        allowed = self.login(201).get("/documentacion/vigor/internos/imprimir")
+        self.assertEqual(allowed.status_code, 200)
+
+    def test_print_routes_accept_get_only(self):
+        response = self.login(201).post("/documentacion/vigor/internos/imprimir")
+        self.assertEqual(response.status_code, 405)
+
+    def test_print_routes_are_fixed_to_type_and_active_records(self):
+        internos = self.body("/documentacion/vigor/internos/imprimir?per_page=25&page=1")
+        self.assertIn("INTERNO", internos)
+        self.assertIn("INT-PAG-01", internos)
+        self.assertIn("INT-PAG-30", internos)
+        self.assertNotIn("EXT-ISO", internos)
+        self.assertNotIn("INT-INACTIVO", internos)
+
+        externos = self.body("/documentacion/vigor/externos/imprimir")
+        self.assertIn("EXTERNO", externos)
+        self.assertIn("EXT-ISO", externos)
+        self.assertIn("DOCEXT/LI/42", externos)
+        self.assertIn("DOCEXT/LI/43", externos)
+        self.assertNotIn("INT-PAG-01", externos)
+        self.assertNotIn("EXT-INACTIVO", externos)
+
+        formatos = self.body("/documentacion/vigor/formatos/imprimir")
+        self.assertIn("FORMATO", formatos)
+        self.assertIn("PGT/LI/01-FO02", formatos)
+        self.assertEqual(formatos.count("PGT/LI/01-FO04"), 2)
+        self.assertEqual(formatos.count("PGT/LI/01-FO05"), 2)
+        self.assertNotIn("EXT-ISO", formatos)
+
+    def test_print_strict_company_isolation_and_ignores_empresa_id(self):
+        body = self.body("/documentacion/vigor/internos/imprimir?empresa_id=102&per_page=100")
+        self.assertIn("Empresa uno", body)
+        self.assertIn("INT-PAG-01", body)
+        self.assertNotIn("INT-OTRA-EMPRESA", body)
+
+    def test_print_second_company_user_only_sees_own_records(self):
+        other = self.body("/documentacion/vigor/internos/imprimir?empresa_id=101", user_id=203)
+        self.assertIn("Empresa dos", other)
+        self.assertIn("INT-OTRA-EMPRESA", other)
+        self.assertNotIn("INT-PAG-01", other)
+
+    def test_print_filters_q_revision_section_and_null_fields(self):
+        self.assertIn("INT-PAG-05", self.body("/documentacion/vigor/internos/imprimir?q=custodio+alfa"))
+        revision_body = self.body("/documentacion/vigor/internos/imprimir?revision=01")
+        self.assertIn("INT-PAG-28", revision_body)
+        self.assertNotIn("INT-PAG-01", revision_body)
+        section_body = self.body("/documentacion/vigor/internos/imprimir?seccion=Seccion+B")
+        self.assertIn("INT-PAG-16", section_body)
+        self.assertNotIn("INT-PAG-01", section_body)
+        external = self.body("/documentacion/vigor/externos/imprimir?q=docext")
+        self.assertIn("DOCEXT/LI/42", external)
+        self.assertIn("DOCEXT/LI/43", external)
+        self.assertIn("—", external)
+
+    def test_print_no_results_and_all_results_ignore_page_and_per_page(self):
+        empty = self.body("/documentacion/vigor/internos/imprimir?q=no-existe&page=99&per_page=25")
+        self.assertIn("No existen registros para los filtros aplicados.", empty)
+        self.assertIn("0 registro(s) encontrado(s)", empty)
+
+        all_results = self.body("/documentacion/vigor/internos/imprimir?page=1&per_page=25")
+        self.assertIn("30 registro(s) encontrado(s)", all_results)
+        self.assertIn("INT-PAG-01", all_results)
+        self.assertIn("INT-PAG-30", all_results)
+
+    def test_print_preserves_order_null_values_company_total_actions_and_css(self):
+        body = self.body("/documentacion/vigor/formatos/imprimir")
+
+        self.assertLess(body.index("PGT/LI/01-FO02"), body.index("PGT/LI/01-FO04"))
+        self.assertIn("Empresa uno", body)
+        self.assertIn("5 registro(s) encontrado(s)", body)
+        self.assertIn("Imprimir", body)
+        self.assertIn("Volver al listado", body)
+        self.assertIn("class=\"print-toolbar no-print\"", body)
+        self.assertIn("@media print", body)
+        self.assertIn("@page", body)
+        self.assertIn("landscape", body)
+        self.assertIn("Acceso:", body)
+        self.assertIn("Lugar:", body)
+        self.assertIn("Protección:", body)
+        self.assertIn("Medio:", body)
+        self.assertIn("Destino:", body)
+        self.assertIn("PGT/LI/01-FO02", body)
+        self.assertIn("<td>—</td>", body)
+
+    def test_print_back_link_preserves_filters_and_valid_per_page(self):
+        body = self.body("/documentacion/vigor/internos/imprimir?q=INT&revision=01&seccion=Seccion+B&per_page=50&page=2")
+
+        self.assertIn("/documentacion/vigor/internos", body)
+        self.assertIn("q=INT", body)
+        self.assertIn("revision=01", body)
+        self.assertIn("seccion=Seccion+B", body)
+        self.assertIn("per_page=50", body)
+
+    def test_print_routes_do_not_write_records(self):
+        before = DocumentoVigorCatalogo.query.count()
+        client = self.login(201)
+        client.get("/documentacion/vigor/internos/imprimir?q=INT")
+        client.get("/documentacion/vigor/externos/imprimir")
+        client.get("/documentacion/vigor/formatos/imprimir?per_page=25&page=2")
         self.assertEqual(DocumentoVigorCatalogo.query.count(), before)
 
 

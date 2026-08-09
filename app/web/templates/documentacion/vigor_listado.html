@@ -39,12 +39,25 @@
         white-space: nowrap;
     }
 
+    .vigor-heading-actions {
+        align-items: flex-end;
+    }
+
     .vigor-filter-actions {
         min-width: 0;
     }
 
     .vigor-filter-actions .btn {
         min-width: 120px;
+    }
+
+    .vigor-type-nav {
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .vigor-type-nav .btn {
+        min-width: 110px;
     }
 
     .vigor-table-wrap {
@@ -122,6 +135,10 @@
             white-space: normal;
         }
 
+        .vigor-heading-actions {
+            align-items: flex-start;
+        }
+
         .vigor-filter-actions .btn {
             flex: 1 1 160px;
         }
@@ -146,11 +163,38 @@
             <h2 class="mb-1 text-break">{{ meta.title }}</h2>
             <div class="text-muted">{{ meta.description }}</div>
         </div>
-        <div class="vigor-heading-summary text-end">
-            <span class="badge bg-primary">{{ tipo_listado }}</span>
-            <div class="small text-muted mt-1">{{ pagination.total }} registro(s) encontrado(s)</div>
+        <div class="vigor-heading-actions d-flex flex-column gap-2">
+            <div class="vigor-heading-summary text-end">
+                <span class="badge bg-primary">{{ tipo_listado }}</span>
+                <div class="small text-muted mt-1">{{ pagination.total }} registro(s) encontrado(s)</div>
+            </div>
+            <a class="btn btn-outline-primary btn-sm"
+               href="{{ url_for(meta.print_endpoint, q=filters.q, revision=filters.revision, seccion=filters.seccion, per_page=filters.per_page) }}"
+               target="_blank"
+               rel="noopener">
+                Imprimir listado
+            </a>
+            <a class="btn btn-outline-secondary btn-sm"
+               href="{{ url_for('documentacion.index') }}">
+                Volver a Vista actual
+            </a>
         </div>
     </div>
+
+    <nav class="vigor-type-nav d-flex flex-wrap gap-2 mb-4" aria-label="Listados de documentos en vigor">
+        <a class="btn btn-sm {% if tipo_listado == 'INTERNO' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+           href="{{ url_for('documentacion.vigor_internos') }}">
+            Internos
+        </a>
+        <a class="btn btn-sm {% if tipo_listado == 'EXTERNO' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+           href="{{ url_for('documentacion.vigor_externos') }}">
+            Externos
+        </a>
+        <a class="btn btn-sm {% if tipo_listado == 'FORMATO' %}btn-primary{% else %}btn-outline-primary{% endif %}"
+           href="{{ url_for('documentacion.vigor_formatos') }}">
+            Formatos
+        </a>
+    </nav>
 
     <div class="page-card mb-4">
         <form method="get" class="row g-3 align-items-end">

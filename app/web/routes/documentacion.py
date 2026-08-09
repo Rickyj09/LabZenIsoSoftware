@@ -1,6 +1,7 @@
 import hmac
 import os
 import secrets
+from datetime import datetime, timezone
 
 from flask import (
     abort,
@@ -151,16 +152,19 @@ VIGOR_LISTING_META = {
         "title": "Documentos internos en vigor",
         "description": "Listado controlado de documentos internos vigentes para la empresa actual.",
         "endpoint": "documentacion.vigor_internos",
+        "print_endpoint": "documentacion.vigor_internos_imprimir",
     },
     DOCUMENTO_VIGOR_EXTERNO: {
         "title": "Documentos externos en vigor",
         "description": "Listado controlado de documentos externos vigentes para la empresa actual.",
         "endpoint": "documentacion.vigor_externos",
+        "print_endpoint": "documentacion.vigor_externos_imprimir",
     },
     DOCUMENTO_VIGOR_FORMATO: {
         "title": "Formatos en vigor",
         "description": "Listado controlado de formatos vigentes para la empresa actual.",
         "endpoint": "documentacion.vigor_formatos",
+        "print_endpoint": "documentacion.vigor_formatos_imprimir",
     },
 }
 
@@ -265,6 +269,14 @@ def _apply_vigor_filters(query, filters):
     return query
 
 
+def _order_vigor_query(query):
+    return query.order_by(
+        db.func.coalesce(DocumentoVigorCatalogo.seccion, "").asc(),
+        DocumentoVigorCatalogo.fuente_fila.asc(),
+        DocumentoVigorCatalogo.id.asc(),
+    )
+
+
 def _vigor_sections(tipo_listado):
     return [
         section
@@ -283,12 +295,7 @@ def _render_vigor_listing(tipo_listado):
     if not getattr(current_user, "empresa_id", None):
         abort(403)
     filters = _vigor_filters_from_request()
-    query = _apply_vigor_filters(_vigor_base_query(tipo_listado), filters)
-    query = query.order_by(
-        db.func.coalesce(DocumentoVigorCatalogo.seccion, "").asc(),
-        DocumentoVigorCatalogo.fuente_fila.asc(),
-        DocumentoVigorCatalogo.id.asc(),
-    )
+    query = _order_vigor_query(_apply_vigor_filters(_vigor_base_query(tipo_listado), filters))
     pagination = query.paginate(
         page=filters["page"],
         per_page=filters["per_page"],
@@ -303,6 +310,25 @@ def _render_vigor_listing(tipo_listado):
         pagination=pagination,
         items=pagination.items,
         per_page_options=VIGOR_PER_PAGE_OPTIONS,
+    )
+
+
+def _render_vigor_print(tipo_listado):
+    if not getattr(current_user, "empresa_id", None):
+        abort(403)
+    filters = _vigor_filters_from_request()
+    query = _order_vigor_query(_apply_vigor_filters(_vigor_base_query(tipo_listado), filters))
+    items = query.all()
+    empresa = getattr(current_user, "empresa", None)
+    return render_template(
+        "documentacion/vigor_imprimir.html",
+        meta=VIGOR_LISTING_META[tipo_listado],
+        tipo_listado=tipo_listado,
+        filters=filters,
+        items=items,
+        total=len(items),
+        empresa_nombre=(getattr(empresa, "nombre", None) or "Laboratorio no configurado"),
+        generado_en=datetime.now(timezone.utc),
     )
 
 
@@ -479,6 +505,13 @@ def vigor_internos():
     return _render_vigor_listing(DOCUMENTO_VIGOR_INTERNO)
 
 
+@bp.route("/vigor/internos/imprimir")
+@login_required
+@require_permission("documentos.ver")
+def vigor_internos_imprimir():
+    return _render_vigor_print(DOCUMENTO_VIGOR_INTERNO)
+
+
 @bp.route("/vigor/externos")
 @login_required
 @require_permission("documentos.ver")
@@ -486,11 +519,25 @@ def vigor_externos():
     return _render_vigor_listing(DOCUMENTO_VIGOR_EXTERNO)
 
 
+@bp.route("/vigor/externos/imprimir")
+@login_required
+@require_permission("documentos.ver")
+def vigor_externos_imprimir():
+    return _render_vigor_print(DOCUMENTO_VIGOR_EXTERNO)
+
+
 @bp.route("/vigor/formatos")
 @login_required
 @require_permission("documentos.ver")
 def vigor_formatos():
     return _render_vigor_listing(DOCUMENTO_VIGOR_FORMATO)
+
+
+@bp.route("/vigor/formatos/imprimir")
+@login_required
+@require_permission("documentos.ver")
+def vigor_formatos_imprimir():
+    return _render_vigor_print(DOCUMENTO_VIGOR_FORMATO)
 
 
 def _render_explorer(folder_id=None, uncategorized=False):

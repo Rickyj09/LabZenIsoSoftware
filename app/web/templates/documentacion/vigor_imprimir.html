@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>{{ meta.title }} - Imprimir</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            --print-text: #111827;
+            --print-muted: #4B5563;
+            --print-border: #D1D5DB;
+            --print-soft: #F3F4F6;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            color: var(--print-text);
+            background: #ffffff;
+            font-family: "Segoe UI", Arial, sans-serif;
+            font-size: 12px;
+            line-height: 1.35;
+        }
+
+        a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        .print-page {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        .print-toolbar {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+
+        .print-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 34px;
+            padding: 7px 14px;
+            border: 1px solid #2563EB;
+            border-radius: 8px;
+            background: #ffffff;
+            color: #1E3A8A;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .print-btn-primary {
+            background: #2563EB;
+            color: #ffffff;
+        }
+
+        .print-header {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 18px;
+            align-items: start;
+            padding-bottom: 14px;
+            border-bottom: 2px solid var(--print-border);
+            margin-bottom: 14px;
+        }
+
+        .print-title {
+            margin: 0 0 6px;
+            font-size: 24px;
+            line-height: 1.15;
+        }
+
+        .print-company {
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .print-muted {
+            color: var(--print-muted);
+        }
+
+        .print-badge {
+            display: inline-block;
+            border: 1px solid var(--print-border);
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-weight: 700;
+            text-align: center;
+            min-width: 86px;
+        }
+
+        .print-summary {
+            text-align: right;
+        }
+
+        .print-filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 0 0 14px;
+            padding: 0;
+            list-style: none;
+        }
+
+        .print-filters li {
+            border: 1px solid var(--print-border);
+            border-radius: 6px;
+            padding: 5px 8px;
+        }
+
+        .print-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .print-table th,
+        .print-table td {
+            border: 1px solid var(--print-border);
+            padding: 6px;
+            vertical-align: top;
+            overflow-wrap: anywhere;
+            word-break: normal;
+        }
+
+        .print-table th {
+            background: var(--print-soft);
+            font-weight: 700;
+            text-align: left;
+        }
+
+        .print-table thead {
+            display: table-header-group;
+        }
+
+        .print-table tr {
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
+
+        .print-code {
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 11px;
+            overflow-wrap: anywhere;
+        }
+
+        .print-meta-row td {
+            background: #FAFAFA;
+            color: var(--print-muted);
+            font-size: 11px;
+        }
+
+        .print-empty {
+            border: 1px solid var(--print-border);
+            padding: 18px;
+            text-align: center;
+            color: var(--print-muted);
+        }
+
+        @page {
+            size: A4 landscape;
+            margin: 12mm;
+        }
+
+        @media print {
+            body {
+                font-size: 10px;
+            }
+
+            .print-page {
+                max-width: none;
+                padding: 0;
+            }
+
+            .no-print {
+                display: none !important;
+            }
+
+            .print-header {
+                margin-bottom: 10px;
+                padding-bottom: 10px;
+            }
+
+            .print-title {
+                font-size: 18px;
+            }
+
+            .print-table th,
+            .print-table td {
+                padding: 4px;
+            }
+
+            a[href]::after {
+                content: "";
+            }
+        }
+    </style>
+</head>
+<body>
+    {% macro empty_value(value) -%}
+        {{ value if value not in (none, '') else '—' }}
+    {%- endmacro %}
+
+    <div class="print-page">
+        <div class="print-toolbar no-print">
+            <button type="button" class="print-btn print-btn-primary" onclick="window.print()">Imprimir</button>
+            <a class="print-btn"
+               href="{{ url_for(meta.endpoint, q=filters.q, revision=filters.revision, seccion=filters.seccion, per_page=filters.per_page) }}">
+                Volver al listado
+            </a>
+        </div>
+
+        <header class="print-header">
+            <div>
+                <div class="print-company">{{ empresa_nombre }}</div>
+                <h1 class="print-title">{{ meta.title }}</h1>
+                <div class="print-muted">{{ meta.description }}</div>
+                <div class="print-muted">Generado: {{ generado_en.strftime('%Y-%m-%d %H:%M') }} UTC</div>
+            </div>
+            <div class="print-summary">
+                <div class="print-badge">{{ tipo_listado }}</div>
+                <div class="print-muted">{{ total }} registro(s) encontrado(s)</div>
+            </div>
+        </header>
+
+        {% if filters.q or filters.revision or filters.seccion %}
+        <ul class="print-filters">
+            {% if filters.q %}<li><strong>Buscar:</strong> {{ filters.q }}</li>{% endif %}
+            {% if filters.revision %}<li><strong>Revisión:</strong> {{ filters.revision }}</li>{% endif %}
+            {% if filters.seccion %}<li><strong>Sección:</strong> {{ filters.seccion }}</li>{% endif %}
+        </ul>
+        {% endif %}
+
+        {% if items %}
+        <table class="print-table">
+            <thead>
+                <tr>
+                    <th style="width: 13%;">Código</th>
+                    <th style="width: 30%;">Título</th>
+                    <th style="width: 8%;">Revisión</th>
+                    <th style="width: 12%;">Fecha de vigencia</th>
+                    <th style="width: 15%;">Custodio</th>
+                    <th style="width: 22%;">Sección</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td><span class="print-code">{{ empty_value(item.codigo) }}</span></td>
+                    <td>{{ empty_value(item.titulo) }}</td>
+                    <td>{{ empty_value(item.revision) }}</td>
+                    <td>{{ item.fecha_vigencia.strftime('%Y-%m-%d') if item.fecha_vigencia else '—' }}</td>
+                    <td>{{ empty_value(item.custodio) }}</td>
+                    <td>{{ empty_value(item.seccion) }}</td>
+                </tr>
+                <tr class="print-meta-row">
+                    <td colspan="6">
+                        <strong>Acceso:</strong> {{ empty_value(item.acceso_documento) }}
+                        · <strong>Lugar:</strong> {{ empty_value(item.lugar_almacenamiento) }}
+                        · <strong>Protección:</strong> {{ empty_value(item.proteccion) }}
+                        · <strong>Medio:</strong> {{ empty_value(item.medio) }}
+                        · <strong>Destino:</strong> {{ empty_value(item.destino_final) }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="print-empty">No existen registros para los filtros aplicados.</div>
+        {% endif %}
+    </div>
+</body>
+</html>

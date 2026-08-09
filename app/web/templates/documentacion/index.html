@@ -34,6 +34,28 @@
 </div>
 {% endif %}
 
+{% if vista == 'documentos' %}
+<section class="page-card mb-4" aria-labelledby="documentos-vigor-title">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+        <div>
+            <h5 id="documentos-vigor-title" class="mb-1">Documentos en vigor</h5>
+            <div class="text-muted small">Listados vigentes importados del cat&aacute;logo documental.</div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <a href="{{ url_for('documentacion.vigor_internos') }}" class="btn btn-outline-primary">
+                Documentos internos en vigor
+            </a>
+            <a href="{{ url_for('documentacion.vigor_externos') }}" class="btn btn-outline-primary">
+                Documentos externos en vigor
+            </a>
+            <a href="{{ url_for('documentacion.vigor_formatos') }}" class="btn btn-outline-primary">
+                Formatos en vigor
+            </a>
+        </div>
+    </div>
+</section>
+{% endif %}
+
 <div class="page-card mb-4">
     <form method="get" class="row g-3">
         {% if vista == 'documentos' %}

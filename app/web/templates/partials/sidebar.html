@@ -143,7 +143,7 @@
                 data-bs-toggle="collapse"
                 data-bs-target="#menuEquipamiento"
                 aria-expanded="{% if request.endpoint and request.endpoint.startswith('equipamiento.') %}true{% else %}false{% endif %}">
-            <span>Instalaciones y Equipamiento</span>
+            <span>Instalaciones y equipamiento</span>
             <span>▾</span>
         </button>
 
@@ -230,6 +230,44 @@
             </a>
 
             {% if can('documentos.ver') %}
+            {% set gestion_documental_endpoints = [
+                'documentacion.dashboard',
+                'documentacion.pendientes',
+                'documentacion.index',
+                'documentacion.explorador',
+                'documentacion.explorador_sin_clasificar',
+                'documentacion.explorador_carpeta',
+                'documentacion.vigor_internos',
+                'documentacion.vigor_externos',
+                'documentacion.vigor_formatos'
+            ] %}
+            {% set documentos_endpoints = [
+                'documentacion.index',
+                'documentacion.explorador',
+                'documentacion.explorador_sin_clasificar',
+                'documentacion.explorador_carpeta',
+                'documentacion.vigor_internos',
+                'documentacion.vigor_externos',
+                'documentacion.vigor_formatos'
+            ] %}
+            {% set vista_actual_endpoints = [
+                'documentacion.index',
+                'documentacion.vigor_internos',
+                'documentacion.vigor_externos',
+                'documentacion.vigor_formatos'
+            ] %}
+            <button class="sidebar-group-btn"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#menuGestionDocumental"
+                    aria-controls="menuGestionDocumental"
+                    aria-expanded="{% if request.endpoint in gestion_documental_endpoints %}true{% else %}false{% endif %}">
+                <span>Gestión documental</span>
+                <span>▾</span>
+            </button>
+
+            <div class="collapse {% if request.endpoint in gestion_documental_endpoints %}show{% endif %}"
+                 id="menuGestionDocumental">
             <a class="sidebar-link {% if request.endpoint == 'documentacion.dashboard' %}active{% endif %}"
                href="{{ url_for('documentacion.dashboard') }}">
                 Dashboard documental
@@ -238,7 +276,6 @@
                 {% endif %}
             </a>
 
-            {% if can('documentos.ver_pendientes') %}
             <a class="sidebar-link {% if request.endpoint == 'documentacion.pendientes' %}active{% endif %}"
                href="{{ url_for('documentacion.pendientes') }}">
                 Mis pendientes
@@ -246,37 +283,30 @@
                 <span class="badge bg-danger ms-1">{{ documental_pending_count }}</span>
                 {% endif %}
             </a>
-            {% endif %}
 
-            <a class="sidebar-link {% if request.endpoint == 'documentacion.index' %}active{% endif %}"
-               href="{{ url_for('documentacion.index') }}">
-                Documentos
-                {% if documental_pending_count %}
-                <span class="badge bg-danger ms-1">{{ documental_pending_count }}</span>
-                {% endif %}
-            </a>
+            <button class="sidebar-group-btn"
+                    type="button"
+                    data-bs-toggle="collapse"
+                    data-bs-target="#menuGestionDocumentos"
+                    aria-controls="menuGestionDocumentos"
+                    aria-expanded="{% if request.endpoint in documentos_endpoints %}true{% else %}false{% endif %}">
+                <span>Documentos</span>
+                <span>▾</span>
+            </button>
 
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('documentacion.explorador') %}active{% endif %}"
-               href="{{ url_for('documentacion.explorador') }}">
-                Explorador documental
-            </a>
+            <div class="collapse {% if request.endpoint in documentos_endpoints %}show{% endif %}"
+                 id="menuGestionDocumentos">
+                <a class="sidebar-link {% if request.endpoint in vista_actual_endpoints %}active{% endif %}"
+                   href="{{ url_for('documentacion.index') }}">
+                    Vista actual
+                </a>
+                <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('documentacion.explorador') %}active{% endif %}"
+                   href="{{ url_for('documentacion.explorador') }}">
+                    Vista explorador
+                </a>
+            </div>
+            </div>
 
-            <a class="sidebar-link {% if request.endpoint == 'documentacion.registros' %}active{% endif %}"
-               href="{{ url_for('documentacion.registros') }}">
-                Registros
-            </a>
-
-            <a class="sidebar-link {% if request.endpoint == 'documentacion.archivo' %}active{% endif %}"
-               href="{{ url_for('documentacion.archivo') }}">
-                Archivo
-            </a>
-
-            {% if can('documentos.firmas.identidades.gestionar') %}
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('documentacion_firmas.') %}active{% endif %}"
-               href="{{ url_for('documentacion_firmas.identidades') }}">
-                Identidades de firma
-            </a>
-            {% endif %}
             {% endif %}
         </div>
 
