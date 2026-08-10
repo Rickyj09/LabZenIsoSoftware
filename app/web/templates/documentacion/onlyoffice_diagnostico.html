@@ -7,7 +7,16 @@
     <div>
         <h2 class="mb-1">Diagnóstico ONLYOFFICE</h2>
         <div class="text-muted">
-            Infraestructura local de conectividad. La edición documental todavía no está habilitada.
+            Infraestructura de conectividad con ONLYOFFICE.
+        {% if onlyoffice.edit_enabled and onlyoffice.conversion_enabled %}
+            La edición y la conversión documental están habilitadas.
+        {% elif onlyoffice.edit_enabled %}
+            La edición documental está habilitada; la conversión está deshabilitada.
+        {% elif onlyoffice.conversion_enabled %}
+            La conversión documental está habilitada; la edición está deshabilitada.
+        {% else %}
+            La edición y la conversión documental están deshabilitadas.
+        {% endif %}
         </div>
     </div>
     <a href="{{ url_for('documentacion.dashboard') }}" class="btn btn-outline-secondary">Volver al dashboard documental</a>
