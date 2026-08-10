@@ -235,10 +235,14 @@ class DocumentPublicationService:
 
             process = self._completed_signature_process(version_doc)
             final_pdf = process.pdf_final
-            previous = documento.version_vigente if documento.version_vigente_id else None
+            previous_publication = self.active_publication_for_document(documento)
+            previous = (
+                previous_publication.documento_version
+                if previous_publication and previous_publication.documento_version_id != version_doc.id
+                else documento.version_vigente if documento.version_vigente_id else None
+            )
             version_previous_state = version_doc.estado
             previous_state = previous.estado if previous else None
-            previous_publication = self.active_publication_for_document(documento)
             now = _now()
             if not publicacion or not publicacion.pdf_qr_artifact or not publicacion.qr_embebido:
                 raise DocumentPublicationError("La publicacion debe estar preparada con QR embebido antes de publicarse.")

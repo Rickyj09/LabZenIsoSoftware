@@ -17,9 +17,11 @@ from app.models.documentos import (
     CLASIFICACION_CONTROL_INTERNO,
     ESTADO_APROBADO,
     ESTADO_OBSOLETO,
+    ESTADO_SUSTITUIDO,
     ESTADO_VIGENTE,
     FIRMA_PROCESO_COMPLETADO,
     PUBLICACION_ACTIVA,
+    PUBLICACION_OBSOLETA,
     PUBLICACION_PREPARADA,
     ENTREGA_OMITIDO,
     Documento,
@@ -263,6 +265,98 @@ class DocumentPublicationTest(unittest.TestCase):
             ).count(),
             1,
         )
+
+    def test_publish_as_current_obsoletes_previously_active_publication_version_even_when_replaced(self):
+        previous = db.session.get(DocumentoVersion, 1500)
+        version = db.session.get(DocumentoVersion, 1501)
+        document = db.session.get(Documento, 501)
+        now = datetime.now(timezone.utc)
+        previous.estado = ESTADO_SUSTITUIDO
+        document.version_vigente_id = version.id
+        document.version_actual = version.version
+        previous_publication = DocumentoPublicacion(
+            empresa_id=101,
+            documento_id=document.id,
+            documento_version_id=previous.id,
+            public_id="pub-prev-active",
+            token="token-prev-active",
+            estado=PUBLICACION_ACTIVA,
+            activa=True,
+            qr_payload="https://labzeniso.test/documentos/publicados/pub-prev-active",
+            qr_embebido=True,
+            pdf_publicado_id=None,
+            vigente_desde=now,
+        )
+        db.session.add(previous_publication)
+        db.session.flush()
+        catalog_row = DocumentoVigorCatalogo(
+            empresa_id=101,
+            tipo_listado="INTERNO",
+            clave_importacion="INTERNO::DOCUMENTO:501#1",
+            identidad_estable="DOCUMENTO:501#1",
+            ordinal_identidad=1,
+            codigo=document.codigo,
+            titulo=document.titulo,
+            revision=previous.version,
+            fecha_vigencia=now.date(),
+            acceso_documento=previous_publication.qr_payload,
+            medio="PDF",
+            seccion=document.proceso,
+            activo=True,
+            documento_id=document.id,
+            documento_version_id=previous.id,
+            documento_publicacion_id=previous_publication.id,
+            fuente_archivo="PUBLICACION_AUTOMATICA",
+            fuente_hoja="publish_as_current",
+            fuente_fila=1,
+            importado_por_id=201,
+            importado_en=now,
+            actualizado_por_id=201,
+            actualizado_en=now,
+            sincronizado_por_id=201,
+            sincronizado_en=now,
+        )
+        db.session.add(catalog_row)
+        db.session.commit()
+        first_row_id = catalog_row.id
+        self.complete_signature_process()
+
+        publication = DocumentPublicationService().publish_as_current(
+            documento=db.session.get(Documento, 501),
+            version_doc=db.session.get(DocumentoVersion, 1501),
+            usuario=db.session.get(Usuario, 201),
+        )
+
+        self.assertEqual(db.session.get(DocumentoVersion, 1500).estado, ESTADO_OBSOLETO)
+        self.assertEqual(db.session.get(DocumentoVersion, 1501).estado, ESTADO_VIGENTE)
+        obsolete_event = DocumentoAprobacion.query.filter_by(
+            documento_version_id=1500,
+            accion="VERSION_ANTERIOR_OBSOLETA",
+        ).one()
+        self.assertEqual(obsolete_event.estado_anterior, ESTADO_SUSTITUIDO)
+        self.assertEqual(obsolete_event.estado_nuevo, ESTADO_OBSOLETO)
+        self.assertEqual(db.session.get(DocumentoPublicacion, previous_publication.id).estado, PUBLICACION_OBSOLETA)
+        self.assertFalse(db.session.get(DocumentoPublicacion, previous_publication.id).activa)
+        row = DocumentoVigorCatalogo.query.filter_by(identidad_estable="DOCUMENTO:501#1").one()
+        self.assertEqual(row.id, first_row_id)
+        self.assertEqual(row.documento_version_id, version.id)
+        self.assertEqual(row.documento_publicacion_id, publication.id)
+        self.assertEqual(DocumentoVigorCatalogo.query.filter_by(documento_id=501).count(), 1)
+        self.assertEqual(DocumentoVigorCatalogo.query.filter_by(identidad_estable="DOCUMENTO:501#1").count(), 1)
+        with self.assertRaisesRegex(DocumentPublicationError, "version ya esta VIGENTE"):
+            DocumentPublicationService().publish_as_current(
+                documento=db.session.get(Documento, 501),
+                version_doc=db.session.get(DocumentoVersion, 1501),
+                usuario=db.session.get(Usuario, 201),
+            )
+        self.assertEqual(
+            DocumentoAprobacion.query.filter_by(
+                documento_version_id=1500,
+                accion="VERSION_ANTERIOR_OBSOLETA",
+            ).count(),
+            1,
+        )
+        self.assertEqual(DocumentoVigorCatalogo.query.filter_by(documento_id=501).count(), 1)
 
     def test_publish_as_current_requires_completed_signature_process(self):
         DocumentPublicationService().prepare_publication_for_signature(
