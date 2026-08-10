@@ -40,6 +40,13 @@ _spec.loader.exec_module(_fixture)
 
 
 class DocumentCurrentCatalogSyncTest(_fixture.DocumentPublicationTest):
+    def login(self, user_id=201):
+        client = self.app.test_client()
+        with client.session_transaction() as session:
+            session["_user_id"] = str(user_id)
+            session["_fresh"] = True
+        return client
+
     def publish_base_document(self):
         self.complete_signature_process()
         return DocumentPublicationService().publish_as_current(
@@ -115,6 +122,20 @@ class DocumentCurrentCatalogSyncTest(_fixture.DocumentPublicationTest):
         db.session.commit()
         return version
 
+    def active_publication_row(self, *, empresa_id, documento_id, version_id, public_id):
+        return DocumentoPublicacion(
+            empresa_id=empresa_id,
+            documento_id=documento_id,
+            documento_version_id=version_id,
+            public_id=public_id,
+            token=f"token-{public_id}",
+            estado=PUBLICACION_ACTIVA,
+            activa=True,
+            qr_payload=f"https://labzeniso.test/documentos/publicados/{public_id}",
+            qr_embebido=True,
+            vigente_desde=datetime.now(timezone.utc),
+        )
+
     def test_publish_internal_document_creates_current_catalog_entry(self):
         publication = self.publish_base_document()
         row = DocumentoVigorCatalogo.query.filter_by(documento_id=501, activo=True).one()
@@ -170,20 +191,40 @@ class DocumentCurrentCatalogSyncTest(_fixture.DocumentPublicationTest):
     def test_repeated_sync_is_idempotent_and_records_no_change(self):
         publication = self.publish_base_document()
         service = DocumentCurrentCatalogSyncService()
-        row = service.sync_current_publication(
-            documento=db.session.get(Documento, 501),
-            version_doc=db.session.get(DocumentoVersion, 1501),
-            publicacion=publication,
-            usuario=db.session.get(Usuario, 201),
-        )
+        for _ in range(3):
+            row = service.sync_current_publication(
+                documento=db.session.get(Documento, 501),
+                version_doc=db.session.get(DocumentoVersion, 1501),
+                publicacion=publication,
+                usuario=db.session.get(Usuario, 201),
+            )
         db.session.commit()
 
         self.assertEqual(DocumentoVigorCatalogo.query.filter_by(documento_id=501).count(), 1)
         self.assertEqual(row.documento_publicacion_id, publication.id)
         self.assertEqual(
             DocumentoAprobacion.query.filter_by(accion="CATALOGO_VIGENTE_SIN_CAMBIOS").count(),
-            1,
+            3,
         )
+
+    def test_sync_updates_catalog_without_altering_document_state(self):
+        publication = self.publish_base_document()
+        document = db.session.get(Documento, 501)
+        previous_state = document.estado
+        previous_current_version = document.version_vigente_id
+
+        row = DocumentCurrentCatalogSyncService().sync_current_publication(
+            documento=document,
+            version_doc=db.session.get(DocumentoVersion, 1501),
+            publicacion=publication,
+            usuario=db.session.get(Usuario, 201),
+        )
+        db.session.commit()
+
+        self.assertEqual(db.session.get(Documento, 501).estado, previous_state)
+        self.assertEqual(db.session.get(Documento, 501).version_vigente_id, previous_current_version)
+        self.assertEqual(row.documento_id, 501)
+        self.assertEqual(row.documento_version_id, previous_current_version)
 
     def test_new_current_version_updates_catalog_and_keeps_publication_history(self):
         first_publication = self.publish_base_document()
@@ -205,6 +246,23 @@ class DocumentCurrentCatalogSyncTest(_fixture.DocumentPublicationTest):
         self.assertEqual(db.session.get(DocumentoPublicacion, first_publication.id).estado, PUBLICACION_OBSOLETA)
         self.assertFalse(db.session.get(DocumentoPublicacion, first_publication.id).activa)
         self.assertEqual(DocumentoPublicacion.query.filter_by(documento_id=501).count(), 2)
+
+    def test_current_catalog_view_points_actions_to_new_current_publication(self):
+        first_publication = self.publish_base_document()
+        second_version = self.create_second_version()
+        second_publication = DocumentPublicationService().publish_as_current(
+            documento=db.session.get(Documento, 501),
+            version_doc=second_version,
+            usuario=db.session.get(Usuario, 201),
+        )
+
+        body = self.login().get("/documentacion/documentos-vigentes").get_data(as_text=True)
+
+        self.assertEqual(body.count("DOC-PUB"), 1)
+        self.assertIn(second_publication.public_id, body)
+        self.assertNotIn(first_publication.public_id, body)
+        self.assertIn(f"/documentos/publicados/{second_publication.public_id}", body)
+        self.assertIn(f"/documentos/publicados/{second_publication.public_id}/pdf", body)
 
     def test_external_catalog_rows_are_not_removed_or_reclassified(self):
         external = DocumentoVigorCatalogo(
@@ -231,6 +289,60 @@ class DocumentCurrentCatalogSyncTest(_fixture.DocumentPublicationTest):
         self.assertTrue(external.activo)
         self.assertEqual(external.tipo_listado, DOCUMENTO_VIGOR_EXTERNO)
 
+    def test_external_imported_candidate_with_similar_code_is_not_linked(self):
+        external = DocumentoVigorCatalogo(
+            empresa_id=101,
+            tipo_listado=DOCUMENTO_VIGOR_EXTERNO,
+            clave_importacion="external-similar",
+            identidad_estable="CODIGO:DOC-PUB#1",
+            ordinal_identidad=1,
+            codigo="DOC-PUB",
+            titulo="Documento externo con codigo similar",
+            activo=True,
+            fuente_archivo="cliente.xlsx",
+            fuente_hoja="DOCUMENTOS EXTERNOS",
+            fuente_fila=43,
+            importado_en=datetime.now(timezone.utc),
+        )
+        db.session.add(external)
+        db.session.commit()
+
+        self.publish_base_document()
+        db.session.refresh(external)
+
+        self.assertIsNone(external.documento_id)
+        self.assertIsNone(external.documento_version_id)
+        self.assertTrue(external.activo)
+
+    def test_ambiguous_imported_candidates_are_not_selected_by_code(self):
+        ambiguous_rows = [
+            DocumentoVigorCatalogo(
+                empresa_id=101,
+                tipo_listado=DOCUMENTO_VIGOR_INTERNO,
+                clave_importacion=f"ambiguous-{index}",
+                identidad_estable=f"CODIGO:DOC-PUB#{index}",
+                ordinal_identidad=index,
+                codigo="DOC-PUB",
+                titulo=f"Historico ambiguo {index}",
+                activo=True,
+                fuente_archivo="historico.xlsx",
+                fuente_hoja="INTERNOS",
+                fuente_fila=50 + index,
+                importado_en=datetime.now(timezone.utc),
+            )
+            for index in (1, 2)
+        ]
+        db.session.add_all(ambiguous_rows)
+        db.session.commit()
+
+        self.publish_base_document()
+        db.session.refresh(ambiguous_rows[0])
+        db.session.refresh(ambiguous_rows[1])
+
+        self.assertEqual(DocumentoVigorCatalogo.query.filter_by(codigo="DOC-PUB", activo=True).count(), 3)
+        self.assertTrue(all(row.documento_id is None for row in ambiguous_rows))
+        self.assertEqual(DocumentoVigorCatalogo.query.filter_by(documento_id=501, activo=True).count(), 1)
+
     def test_sync_is_tenant_scoped(self):
         publication = self.publish_base_document()
 
@@ -243,6 +355,52 @@ class DocumentCurrentCatalogSyncTest(_fixture.DocumentPublicationTest):
             )
 
         self.assertEqual(DocumentoVigorCatalogo.query.filter_by(empresa_id=102).count(), 0)
+
+    def test_same_document_code_in_two_companies_remains_isolated(self):
+        self.publish_base_document()
+        other_doc = Documento(
+            id=601,
+            empresa_id=102,
+            codigo="DOC-PUB",
+            titulo="Documento misma clave otra empresa",
+            tipo_documento="PROCEDIMIENTO",
+            clasificacion_control=CLASIFICACION_CONTROL_INTERNO,
+            estado=ESTADO_VIGENTE,
+            version_actual="1",
+            elaborado_por_id=203,
+        )
+        other_version = DocumentoVersion(
+            id=1601,
+            empresa_id=102,
+            documento_id=601,
+            version="1",
+            estado=ESTADO_VIGENTE,
+            elaborado_por_id=203,
+        )
+        other_doc.version_vigente_id = other_version.id
+        other_publication = self.active_publication_row(
+            empresa_id=102,
+            documento_id=601,
+            version_id=1601,
+            public_id="pub-other-company",
+        )
+        db.session.add_all([other_doc, other_version, other_publication])
+        db.session.commit()
+
+        row = DocumentCurrentCatalogSyncService().sync_current_publication(
+            documento=other_doc,
+            version_doc=other_version,
+            publicacion=other_publication,
+            usuario=db.session.get(Usuario, 203),
+        )
+        db.session.commit()
+
+        self.assertEqual(row.empresa_id, 102)
+        self.assertEqual(row.documento_id, 601)
+        self.assertEqual(row.documento_version_id, 1601)
+        self.assertEqual(DocumentoVigorCatalogo.query.filter_by(empresa_id=101, documento_id=501).count(), 1)
+        self.assertEqual(DocumentoVigorCatalogo.query.filter_by(empresa_id=102, documento_id=601).count(), 1)
+        self.assertEqual(DocumentoVigorCatalogo.query.filter_by(codigo="DOC-PUB").count(), 2)
 
     def test_sync_rejects_mismatched_document_version_and_publication_tenants(self):
         publication = self.publish_base_document()
