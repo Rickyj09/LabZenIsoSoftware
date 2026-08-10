@@ -19,6 +19,7 @@ DOCUMENT_PERMISSIONS = {
     "crear",
     "editar",
     "enviar_revision",
+    "revisar",
     "aprobar",
     "rechazar",
     "devolver_borrador",
@@ -31,6 +32,7 @@ DOCUMENT_PERMISSIONS = {
 }
 
 ROLE_MATRIX = {
+    "ADMINISTRADOR": DOCUMENT_PERMISSIONS,
     "CALIDAD": DOCUMENT_PERMISSIONS,
     "TECNICO": {"ver", "crear", "editar", "enviar_revision", "descargar", "ver_historial"},
     "CONSULTA": {"ver", "descargar"},
@@ -79,6 +81,7 @@ class DocumentPermissionTest(unittest.TestCase):
             Usuario(id=202, empresa_id=101, nombre="Técnico", apellido="Uno", email="tecnico@test", username="tecnico", password_hash="x", activo=True),
             Usuario(id=203, empresa_id=101, nombre="Consulta", apellido="Uno", email="consulta@test", username="consulta", password_hash="x", activo=True),
             Usuario(id=204, empresa_id=102, nombre="Calidad", apellido="Dos", email="calidad2@test", username="calidad2", password_hash="x", activo=True),
+            Usuario(id=205, empresa_id=101, nombre="Admin", apellido="Uno", email="admin@test", username="admin", password_hash="x", activo=True),
         ])
         db.session.flush()
         self._create_security_matrix()
@@ -103,7 +106,7 @@ class DocumentPermissionTest(unittest.TestCase):
             db.session.add(permission)
             permission_ids[suffix] = permission.id
 
-        role_users = {"CALIDAD": [201, 204], "TECNICO": [202], "CONSULTA": [203]}
+        role_users = {"ADMINISTRADOR": [205], "CALIDAD": [201, 204], "TECNICO": [202], "CONSULTA": [203]}
         link_id = 3000
         for offset, (role_name, permissions) in enumerate(ROLE_MATRIX.items(), start=1):
             role = Rol(id=2000 + offset, nombre=role_name, es_sistema=True)
@@ -149,7 +152,15 @@ class DocumentPermissionTest(unittest.TestCase):
         stream.seek(0)
         return stream
 
-    def add_document(self, document_id, state="EN_ELABORACION", version_state="EN_ELABORACION"):
+    def add_document(
+        self,
+        document_id,
+        state="EN_ELABORACION",
+        version_state="EN_ELABORACION",
+        *,
+        reviewer_id=None,
+        approver_id=None,
+    ):
         document = Documento(
             id=document_id,
             empresa_id=101,
@@ -167,6 +178,8 @@ class DocumentPermissionTest(unittest.TestCase):
             version="1",
             estado=version_state,
             elaborado_por_id=202,
+            revisado_por_id=reviewer_id,
+            aprobado_por_id=approver_id,
         )
         db.session.add_all([document, version])
         db.session.commit()
@@ -176,8 +189,12 @@ class DocumentPermissionTest(unittest.TestCase):
         quality = db.session.get(Usuario, 201)
         technician = db.session.get(Usuario, 202)
         consultation = db.session.get(Usuario, 203)
+        admin = db.session.get(Usuario, 205)
 
+        self.assertTrue(user_has_permission(admin, "documentos.revisar"))
+        self.assertTrue(user_has_permission(admin, "documentos.aprobar"))
         self.assertTrue(user_has_permission(quality, "documentos.aprobar"))
+        self.assertTrue(user_has_permission(quality, "documentos.revisar"))
         self.assertTrue(user_has_permission(quality, "documentos.firmas.iniciar"))
         self.assertTrue(user_has_permission(quality, "documentos.firmas.identidades.gestionar"))
         self.assertTrue(user_has_permission(technician, "documentos.crear"))
@@ -185,6 +202,7 @@ class DocumentPermissionTest(unittest.TestCase):
         self.assertFalse(user_has_permission(technician, "documentos.firmas.iniciar"))
         self.assertFalse(user_has_permission(technician, "documentos.firmas.identidades.gestionar"))
         self.assertFalse(user_has_permission(technician, "documentos.aprobar"))
+        self.assertFalse(user_has_permission(technician, "documentos.revisar"))
         self.assertFalse(user_has_permission(technician, "documentos.rechazar"))
         self.assertFalse(user_has_permission(technician, "documentos.obsoletar"))
         self.assertTrue(user_has_permission(consultation, "documentos.ver"))
@@ -277,6 +295,138 @@ class DocumentPermissionTest(unittest.TestCase):
         self.assertNotIn("Aprobar", body)
         self.assertNotIn("Marcar obsoleto", body)
         self.assertNotIn("Historial de versiones", body)
+
+
+    def test_assigned_admin_reviewer_sees_and_can_mark_review_conformity(self):
+        document, version = self.add_document(
+            309,
+            "EN_REVISION",
+            "EN_REVISION",
+            reviewer_id=205,
+            approver_id=201,
+        )
+        client = self.login(205)
+
+        detail = client.get(f"/documentacion/{document.id}")
+        body = detail.get_data(as_text=True)
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn("Dar conformidad", body)
+
+        response = client.post(
+            f"/documentacion/{document.id}/versiones/{version.id}/dar-conformidad",
+            data={"comentario": "Conforme"},
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(document.estado, "EN_APROBACION")
+        self.assertEqual(version.estado, "EN_APROBACION")
+        self.assertEqual(version.revisado_por_id, 205)
+        self.assertEqual(DocumentoAprobacion.query.filter_by(
+            documento_id=document.id,
+            accion="DAR_CONFORMIDAD",
+            usuario_id=205,
+        ).count(), 1)
+
+    def test_admin_not_assigned_cannot_mark_review_conformity(self):
+        document, version = self.add_document(
+            310,
+            "EN_REVISION",
+            "EN_REVISION",
+            reviewer_id=201,
+            approver_id=205,
+        )
+        client = self.login(205)
+
+        detail = client.get(f"/documentacion/{document.id}")
+        self.assertEqual(detail.status_code, 200)
+        self.assertNotIn("Dar conformidad", detail.get_data(as_text=True))
+
+        response = client.post(
+            f"/documentacion/{document.id}/versiones/{version.id}/dar-conformidad",
+            data={"comentario": "No asignado"},
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(document.estado, "EN_REVISION")
+        self.assertEqual(version.estado, "EN_REVISION")
+        self.assertEqual(DocumentoAprobacion.query.filter_by(
+            documento_id=document.id,
+            accion="DAR_CONFORMIDAD",
+        ).count(), 0)
+
+    def test_reviewer_permission_without_assignment_cannot_mark_review_conformity(self):
+        document, version = self.add_document(
+            311,
+            "EN_REVISION",
+            "EN_REVISION",
+            reviewer_id=205,
+            approver_id=201,
+        )
+        client = self.login(201)
+
+        response = client.post(
+            f"/documentacion/{document.id}/versiones/{version.id}/dar-conformidad",
+            data={"comentario": "No asignado"},
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(document.estado, "EN_REVISION")
+        self.assertEqual(version.estado, "EN_REVISION")
+        self.assertEqual(DocumentoAprobacion.query.filter_by(
+            documento_id=document.id,
+            accion="DAR_CONFORMIDAD",
+        ).count(), 0)
+
+    def test_user_without_review_permission_cannot_mark_review_conformity(self):
+        document, version = self.add_document(
+            312,
+            "EN_REVISION",
+            "EN_REVISION",
+            reviewer_id=203,
+            approver_id=201,
+        )
+
+        response = self.login(203).post(
+            f"/documentacion/{document.id}/versiones/{version.id}/dar-conformidad",
+            data={"comentario": "Sin permiso"},
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(document.estado, "EN_REVISION")
+        self.assertEqual(version.estado, "EN_REVISION")
+
+    def test_review_action_hidden_and_rejected_outside_review_state(self):
+        document, version = self.add_document(
+            313,
+            "EN_APROBACION",
+            "EN_APROBACION",
+            reviewer_id=205,
+            approver_id=201,
+        )
+        client = self.login(205)
+
+        detail = client.get(f"/documentacion/{document.id}")
+        self.assertEqual(detail.status_code, 200)
+        self.assertNotIn("Dar conformidad", detail.get_data(as_text=True))
+
+        response = client.post(
+            f"/documentacion/{document.id}/versiones/{version.id}/dar-conformidad",
+            data={"comentario": "Fuera de estado"},
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(document.estado, "EN_APROBACION")
+        self.assertEqual(version.estado, "EN_APROBACION")
 
 
 if __name__ == "__main__":
