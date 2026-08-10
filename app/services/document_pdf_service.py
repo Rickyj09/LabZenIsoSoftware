@@ -401,13 +401,18 @@ class DocumentPdfService:
         }
         if any(active_markers.values()):
             raise DocumentPdfError("PDF con contenido activo inesperado.")
-        page_count = self._count_pdf_pages(data)
+        page_count = self._count_pdf_pages(path)
         if self.app.config.get("ONLYOFFICE_PDF_VALIDATE_PAGE_COUNT") and page_count <= 0:
             raise DocumentPdfError("PDF sin paginas validas.")
         return PdfValidationResult(sha256=sha256, size=size, page_count=page_count, metadata={"active_markers": active_markers})
 
-    def _count_pdf_pages(self, data):
-        return len(re.findall(br"/Type\s*/Page\b", data))
+    def _count_pdf_pages(self, path):
+        try:
+            from pypdf import PdfReader
+
+            return len(PdfReader(str(path)).pages)
+        except Exception as exc:
+            raise DocumentPdfError("No se pudo leer el conteo real de paginas del PDF.") from exc
 
     def _approved_snapshot_for_conversion(self, *, documento, version_doc):
         if version_doc.estado != ESTADO_APROBADO:

@@ -415,6 +415,11 @@ class DocumentSignatureTest(unittest.TestCase):
 
             return len(list(PdfFileReader(handle).embedded_signatures))
 
+    def physical_page_count(self, artifact):
+        from pypdf import PdfReader
+
+        return len(PdfReader(str(resolve_document_path(artifact.storage_path))).pages)
+
     def embedded_signature_names(self, artifact):
         with resolve_document_path(artifact.storage_path).open("rb") as handle:
             from pyhanko.pdf_utils.reader import PdfFileReader
@@ -914,6 +919,8 @@ class DocumentSignatureTest(unittest.TestCase):
             self.assertEqual(step.estado, FIRMA_PASO_FIRMADO)
             self.assertEqual(step.signature_count_after, order)
             self.assertEqual(self.embedded_signature_count(step.artifact_salida), order)
+            self.assertEqual(step.artifact_salida.page_count, 2)
+            self.assertEqual(self.physical_page_count(step.artifact_salida), 2)
             if expected_next_state:
                 next_step = DocumentoFirmaPaso.query.filter_by(proceso_id=process.id, orden=order + 1).one()
                 self.assertEqual(next_step.estado, expected_next_state)
@@ -933,6 +940,8 @@ class DocumentSignatureTest(unittest.TestCase):
         self.assertEqual(process.estado, FIRMA_PROCESO_COMPLETADO)
         self.assertIsNotNone(process.pdf_final_id)
         self.assertEqual(self.embedded_signature_count(process.pdf_final), 3)
+        self.assertEqual(process.pdf_final.page_count, 2)
+        self.assertEqual(self.physical_page_count(process.pdf_final), 2)
         self.assertEqual(
             self.embedded_signature_names(process.pdf_final),
             ["LabZenISO_Elaborador", "LabZenISO_Revisor", "LabZenISO_Aprobador"],
@@ -958,6 +967,33 @@ class DocumentSignatureTest(unittest.TestCase):
         self.assertEqual(DocumentoFirmaPaso.query.filter_by(proceso_id=process.id).count(), 3)
         self.assertEqual((document.estado, version.version, original_pdf.archivo_sha256, original_pdf.storage_path), original_state)
         self.assertEqual(len(dev_events), 3)
+
+    def test_dev_signature_preserves_one_page_physical_count_in_artifact_metadata(self):
+        self.enable_dev_signature_mode()
+        DocumentSignatureDevCertificateService(self.app).initialize()
+        process = DocumentSignatureService().start_process(
+            documento=Documento.query.get(501),
+            version_doc=DocumentoVersion.query.get(1501),
+            usuario=Usuario.query.get(204),
+        )
+        step = DocumentoFirmaPaso.query.filter_by(proceso_id=process.id, orden=1).one()
+
+        artifact = DocumentSignatureService().sign_step_with_dev_certificate(
+            paso=step,
+            usuario=Usuario.query.get(201),
+        )
+
+        self.assertEqual(artifact.tipo, ARTEFACTO_PDF_FIRMADO_PARCIAL)
+        self.assertEqual(artifact.signature_count, 1)
+        self.assertEqual(artifact.page_count, 1)
+        self.assertEqual(self.physical_page_count(artifact), 1)
+        self.assertEqual(
+            DocumentPdfService().validate_pdf_file(
+                resolve_document_path(artifact.storage_path),
+                allow_signature_forms=True,
+            ).page_count,
+            1,
+        )
 
     def test_detail_hides_start_signature_without_pdf_and_post_does_not_create_process(self):
         self.make_current_version_visible_in_detail()
