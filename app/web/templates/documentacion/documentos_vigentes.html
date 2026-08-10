@@ -1,0 +1,248 @@
+{% extends "base_admin.html" %}
+
+{% macro dash(value) -%}
+    {{ value if value not in (none, '') else '&mdash;'|safe }}
+{%- endmacro %}
+
+{% macro page_link(page, label, disabled=false, active=false) -%}
+<li class="page-item {% if disabled %}disabled{% endif %} {% if active %}active{% endif %}">
+    {% if disabled %}
+    <span class="page-link">{{ label }}</span>
+    {% else %}
+    <a class="page-link" href="{{ url_for('documentacion.documentos_vigentes', page=page, per_page=filters.per_page, q=filters.q, clasificacion=filters.clasificacion, tipo_documento=filters.tipo_documento, estado=filters.estado) }}">{{ label }}</a>
+    {% endif %}
+</li>
+{%- endmacro %}
+
+{% block title %}Documentos vigentes{% endblock %}
+
+{% block extra_css %}
+<style>
+    .current-catalog-page,
+    .current-catalog-heading,
+    .current-catalog-table-wrap {
+        max-width: 100%;
+        min-width: 0;
+    }
+
+    .current-catalog-heading-main {
+        flex: 1 1 420px;
+        min-width: 0;
+    }
+
+    .current-catalog-table-wrap {
+        overflow-x: auto;
+    }
+
+    .current-catalog-table {
+        min-width: 1180px;
+        table-layout: fixed;
+    }
+
+    .current-catalog-code { width: 155px; }
+    .current-catalog-title { width: 270px; }
+    .current-catalog-classification { width: 120px; }
+    .current-catalog-type { width: 140px; }
+    .current-catalog-version { width: 110px; }
+    .current-catalog-state { width: 125px; }
+    .current-catalog-date { width: 150px; }
+    .current-catalog-sync { width: 155px; }
+    .current-catalog-actions { width: 260px; }
+
+    .current-catalog-code-value {
+        white-space: normal;
+        overflow-wrap: normal;
+        word-break: normal;
+    }
+
+    .current-catalog-filter-actions .btn {
+        min-width: 120px;
+    }
+
+    @media (max-width: 991.98px) {
+        .current-catalog-heading-summary {
+            text-align: left !important;
+        }
+
+        .current-catalog-filter-actions .btn {
+            flex: 1 1 160px;
+        }
+    }
+
+    @media (max-width: 575.98px) {
+        .current-catalog-filter-actions {
+            flex-direction: column;
+        }
+
+        .current-catalog-filter-actions .btn {
+            width: 100%;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="current-catalog-page">
+    <div class="current-catalog-heading d-flex justify-content-between align-items-start mb-4 flex-wrap gap-3">
+        <div class="current-catalog-heading-main">
+            <h2 class="mb-1 text-break">Documentos vigentes</h2>
+            <div class="text-muted">Cat&aacute;logo vigente de documentos controlados para la empresa actual.</div>
+        </div>
+        <div class="current-catalog-heading-summary text-end">
+            <span class="badge bg-primary">{{ pagination.total }} registro(s)</span>
+            <div class="small text-muted mt-1">P&aacute;gina {{ pagination.page }} de {{ pagination.pages or 1 }}</div>
+        </div>
+    </div>
+
+    <div class="page-card mb-4">
+        <form method="get" class="row g-3 align-items-end">
+            <div class="col-xl-3 col-lg-6 col-md-6">
+                <label class="form-label">Buscar</label>
+                <input type="text" name="q" class="form-control" value="{{ filters.q }}" placeholder="C&oacute;digo o t&iacute;tulo">
+            </div>
+            <div class="col-xl-2 col-lg-3 col-md-6">
+                <label class="form-label">Clasificaci&oacute;n</label>
+                <select name="clasificacion" class="form-select">
+                    <option value="">Todas</option>
+                    {% for clasificacion in clasificaciones %}
+                    <option value="{{ clasificacion }}" {% if filters.clasificacion == clasificacion %}selected{% endif %}>{{ clasificacion }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-xl-2 col-lg-3 col-md-6">
+                <label class="form-label">Tipo documental</label>
+                <select name="tipo_documento" class="form-select">
+                    <option value="">Todos</option>
+                    {% for tipo in tipos_documento %}
+                    <option value="{{ tipo }}" {% if filters.tipo_documento == tipo %}selected{% endif %}>{{ tipo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-xl-2 col-lg-3 col-md-6">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select">
+                    <option value="">Todos</option>
+                    <option value="VIGENTE" {% if filters.estado == 'VIGENTE' %}selected{% endif %}>Vigente</option>
+                    <option value="SIN_RELACION" {% if filters.estado == 'SIN_RELACION' %}selected{% endif %}>Sin relaci&oacute;n</option>
+                </select>
+            </div>
+            <div class="col-xl-1 col-lg-3 col-md-6">
+                <label class="form-label">Mostrar</label>
+                <select name="per_page" class="form-select">
+                    {% for option in per_page_options %}
+                    <option value="{{ option }}" {% if filters.per_page == option %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-xl-2 col-lg-12 d-flex flex-wrap gap-2 current-catalog-filter-actions">
+                <button type="submit" class="btn btn-outline-primary flex-fill">Filtrar</button>
+                <a href="{{ url_for('documentacion.documentos_vigentes') }}" class="btn btn-outline-secondary flex-fill">Limpiar filtros</a>
+            </div>
+        </form>
+    </div>
+
+    <div class="page-card">
+        <div class="table-responsive current-catalog-table-wrap">
+            <table class="table table-hover align-middle current-catalog-table">
+                <thead>
+                    <tr>
+                        <th class="current-catalog-code">C&oacute;digo</th>
+                        <th class="current-catalog-title">Documento</th>
+                        <th class="current-catalog-classification">Clasificaci&oacute;n</th>
+                        <th class="current-catalog-type">Tipo documental</th>
+                        <th class="current-catalog-version">Versi&oacute;n</th>
+                        <th class="current-catalog-state">Estado</th>
+                        <th class="current-catalog-date">Fecha vigencia</th>
+                        <th class="current-catalog-sync">Sincronizaci&oacute;n</th>
+                        <th class="current-catalog-actions">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    {% set documento = item.documento %}
+                    {% set version = item.documento_version %}
+                    {% set publicacion = item.documento_publicacion %}
+                    <tr>
+                        <td><code class="current-catalog-code-value">{{ dash(item.codigo) }}</code></td>
+                        <td class="text-break">{{ dash(item.titulo) }}</td>
+                        <td>
+                            {% if item.tipo_listado == 'INTERNO' %}
+                            <span class="badge bg-primary">INTERNO</span>
+                            {% elif item.tipo_listado == 'FORMATO' %}
+                            <span class="badge bg-info text-dark">FORMATO</span>
+                            {% elif item.tipo_listado == 'EXTERNO' %}
+                            <span class="badge bg-secondary">EXTERNO</span>
+                            {% else %}
+                            <span class="badge bg-light text-dark">{{ dash(item.tipo_listado) }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ dash(documento.tipo_documento if documento else none) }}</td>
+                        <td>{{ dash(version.version if version else item.revision) }}</td>
+                        <td>
+                            {% if version %}
+                            <span class="badge {{ document_state_badge_class(version.estado) }}">{{ document_state_label(version.estado) }}</span>
+                            {% elif publicacion %}
+                            <span class="badge {% if publicacion.estado == 'ACTIVA' %}bg-success{% else %}bg-secondary{% endif %}">{{ publicacion.estado }}</span>
+                            {% else %}
+                            <span class="badge bg-light text-dark">Sin relaci&oacute;n</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if publicacion and publicacion.vigente_desde %}
+                                {{ publicacion.vigente_desde.strftime('%Y-%m-%d') }}
+                            {% elif item.fecha_vigencia %}
+                                {{ item.fecha_vigencia.strftime('%Y-%m-%d') }}
+                            {% else %}
+                                &mdash;
+                            {% endif %}
+                        </td>
+                        <td>{{ item.sincronizado_en.strftime('%Y-%m-%d %H:%M') if item.sincronizado_en else '&mdash;'|safe }}</td>
+                        <td>
+                            <div class="d-flex flex-wrap gap-2">
+                                {% if documento %}
+                                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('documentacion.detalle', item_id=documento.id) }}">Detalle</a>
+                                {% endif %}
+                                {% if publicacion %}
+                                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('documentacion_publicaciones.ver_publicacion', public_id=publicacion.public_id) }}">Ver vigente</a>
+                                {% endif %}
+                                {% if publicacion and can('documentos.descargar') %}
+                                <a class="btn btn-sm btn-outline-success" href="{{ url_for('documentacion_publicaciones.descargar_pdf_publicado', public_id=publicacion.public_id) }}">Descargar</a>
+                                {% endif %}
+                                {% if documento and can('documentos.ver_historial') %}
+                                <a class="btn btn-sm btn-outline-dark" href="{{ url_for('documentacion.detalle', item_id=documento.id) }}#historial">Historial</a>
+                                {% endif %}
+                                {% if not documento and not publicacion %}
+                                <span class="text-muted small">Sin acciones disponibles</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="9" class="text-center text-muted py-4">
+                            No existen documentos vigentes registrados para esta empresa. Los documentos publicados y clasificados se incorporar&aacute;n autom&aacute;ticamente al cat&aacute;logo.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% if pagination.pages > 1 %}
+        <nav aria-label="Paginaci&oacute;n de documentos vigentes" class="mt-3">
+            <ul class="pagination flex-wrap mb-0">
+                {{ page_link(pagination.prev_num, 'Anterior', disabled=not pagination.has_prev) }}
+                {% for page in pagination.iter_pages(left_edge=1, left_current=2, right_current=2, right_edge=1) %}
+                    {% if page %}
+                        {{ page_link(page, page, active=page == pagination.page) }}
+                    {% else %}
+                        <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                    {% endif %}
+                {% endfor %}
+                {{ page_link(pagination.next_num, 'Siguiente', disabled=not pagination.has_next) }}
+            </ul>
+        </nav>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

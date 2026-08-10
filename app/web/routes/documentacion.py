@@ -16,6 +16,7 @@ from flask import (
     session,
 )
 from flask_login import login_required, current_user
+from sqlalchemy.orm import joinedload
 
 from app.extensions import db
 from app.security.permissions import current_user_can, require_permission
@@ -156,6 +157,7 @@ CLASIFICACIONES_CONTROL_LABELS = {
 
 PREVIEWABLE_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
 VIGOR_PER_PAGE_OPTIONS = (25, 50, 100)
+CURRENT_CATALOG_PER_PAGE_OPTIONS = (25, 50, 100)
 VIGOR_LISTING_META = {
     DOCUMENTO_VIGOR_INTERNO: {
         "title": "Documentos internos en vigor",
@@ -176,6 +178,12 @@ VIGOR_LISTING_META = {
         "print_endpoint": "documentacion.vigor_formatos_imprimir",
     },
 }
+
+CURRENT_CATALOG_CLASSIFICATIONS = (
+    DOCUMENTO_VIGOR_INTERNO,
+    DOCUMENTO_VIGOR_FORMATO,
+    DOCUMENTO_VIGOR_EXTERNO,
+)
 
 
 def _responsables_documentales():
@@ -313,6 +321,11 @@ def _vigor_per_page(value):
     return parsed if parsed in VIGOR_PER_PAGE_OPTIONS else 25
 
 
+def _current_catalog_per_page(value):
+    parsed = _safe_positive_int(value, 25)
+    return parsed if parsed in CURRENT_CATALOG_PER_PAGE_OPTIONS else 25
+
+
 def _vigor_filters_from_request():
     return {
         "q": request.args.get("q", "").strip(),
@@ -323,12 +336,99 @@ def _vigor_filters_from_request():
     }
 
 
+def _current_catalog_filters_from_request():
+    return {
+        "q": request.args.get("q", "").strip(),
+        "clasificacion": request.args.get("clasificacion", "").strip(),
+        "tipo_documento": request.args.get("tipo_documento", "").strip(),
+        "estado": request.args.get("estado", "").strip(),
+        "page": _safe_positive_int(request.args.get("page"), 1),
+        "per_page": _current_catalog_per_page(request.args.get("per_page")),
+    }
+
+
 def _vigor_base_query(tipo_listado):
     return DocumentoVigorCatalogo.query.filter_by(
         empresa_id=current_user.empresa_id,
         tipo_listado=tipo_listado,
         activo=True,
     )
+
+
+def _current_catalog_base_query():
+    preferred_linked_id = db.func.coalesce(
+        db.func.max(db.case(
+            (DocumentoVigorCatalogo.sincronizado_en.isnot(None), DocumentoVigorCatalogo.id),
+            else_=None,
+        )),
+        db.func.max(DocumentoVigorCatalogo.id),
+    ).label("current_id")
+    linked_current_ids = (
+        db.session.query(preferred_linked_id)
+        .filter(
+            DocumentoVigorCatalogo.empresa_id == current_user.empresa_id,
+            DocumentoVigorCatalogo.activo.is_(True),
+            DocumentoVigorCatalogo.documento_id.isnot(None),
+        )
+        .group_by(DocumentoVigorCatalogo.documento_id)
+        .subquery()
+    )
+    return (
+        DocumentoVigorCatalogo.query
+        .options(
+            joinedload(DocumentoVigorCatalogo.documento),
+            joinedload(DocumentoVigorCatalogo.documento_version),
+            joinedload(DocumentoVigorCatalogo.documento_publicacion),
+        )
+        .filter(
+            DocumentoVigorCatalogo.empresa_id == current_user.empresa_id,
+            DocumentoVigorCatalogo.activo.is_(True),
+            db.or_(
+                DocumentoVigorCatalogo.documento_id.is_(None),
+                DocumentoVigorCatalogo.id.in_(db.select(linked_current_ids.c.current_id)),
+            ),
+        )
+    )
+
+
+def _apply_current_catalog_filters(query, filters):
+    if filters["q"]:
+        like = f"%{filters['q'].lower()}%"
+        query = query.filter(db.or_(
+            db.func.lower(db.func.coalesce(DocumentoVigorCatalogo.codigo, "")).like(like),
+            db.func.lower(db.func.coalesce(DocumentoVigorCatalogo.titulo, "")).like(like),
+        ))
+    if filters["clasificacion"] in CURRENT_CATALOG_CLASSIFICATIONS:
+        query = query.filter(DocumentoVigorCatalogo.tipo_listado == filters["clasificacion"])
+    if filters["tipo_documento"]:
+        query = query.outerjoin(Documento, Documento.id == DocumentoVigorCatalogo.documento_id)
+        query = query.filter(
+            Documento.empresa_id == current_user.empresa_id,
+            Documento.tipo_documento == filters["tipo_documento"],
+        )
+    if filters["estado"] == "VIGENTE":
+        query = (
+            query
+            .outerjoin(DocumentoVersion, DocumentoVersion.id == DocumentoVigorCatalogo.documento_version_id)
+            .outerjoin(DocumentoPublicacion, DocumentoPublicacion.id == DocumentoVigorCatalogo.documento_publicacion_id)
+            .filter(db.or_(
+                db.and_(
+                    DocumentoVersion.empresa_id == current_user.empresa_id,
+                    DocumentoVersion.estado == "VIGENTE",
+                ),
+                db.and_(
+                    DocumentoPublicacion.empresa_id == current_user.empresa_id,
+                    DocumentoPublicacion.estado == "ACTIVA",
+                    DocumentoPublicacion.activa.is_(True),
+                ),
+            ))
+        )
+    if filters["estado"] == "SIN_RELACION":
+        query = query.filter(
+            DocumentoVigorCatalogo.documento_version_id.is_(None),
+            DocumentoVigorCatalogo.documento_publicacion_id.is_(None),
+        )
+    return query
 
 
 def _apply_vigor_filters(query, filters):
@@ -354,6 +454,15 @@ def _order_vigor_query(query):
     )
 
 
+def _order_current_catalog_query(query):
+    return query.order_by(
+        DocumentoVigorCatalogo.tipo_listado.asc(),
+        db.func.coalesce(DocumentoVigorCatalogo.codigo, "").asc(),
+        db.func.coalesce(DocumentoVigorCatalogo.titulo, "").asc(),
+        DocumentoVigorCatalogo.id.asc(),
+    )
+
+
 def _vigor_sections(tipo_listado):
     return [
         section
@@ -366,6 +475,23 @@ def _vigor_sections(tipo_listado):
             .all()
         )
     ]
+
+
+def _current_catalog_document_types():
+    rows = (
+        db.session.query(Documento.tipo_documento)
+        .join(DocumentoVigorCatalogo, DocumentoVigorCatalogo.documento_id == Documento.id)
+        .filter(
+            DocumentoVigorCatalogo.empresa_id == current_user.empresa_id,
+            DocumentoVigorCatalogo.activo.is_(True),
+            Documento.empresa_id == current_user.empresa_id,
+            Documento.tipo_documento.isnot(None),
+        )
+        .distinct()
+        .order_by(Documento.tipo_documento.asc())
+        .all()
+    )
+    return [row[0] for row in rows if row[0]]
 
 
 def _render_vigor_listing(tipo_listado):
@@ -501,6 +627,31 @@ def clasificacion_pendientes():
         latest_versions=latest_versions,
         clasificaciones_control=CLASIFICACIONES_CONTROL,
         clasificaciones_control_labels=CLASIFICACIONES_CONTROL_LABELS,
+    )
+
+
+@bp.route("/documentos-vigentes")
+@login_required
+@require_permission("documentos.ver")
+def documentos_vigentes():
+    if not getattr(current_user, "empresa_id", None):
+        abort(403)
+    filters = _current_catalog_filters_from_request()
+    query = _order_current_catalog_query(_apply_current_catalog_filters(_current_catalog_base_query(), filters))
+    pagination = query.paginate(
+        page=filters["page"],
+        per_page=filters["per_page"],
+        error_out=False,
+    )
+    return render_template(
+        "documentacion/documentos_vigentes.html",
+        filters=filters,
+        pagination=pagination,
+        items=pagination.items,
+        per_page_options=CURRENT_CATALOG_PER_PAGE_OPTIONS,
+        clasificaciones=CURRENT_CATALOG_CLASSIFICATIONS,
+        tipos_documento=_current_catalog_document_types(),
+        estados_catalogo=("VIGENTE", "SIN_RELACION"),
     )
 
 
