@@ -23,6 +23,7 @@ from app.models.documentos import (
     PUBLICACION_PREPARADA,
     ENTREGA_OMITIDO,
     Documento,
+    DocumentoAprobacion,
     DocumentoArtefacto,
     DocumentoDistribucionDestinatario,
     DocumentoDistribucionEntrega,
@@ -30,12 +31,13 @@ from app.models.documentos import (
     DocumentoPublicacion,
     DocumentoSnapshot,
     DocumentoVersion,
+    DocumentoVigorCatalogo,
 )
 from app.models.empresa import Empresa
 from app.models.seguridad import Permiso, Rol, RolPermiso, Usuario, UsuarioRol
 from app.services.document_distribution_service import DocumentDistributionService
 from app.services.document_pdf_service import DocumentPdfService
-from app.services.document_publication_service import DocumentPublicationService, PUBLISH_PERMISSION
+from app.services.document_publication_service import DocumentPublicationError, DocumentPublicationService, PUBLISH_PERMISSION
 from app.services.storage_service import file_digest_and_size, resolve_document_path, store_pdf_artifact_copy, store_signed_pdf_artifact_copy
 
 
@@ -228,9 +230,58 @@ class DocumentPublicationTest(unittest.TestCase):
         self.assertTrue(publication.activa)
         self.assertEqual(db.session.get(DocumentoVersion, 1501).estado, ESTADO_VIGENTE)
         self.assertEqual(db.session.get(DocumentoVersion, 1500).estado, ESTADO_OBSOLETO)
+        publish_event = DocumentoAprobacion.query.filter_by(
+            documento_version_id=1501,
+            accion="PUBLICAR_VIGENTE",
+        ).one()
+        self.assertEqual(publish_event.estado_anterior, ESTADO_APROBADO)
+        self.assertEqual(publish_event.estado_nuevo, ESTADO_VIGENTE)
+        obsolete_event = DocumentoAprobacion.query.filter_by(
+            documento_version_id=1500,
+            accion="VERSION_ANTERIOR_OBSOLETA",
+        ).one()
+        self.assertEqual(obsolete_event.estado_anterior, ESTADO_APROBADO)
+        self.assertEqual(obsolete_event.estado_nuevo, ESTADO_OBSOLETO)
+        catalog_row = DocumentoVigorCatalogo.query.filter_by(documento_id=501).one()
+        self.assertEqual(catalog_row.documento_version_id, 1501)
+        self.assertEqual(catalog_row.documento_publicacion_id, publication.id)
+        self.assertIsNotNone(catalog_row.sincronizado_en)
         self.assertEqual(DocumentoDistribucionEntrega.query.filter_by(publicacion_id=publication.id).count(), 2)
         DocumentDistributionService().enqueue_publication_deliveries(publicacion=publication)
         self.assertEqual(DocumentoDistribucionEntrega.query.filter_by(publicacion_id=publication.id).count(), 2)
+        with self.assertRaisesRegex(DocumentPublicationError, "version ya esta VIGENTE"):
+            DocumentPublicationService().publish_as_current(
+                documento=db.session.get(Documento, 501),
+                version_doc=db.session.get(DocumentoVersion, 1501),
+                usuario=db.session.get(Usuario, 201),
+            )
+        self.assertEqual(DocumentoVigorCatalogo.query.filter_by(documento_id=501).count(), 1)
+        self.assertEqual(
+            DocumentoAprobacion.query.filter_by(
+                documento_version_id=1501,
+                accion="PUBLICAR_VIGENTE",
+            ).count(),
+            1,
+        )
+
+    def test_publish_as_current_requires_completed_signature_process(self):
+        DocumentPublicationService().prepare_publication_for_signature(
+            documento=db.session.get(Documento, 501),
+            version_doc=db.session.get(DocumentoVersion, 1501),
+            usuario=db.session.get(Usuario, 201),
+        )
+
+        with self.assertRaisesRegex(DocumentPublicationError, "proceso de firmas debe estar COMPLETADO"):
+            DocumentPublicationService().publish_as_current(
+                documento=db.session.get(Documento, 501),
+                version_doc=db.session.get(DocumentoVersion, 1501),
+                usuario=db.session.get(Usuario, 201),
+            )
+
+        self.assertEqual(db.session.get(Documento, 501).estado, ESTADO_APROBADO)
+        self.assertEqual(db.session.get(DocumentoVersion, 1501).estado, ESTADO_APROBADO)
+        self.assertEqual(DocumentoPublicacion.query.filter_by(estado=PUBLICACION_ACTIVA, activa=True).count(), 0)
+        self.assertEqual(DocumentoVigorCatalogo.query.count(), 0)
 
     def test_email_disabled_marks_delivery_omitted_not_sent(self):
         from app.services.document_email_service import DocumentEmailService

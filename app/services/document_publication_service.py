@@ -236,6 +236,8 @@ class DocumentPublicationService:
             process = self._completed_signature_process(version_doc)
             final_pdf = process.pdf_final
             previous = documento.version_vigente if documento.version_vigente_id else None
+            version_previous_state = version_doc.estado
+            previous_state = previous.estado if previous else None
             previous_publication = self.active_publication_for_document(documento)
             now = _now()
             if not publicacion or not publicacion.pdf_qr_artifact or not publicacion.qr_embebido:
@@ -262,12 +264,32 @@ class DocumentPublicationService:
                 previous.fecha_obsolescencia = now
                 previous.obsoletado_por_id = usuario.id
                 previous.motivo_obsolescencia = f"Sustituida por la version vigente {version_doc.version}."
-                self._record_event(documento, previous, usuario, "VERSION_ANTERIOR_OBSOLETA", previous.motivo_obsolescencia, ip, user_agent)
+                self._record_event(
+                    documento,
+                    previous,
+                    usuario,
+                    "VERSION_ANTERIOR_OBSOLETA",
+                    previous.motivo_obsolescencia,
+                    ip,
+                    user_agent,
+                    estado_anterior=previous_state,
+                    estado_nuevo=previous.estado,
+                )
             if previous_publication and previous_publication.id != publicacion.id:
                 previous_publication.estado = PUBLICACION_OBSOLETA
                 previous_publication.activa = False
 
-            self._record_event(documento, version_doc, usuario, "PUBLICAR_VIGENTE", "Documento publicado como vigente.", ip, user_agent)
+            self._record_event(
+                documento,
+                version_doc,
+                usuario,
+                "PUBLICAR_VIGENTE",
+                "Documento publicado como vigente.",
+                ip,
+                user_agent,
+                estado_anterior=version_previous_state,
+                estado_nuevo=version_doc.estado,
+            )
             DocumentCurrentCatalogSyncService().sync_current_publication(
                 documento=documento,
                 version_doc=version_doc,
@@ -427,15 +449,26 @@ class DocumentPublicationService:
     def _environment(self):
         return (self.app.config.get("APP_ENV") or self.app.config.get("ENV") or "development").strip().lower()
 
-    def _record_event(self, documento, version_doc, usuario, accion, comentario="", ip=None, user_agent=None):
+    def _record_event(
+        self,
+        documento,
+        version_doc,
+        usuario,
+        accion,
+        comentario="",
+        ip=None,
+        user_agent=None,
+        estado_anterior=None,
+        estado_nuevo=None,
+    ):
         db.session.add(DocumentoAprobacion(
             empresa_id=documento.empresa_id,
             documento_id=documento.id,
             documento_version_id=version_doc.id,
             usuario_id=usuario.id,
             accion=accion,
-            estado_anterior=version_doc.estado,
-            estado_nuevo=version_doc.estado,
+            estado_anterior=estado_anterior if estado_anterior is not None else version_doc.estado,
+            estado_nuevo=estado_nuevo if estado_nuevo is not None else version_doc.estado,
             fecha_accion=_now(),
             comentario=(comentario or "").strip() or None,
             ip=ip,
