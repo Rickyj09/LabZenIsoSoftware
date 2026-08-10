@@ -14,6 +14,7 @@ from app.models.documentos import (
     ARTEFACTO_PDF_APROBADO,
     ARTEFACTO_PDF_APROBADO_CON_QR,
     ARTEFACTO_PDF_FIRMADO_FINAL,
+    CLASIFICACION_CONTROL_INTERNO,
     ESTADO_APROBADO,
     ESTADO_OBSOLETO,
     ESTADO_VIGENTE,
@@ -119,7 +120,7 @@ class DocumentPublicationTest(unittest.TestCase):
             RolPermiso(id=3004, rol_id=role.id, permiso_id=1004),
             UsuarioRol(id=4001, usuario_id=201, rol_id=role.id),
         ])
-        document = Documento(id=501, empresa_id=101, codigo="DOC-PUB", titulo="Documento publicado", tipo_documento="PROCEDIMIENTO", proceso="Calidad", estado=ESTADO_APROBADO, version_actual="1", elaborado_por_id=201)
+        document = Documento(id=501, empresa_id=101, codigo="DOC-PUB", titulo="Documento publicado", tipo_documento="PROCEDIMIENTO", clasificacion_control=CLASIFICACION_CONTROL_INTERNO, proceso="Calidad", estado=ESTADO_APROBADO, version_actual="1", elaborado_por_id=201)
         previous = DocumentoVersion(id=1500, empresa_id=101, documento_id=501, version="0", estado=ESTADO_APROBADO, elaborado_por_id=201, revisado_por_id=202, aprobado_por_id=201)
         version = DocumentoVersion(id=1501, empresa_id=101, documento_id=501, version="1", estado=ESTADO_APROBADO, cambios="Cambio controlado", elaborado_por_id=201, revisado_por_id=202, aprobado_por_id=201, fecha_aprobacion=datetime.now(timezone.utc))
         document.version_vigente_id = previous.id

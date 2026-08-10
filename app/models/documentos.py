@@ -55,6 +55,11 @@ ACCIONES_EVENTO_DOCUMENTO = (
     "PUBLICACION_CONSULTADA",
     "PDF_VIGENTE_DESCARGADO",
     "PUBLICACION_REVOCADA",
+    "CLASIFICAR_CONTROL",
+    "CATALOGO_VIGENTE_ALTA",
+    "CATALOGO_VIGENTE_ACTUALIZADO",
+    "CATALOGO_VIGENTE_SIN_CAMBIOS",
+    "CATALOGO_VIGENTE_ERROR",
 )
 
 ESTADO_EDICION_ACTIVA = "ACTIVA"
@@ -584,6 +589,7 @@ class DocumentoVigorCatalogo(TenantMixin, BaseModel):
         db.Index("ix_documento_vigor_empresa_tipo_identidad", "empresa_id", "tipo_listado", "identidad_estable"),
         db.Index("ix_documento_vigor_documento_id", "documento_id"),
         db.Index("ix_documento_vigor_documento_version_id", "documento_version_id"),
+        db.Index("ix_documento_vigor_documento_publicacion_id", "documento_publicacion_id"),
     )
 
     tipo_listado = db.Column(db.String(20), nullable=False)
@@ -604,6 +610,7 @@ class DocumentoVigorCatalogo(TenantMixin, BaseModel):
     activo = db.Column(db.Boolean, nullable=False, default=True)
     documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=True)
     documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=True)
+    documento_publicacion_id = db.Column(db.BigInteger, db.ForeignKey("documento_publicaciones.id"), nullable=True)
     fuente_archivo = db.Column(db.String(255), nullable=False)
     fuente_hoja = db.Column(db.String(255), nullable=False)
     fuente_fila = db.Column(db.Integer, nullable=False)
@@ -611,19 +618,23 @@ class DocumentoVigorCatalogo(TenantMixin, BaseModel):
     importado_en = db.Column(db.DateTime(timezone=True), nullable=False)
     actualizado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=True)
     actualizado_en = db.Column(db.DateTime(timezone=True), nullable=True)
+    sincronizado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=True)
+    sincronizado_en = db.Column(db.DateTime(timezone=True), nullable=True)
 
     empresa = db.relationship("Empresa")
     documento = db.relationship("Documento", foreign_keys=[documento_id])
     documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    documento_publicacion = db.relationship("DocumentoPublicacion", foreign_keys=[documento_publicacion_id])
     importado_por = db.relationship("Usuario", foreign_keys=[importado_por_id])
     actualizado_por = db.relationship("Usuario", foreign_keys=[actualizado_por_id])
+    sincronizado_por = db.relationship("Usuario", foreign_keys=[sincronizado_por_id])
 
 
 class DocumentoAprobacion(TenantMixin, BaseModel):
     __tablename__ = "documento_aprobaciones"
     __table_args__ = (
         db.CheckConstraint(
-            "accion IN ('CREAR_VERSION', 'ENVIAR_REVISION', 'DAR_CONFORMIDAD', 'APROBAR', 'RECHAZAR', 'SOLICITAR_CORRECCIONES', 'RECHAZAR_APROBACION', 'DEVOLVER_BORRADOR', 'OBSOLETAR', 'SUSTITUIR_VERSION', 'PUBLICAR_VIGENTE', 'VERSION_ANTERIOR_OBSOLETA', 'PUBLICACION_PREPARADA', 'QR_GENERADO', 'PDF_QR_GENERADO', 'DISTRIBUCION_ENCOLADA', 'PUBLICACION_CONSULTADA', 'PDF_VIGENTE_DESCARGADO', 'PUBLICACION_REVOCADA', 'CLASIFICAR_CONTROL')",
+            "accion IN ('CREAR_VERSION', 'ENVIAR_REVISION', 'DAR_CONFORMIDAD', 'APROBAR', 'RECHAZAR', 'SOLICITAR_CORRECCIONES', 'RECHAZAR_APROBACION', 'DEVOLVER_BORRADOR', 'OBSOLETAR', 'SUSTITUIR_VERSION', 'PUBLICAR_VIGENTE', 'VERSION_ANTERIOR_OBSOLETA', 'PUBLICACION_PREPARADA', 'QR_GENERADO', 'PDF_QR_GENERADO', 'DISTRIBUCION_ENCOLADA', 'PUBLICACION_CONSULTADA', 'PDF_VIGENTE_DESCARGADO', 'PUBLICACION_REVOCADA', 'CLASIFICAR_CONTROL', 'CATALOGO_VIGENTE_ALTA', 'CATALOGO_VIGENTE_ACTUALIZADO', 'CATALOGO_VIGENTE_SIN_CAMBIOS', 'CATALOGO_VIGENTE_ERROR')",
             name="ck_documento_eventos_accion_valida",
         ),
         db.Index("ix_documento_eventos_documento_id", "documento_id"),

@@ -28,6 +28,10 @@ from app.models.documentos import (
     DocumentoVersion,
 )
 from app.security.permissions import user_has_permission
+from app.services.document_current_catalog_sync_service import (
+    DocumentCurrentCatalogSyncError,
+    DocumentCurrentCatalogSyncService,
+)
 from app.services.document_distribution_service import DocumentDistributionService
 from app.services.document_pdf_service import DocumentPdfService, PDF_MIME
 from app.services.document_qr_service import DocumentQrService
@@ -224,49 +228,62 @@ class DocumentPublicationService:
 
     def publish_as_current(self, *, documento, version_doc, usuario, ip=None, user_agent=None):
         self._validate_publish_conditions(documento, version_doc, usuario)
-        publicacion = self.publication_for_version(version_doc)
-        if publicacion and publicacion.estado == PUBLICACION_ACTIVA and publicacion.activa:
+        try:
+            publicacion = self.publication_for_version(version_doc)
+            if publicacion and publicacion.estado == PUBLICACION_ACTIVA and publicacion.activa:
+                return publicacion
+
+            process = self._completed_signature_process(version_doc)
+            final_pdf = process.pdf_final
+            previous = documento.version_vigente if documento.version_vigente_id else None
+            previous_publication = self.active_publication_for_document(documento)
+            now = _now()
+            if not publicacion or not publicacion.pdf_qr_artifact or not publicacion.qr_embebido:
+                raise DocumentPublicationError("La publicacion debe estar preparada con QR embebido antes de publicarse.")
+            publicacion.estado = PUBLICACION_ACTIVA
+            publicacion.activa = True
+            publicacion.vigente_desde = now
+            publicacion.publicado_por_id = usuario.id
+            publicacion.pdf_publicado_id = final_pdf.id
+            publicacion.pdf_fuente_storage_key = final_pdf.storage_path
+            publicacion.pdf_fuente_sha256 = final_pdf.archivo_sha256
+            if not publicacion.qr_payload:
+                publicacion.qr_payload = self._absolute_publication_url(publicacion)
+
+            version_doc.estado = ESTADO_VIGENTE
+            version_doc.vigente_desde = now
+            version_doc.publicado_por_id = usuario.id
+            documento.estado = ESTADO_VIGENTE
+            documento.version_vigente_id = version_doc.id
+            documento.version_actual = version_doc.version
+
+            if previous and previous.id != version_doc.id:
+                previous.estado = ESTADO_OBSOLETO
+                previous.fecha_obsolescencia = now
+                previous.obsoletado_por_id = usuario.id
+                previous.motivo_obsolescencia = f"Sustituida por la version vigente {version_doc.version}."
+                self._record_event(documento, previous, usuario, "VERSION_ANTERIOR_OBSOLETA", previous.motivo_obsolescencia, ip, user_agent)
+            if previous_publication and previous_publication.id != publicacion.id:
+                previous_publication.estado = PUBLICACION_OBSOLETA
+                previous_publication.activa = False
+
+            self._record_event(documento, version_doc, usuario, "PUBLICAR_VIGENTE", "Documento publicado como vigente.", ip, user_agent)
+            DocumentCurrentCatalogSyncService().sync_current_publication(
+                documento=documento,
+                version_doc=version_doc,
+                publicacion=publicacion,
+                usuario=usuario,
+            )
+            DocumentDistributionService().enqueue_publication_deliveries(publicacion=publicacion)
+            self._record_event(documento, version_doc, usuario, "DISTRIBUCION_ENCOLADA", "Distribucion documental encolada.", ip, user_agent)
+            db.session.commit()
             return publicacion
-
-        process = self._completed_signature_process(version_doc)
-        final_pdf = process.pdf_final
-        previous = documento.version_vigente if documento.version_vigente_id else None
-        previous_publication = self.active_publication_for_document(documento)
-        now = _now()
-        if not publicacion or not publicacion.pdf_qr_artifact or not publicacion.qr_embebido:
-            raise DocumentPublicationError("La publicacion debe estar preparada con QR embebido antes de publicarse.")
-        publicacion.estado = PUBLICACION_ACTIVA
-        publicacion.activa = True
-        publicacion.vigente_desde = now
-        publicacion.publicado_por_id = usuario.id
-        publicacion.pdf_publicado_id = final_pdf.id
-        publicacion.pdf_fuente_storage_key = final_pdf.storage_path
-        publicacion.pdf_fuente_sha256 = final_pdf.archivo_sha256
-        if not publicacion.qr_payload:
-            publicacion.qr_payload = self._absolute_publication_url(publicacion)
-
-        version_doc.estado = ESTADO_VIGENTE
-        version_doc.vigente_desde = now
-        version_doc.publicado_por_id = usuario.id
-        documento.estado = ESTADO_VIGENTE
-        documento.version_vigente_id = version_doc.id
-        documento.version_actual = version_doc.version
-
-        if previous and previous.id != version_doc.id:
-            previous.estado = ESTADO_OBSOLETO
-            previous.fecha_obsolescencia = now
-            previous.obsoletado_por_id = usuario.id
-            previous.motivo_obsolescencia = f"Sustituida por la version vigente {version_doc.version}."
-            self._record_event(documento, previous, usuario, "VERSION_ANTERIOR_OBSOLETA", previous.motivo_obsolescencia, ip, user_agent)
-        if previous_publication and previous_publication.id != publicacion.id:
-            previous_publication.estado = PUBLICACION_OBSOLETA
-            previous_publication.activa = False
-
-        self._record_event(documento, version_doc, usuario, "PUBLICAR_VIGENTE", "Documento publicado como vigente.", ip, user_agent)
-        DocumentDistributionService().enqueue_publication_deliveries(publicacion=publicacion)
-        self._record_event(documento, version_doc, usuario, "DISTRIBUCION_ENCOLADA", "Distribucion documental encolada.", ip, user_agent)
-        db.session.commit()
-        return publicacion
+        except DocumentCurrentCatalogSyncError as exc:
+            db.session.rollback()
+            raise DocumentPublicationError(str(exc)) from exc
+        except Exception:
+            db.session.rollback()
+            raise
 
     def revoke_publication(self, *, publicacion, usuario, motivo, ip=None, user_agent=None):
         if not user_has_permission(usuario, REVOKE_PERMISSION):
