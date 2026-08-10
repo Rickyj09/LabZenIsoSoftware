@@ -36,6 +36,7 @@ ROLE_MATRIX = {
     "CALIDAD": DOCUMENT_PERMISSIONS,
     "TECNICO": {"ver", "crear", "editar", "enviar_revision", "descargar", "ver_historial"},
     "CONSULTA": {"ver", "descargar"},
+    "REVISOR_DOCUMENTAL": {"ver", "descargar", "ver_historial", "ver_pendientes", "revisar"},
 }
 
 
@@ -82,6 +83,7 @@ class DocumentPermissionTest(unittest.TestCase):
             Usuario(id=203, empresa_id=101, nombre="Consulta", apellido="Uno", email="consulta@test", username="consulta", password_hash="x", activo=True),
             Usuario(id=204, empresa_id=102, nombre="Calidad", apellido="Dos", email="calidad2@test", username="calidad2", password_hash="x", activo=True),
             Usuario(id=205, empresa_id=101, nombre="Admin", apellido="Uno", email="admin@test", username="admin", password_hash="x", activo=True),
+            Usuario(id=206, empresa_id=101, nombre="Revisor", apellido="Uno", email="revisor@test", username="revisor", password_hash="x", activo=True),
         ])
         db.session.flush()
         self._create_security_matrix()
@@ -106,7 +108,13 @@ class DocumentPermissionTest(unittest.TestCase):
             db.session.add(permission)
             permission_ids[suffix] = permission.id
 
-        role_users = {"ADMINISTRADOR": [205], "CALIDAD": [201, 204], "TECNICO": [202], "CONSULTA": [203]}
+        role_users = {
+            "ADMINISTRADOR": [205],
+            "CALIDAD": [201, 204],
+            "TECNICO": [202],
+            "CONSULTA": [203],
+            "REVISOR_DOCUMENTAL": [206],
+        }
         link_id = 3000
         for offset, (role_name, permissions) in enumerate(ROLE_MATRIX.items(), start=1):
             role = Rol(id=2000 + offset, nombre=role_name, es_sistema=True)
@@ -190,6 +198,7 @@ class DocumentPermissionTest(unittest.TestCase):
         technician = db.session.get(Usuario, 202)
         consultation = db.session.get(Usuario, 203)
         admin = db.session.get(Usuario, 205)
+        reviewer = db.session.get(Usuario, 206)
 
         self.assertTrue(user_has_permission(admin, "documentos.revisar"))
         self.assertTrue(user_has_permission(admin, "documentos.aprobar"))
@@ -207,6 +216,89 @@ class DocumentPermissionTest(unittest.TestCase):
         self.assertFalse(user_has_permission(technician, "documentos.obsoletar"))
         self.assertTrue(user_has_permission(consultation, "documentos.ver"))
         self.assertFalse(user_has_permission(consultation, "documentos.crear"))
+        self.assertTrue(user_has_permission(reviewer, "documentos.ver"))
+        self.assertTrue(user_has_permission(reviewer, "documentos.ver_pendientes"))
+        self.assertTrue(user_has_permission(reviewer, "documentos.revisar"))
+        self.assertFalse(user_has_permission(reviewer, "documentos.aprobar"))
+        self.assertFalse(user_has_permission(reviewer, "documentos.rechazar"))
+
+    def test_assigned_documental_reviewer_can_open_detail_and_mark_review_conformity(self):
+        document, version = self.add_document(
+            314,
+            "EN_REVISION",
+            "EN_REVISION",
+            reviewer_id=206,
+            approver_id=201,
+        )
+        client = self.login(206)
+
+        detail = client.get(f"/documentacion/{document.id}")
+        body = detail.get_data(as_text=True)
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn("Dar conformidad", body)
+
+        response = client.post(
+            f"/documentacion/{document.id}/versiones/{version.id}/dar-conformidad",
+            data={"comentario": "Conforme"},
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(document.estado, "EN_APROBACION")
+        self.assertEqual(version.estado, "EN_APROBACION")
+        self.assertEqual(version.revisado_por_id, 206)
+
+    def test_documental_reviewer_cannot_mark_review_conformity_when_not_assigned(self):
+        document, version = self.add_document(
+            315,
+            "EN_REVISION",
+            "EN_REVISION",
+            reviewer_id=201,
+            approver_id=205,
+        )
+
+        response = self.login(206).post(
+            f"/documentacion/{document.id}/versiones/{version.id}/dar-conformidad",
+            data={"comentario": "No asignado"},
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(document.estado, "EN_REVISION")
+        self.assertEqual(version.estado, "EN_REVISION")
+        self.assertEqual(DocumentoAprobacion.query.filter_by(
+            documento_id=document.id,
+            accion="DAR_CONFORMIDAD",
+        ).count(), 0)
+
+    def test_documental_reviewer_cannot_review_own_document(self):
+        document, version = self.add_document(
+            316,
+            "EN_REVISION",
+            "EN_REVISION",
+            reviewer_id=206,
+            approver_id=201,
+        )
+        document.elaborado_por_id = 206
+        version.elaborado_por_id = 206
+        db.session.commit()
+
+        response = self.login(206).post(
+            f"/documentacion/{document.id}/versiones/{version.id}/dar-conformidad",
+            data={"comentario": "Propio"},
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(document.estado, "EN_REVISION")
+        self.assertEqual(version.estado, "EN_REVISION")
+        self.assertEqual(DocumentoAprobacion.query.filter_by(
+            documento_id=document.id,
+            accion="DAR_CONFORMIDAD",
+        ).count(), 0)
 
     def test_technician_can_open_create_and_edit_forms(self):
         document, _ = self.add_document(301)

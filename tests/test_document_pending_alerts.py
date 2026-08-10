@@ -61,15 +61,17 @@ class DocumentPendingAlertTest(unittest.TestCase):
             Usuario(id=202, empresa_id=101, nombre="Técnico", apellido="Uno", email="tech@pending", username="tech", password_hash="x", activo=True),
             Usuario(id=203, empresa_id=102, nombre="Calidad", apellido="Dos", email="quality2@pending", username="quality2", password_hash="x", activo=True),
             Usuario(id=205, empresa_id=101, nombre="Calidad", apellido="Alterna", email="quality-alt@pending", username="quality-alt", password_hash="x", activo=True),
+            Usuario(id=206, empresa_id=101, nombre="Revisor", apellido="Documental", email="reviewer@pending", username="reviewer", password_hash="x", activo=True),
         ])
         permissions = {}
-        for offset, suffix in enumerate(("ver", "aprobar", "rechazar", "ver_pendientes", "revisar"), start=1):
+        for offset, suffix in enumerate(("ver", "aprobar", "rechazar", "ver_pendientes", "revisar", "ver_historial", "descargar"), start=1):
             permission = Permiso(id=1000 + offset, codigo=f"documentos.{suffix}", nombre=suffix, modulo="documentos")
             permissions[suffix] = permission
             db.session.add(permission)
         quality_role = Rol(id=2001, nombre="CALIDAD", es_sistema=True)
         technical_role = Rol(id=2002, nombre="TECNICO", es_sistema=True)
-        db.session.add_all([quality_role, technical_role])
+        reviewer_role = Rol(id=2003, nombre="REVISOR_DOCUMENTAL", es_sistema=True)
+        db.session.add_all([quality_role, technical_role, reviewer_role])
         db.session.flush()
         link_id = 3000
         for permission in permissions.values():
@@ -77,11 +79,15 @@ class DocumentPendingAlertTest(unittest.TestCase):
             db.session.add(RolPermiso(id=link_id, rol_id=quality_role.id, permiso_id=permission.id))
         link_id += 1
         db.session.add(RolPermiso(id=link_id, rol_id=technical_role.id, permiso_id=permissions["ver"].id))
+        for suffix in ("ver", "descargar", "ver_historial", "ver_pendientes", "revisar"):
+            link_id += 1
+            db.session.add(RolPermiso(id=link_id, rol_id=reviewer_role.id, permiso_id=permissions[suffix].id))
         db.session.add_all([
             UsuarioRol(id=4001, usuario_id=201, rol_id=quality_role.id),
             UsuarioRol(id=4002, usuario_id=203, rol_id=quality_role.id),
             UsuarioRol(id=4003, usuario_id=202, rol_id=technical_role.id),
             UsuarioRol(id=4004, usuario_id=205, rol_id=quality_role.id),
+            UsuarioRol(id=4005, usuario_id=206, rol_id=reviewer_role.id),
         ])
         db.session.commit()
 
@@ -218,6 +224,51 @@ class DocumentPendingAlertTest(unittest.TestCase):
         self.assertIn("DOC-309", pending_response.get_data(as_text=True))
         self.assertIn("1 pendiente(s)", pending_response.get_data(as_text=True))
         self.assertIn("Tiene 1 documento(s) pendiente(s)", index_response.get_data(as_text=True))
+
+    def test_documental_reviewer_can_access_assigned_review_pending(self):
+        _, expected = self.add_version(312, "EN_REVISION", assigned_to=206)
+        self.add_version(313, "EN_REVISION", assigned_to=201)
+        reviewer = db.session.get(Usuario, 206)
+
+        pending = get_pending_documents_for_user(reviewer)
+        response = self.login(206).get("/documentacion/pendientes")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual([item.id for item in pending], [expected.id])
+        self.assertEqual(count_pending_documents_for_user(reviewer), 1)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("DOC-312", body)
+        self.assertNotIn("DOC-313", body)
+        self.assertIn("1 pendiente(s)", body)
+
+    def test_documental_reviewer_sidebar_badge_reflects_assigned_pending(self):
+        self.add_version(314, "EN_REVISION", assigned_to=206)
+
+        response = self.login(206).get("/documentacion/")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Mis pendientes", body)
+        self.assertIn("Tiene 1 documento(s) pendiente(s)", body)
+        self.assertIn('<span class="badge bg-danger ms-1">1</span>', body)
+
+    def test_user_with_view_only_does_not_see_pending_link(self):
+        self.add_version(315, "EN_REVISION", assigned_to=201)
+
+        response = self.login(202).get("/documentacion/")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Mis pendientes", body)
+        self.assertEqual(self.login(202).get("/documentacion/pendientes").status_code, 403)
+
+    def test_documental_reviewer_can_open_detail_for_assigned_pending(self):
+        document, _ = self.add_version(316, "EN_REVISION", assigned_to=206)
+
+        response = self.login(206).get(f"/documentacion/{document.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("DOC-316", response.get_data(as_text=True))
 
     def test_empty_pending_page_has_friendly_message(self):
         response = self.login(201).get("/documentacion/pendientes")

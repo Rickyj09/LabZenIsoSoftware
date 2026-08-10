@@ -280,6 +280,7 @@
                 {% endif %}
             </a>
 
+            {% if can('documentos.ver_pendientes') %}
             <a class="sidebar-link {% if request.endpoint == 'documentacion.pendientes' %}active{% endif %}"
                href="{{ url_for('documentacion.pendientes') }}">
                 Mis pendientes
@@ -287,6 +288,7 @@
                 <span class="badge bg-danger ms-1">{{ documental_pending_count }}</span>
                 {% endif %}
             </a>
+            {% endif %}
 
             <button class="sidebar-group-btn"
                     type="button"
