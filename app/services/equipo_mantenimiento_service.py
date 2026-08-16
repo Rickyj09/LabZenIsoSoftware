@@ -429,6 +429,8 @@ def mantenimientos_proximos(user, today=None, days=30, equipo_id=None):
 def vincular_evidencia_documental(user, mantenimiento_id, documento_id, documento_version_id, tipo_evidencia, observaciones=None):
     _require_permission(user, PERM_VINCULAR_EVIDENCIA)
     maintenance = _get_mantenimiento(user, mantenimiento_id)
+    if maintenance.estado == "COMPLETADO":
+        raise EquipoMantenimientoError("No se pueden modificar evidencias de un mantenimiento completado.")
     if maintenance.estado == "CANCELADO":
         raise EquipoMantenimientoError("No se pueden vincular evidencias a mantenimientos cancelados.")
     document = Documento.query.filter_by(id=documento_id, empresa_id=user.empresa_id).first()
@@ -467,11 +469,14 @@ def desvincular_evidencia_documental(user, evidencia_id, motivo=None):
         "La evidencia no pertenece a esta empresa.",
     )
     maintenance = evidence.mantenimiento
+    if maintenance.estado == "COMPLETADO":
+        raise EquipoMantenimientoError("No se pueden modificar evidencias de un mantenimiento completado.")
+    if maintenance.estado == "CANCELADO":
+        raise EquipoMantenimientoError("No se pueden modificar evidencias de un mantenimiento cancelado.")
     document_code = evidence.documento.codigo if evidence.documento else str(evidence.documento_id)
     version_label = evidence.documento_version.version if evidence.documento_version else str(evidence.documento_version_id)
     description = f"Evidencia desvinculada de {maintenance.codigo}: {document_code} v{version_label}."
-    if maintenance.estado == "COMPLETADO":
-        description += f" Motivo: {_clean(motivo) or 'No especificado'}."
+    description += f" Motivo: {_clean(motivo) or 'No especificado'}."
     _record_event(user, maintenance.equipo, "EVIDENCIA_MANTENIMIENTO_DESVINCULADA", description)
     db.session.delete(evidence)
     return True

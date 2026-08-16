@@ -65,15 +65,57 @@
         {% endif %}
         <div class="page-card mb-4">
             <h5 class="mb-3">Evidencias documentales</h5>
-            {% if item.estado != 'CANCELADO' and can('equipos.mantenimientos.evidencias.vincular') %}
+            {% set evidencias_editables = item.estado in ['PROGRAMADO', 'EN_PROCESO'] %}
+            {% if evidencias_editables and can('equipos.mantenimientos.evidencias.vincular') %}
             <form method="post" action="{{ url_for('equipamiento.vincular_evidencia_mantenimiento', item_id=item.id) }}" class="row g-2 mb-3">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div class="col-md-5"><label class="form-label">Documento</label><select name="documento_id" class="form-select" required><option value="">Selecciona documento</option>{% for doc in documentos %}<option value="{{ doc.id }}">{{ doc.codigo }} - {{ doc.titulo }}</option>{% endfor %}</select></div>
-                <div class="col-md-4"><label class="form-label">Version</label><select name="documento_version_id" class="form-select" required><option value="">Selecciona version</option>{% for version in document_versions %}<option value="{{ version.id }}">{{ version.documento.codigo }} v{{ version.version }} - {{ version.documento.titulo }}</option>{% endfor %}</select></div>
+                <div class="col-md-5"><label class="form-label">Documento</label><select name="documento_id" class="form-select" id="evidencia-documento-select" required><option value="">Selecciona documento</option>{% for doc in documentos %}<option value="{{ doc.id }}">{{ doc.codigo }} - {{ doc.titulo }}</option>{% endfor %}</select></div>
+                <div class="col-md-4"><label class="form-label">Version</label><select name="documento_version_id" class="form-select" id="evidencia-version-select" required disabled><option value="">Selecciona documento primero</option></select></div>
                 <div class="col-md-3"><label class="form-label">Tipo</label><input name="tipo_evidencia" class="form-control" required></div>
                 <div class="col-md-9"><input name="observaciones" class="form-control" placeholder="Observaciones"></div>
                 <div class="col-md-3"><button class="btn btn-outline-primary w-100">Vincular</button></div>
             </form>
+            <script type="application/json" id="evidencia-versiones-data">[
+                {% for version in document_versions %}
+                {"id": {{ version.id|tojson }}, "documento_id": {{ version.documento_id|tojson }}, "label": {{ (version.documento.codigo ~ ' v' ~ version.version ~ ' - ' ~ version.documento.titulo)|tojson }}}{% if not loop.last %},{% endif %}
+                {% endfor %}
+            ]</script>
+            <script>
+                (() => {
+                    const documentSelect = document.getElementById("evidencia-documento-select");
+                    const versionSelect = document.getElementById("evidencia-version-select");
+                    const versionsData = document.getElementById("evidencia-versiones-data");
+                    if (!documentSelect || !versionSelect || !versionsData) return;
+
+                    const versions = JSON.parse(versionsData.textContent || "[]");
+                    const resetVersions = (placeholder) => {
+                        versionSelect.innerHTML = "";
+                        const option = document.createElement("option");
+                        option.value = "";
+                        option.textContent = placeholder;
+                        versionSelect.appendChild(option);
+                        versionSelect.value = "";
+                    };
+
+                    const renderVersions = () => {
+                        const documentId = documentSelect.value;
+                        resetVersions(documentId ? "Selecciona version" : "Selecciona documento primero");
+                        versionSelect.disabled = !documentId;
+                        if (!documentId) return;
+                        versions
+                            .filter((version) => String(version.documento_id) === String(documentId))
+                            .forEach((version) => {
+                                const option = document.createElement("option");
+                                option.value = version.id;
+                                option.textContent = version.label;
+                                versionSelect.appendChild(option);
+                            });
+                    };
+
+                    documentSelect.addEventListener("change", renderVersions);
+                    renderVersions();
+                })();
+            </script>
             {% endif %}
             <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Documento</th><th>Version</th><th>Tipo</th><th>Usuario</th><th>Fecha</th><th></th></tr></thead><tbody>
             {% for evidence in item.evidencias %}
@@ -83,7 +125,7 @@
                     <td>{{ evidence.tipo_evidencia }}</td>
                     <td>{{ evidence.vinculado_por.nombre if evidence.vinculado_por else '-' }}</td>
                     <td>{{ evidence.created_at.strftime('%Y-%m-%d') if evidence.created_at else '' }}</td>
-                    <td class="text-end">{% if can('equipos.mantenimientos.evidencias.desvincular') %}<form method="post" action="{{ url_for('equipamiento.desvincular_evidencia_mantenimiento', evidencia_id=evidence.id) }}" onsubmit="return confirm('Desvincular esta evidencia?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="motivo" value="Desvinculacion desde detalle"><button class="btn btn-sm btn-outline-danger">Desvincular</button></form>{% endif %}</td>
+                    <td class="text-end">{% if evidencias_editables and can('equipos.mantenimientos.evidencias.desvincular') %}<form method="post" action="{{ url_for('equipamiento.desvincular_evidencia_mantenimiento', evidencia_id=evidence.id) }}" onsubmit="return confirm('Desvincular esta evidencia?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="motivo" value="Desvinculacion desde detalle"><button class="btn btn-sm btn-outline-danger">Desvincular</button></form>{% endif %}</td>
                 </tr>
             {% else %}
                 <tr><td colspan="6" class="text-center text-muted py-3">Sin evidencias vinculadas.</td></tr>

@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import json
 from datetime import date
 
 from sqlalchemy import event, inspect
@@ -208,6 +209,30 @@ class Equipamiento5BModelsTest(unittest.TestCase):
             estado="APROBADO",
             elaborado_por_id=201,
             archivo_storage_path="empresa_101/documento/evidencia.pdf",
+        )
+        db.session.add_all([document, version])
+        db.session.flush()
+        return document, version
+
+    def add_second_company_document_version(self):
+        document = Documento(
+            id=503,
+            empresa_id=101,
+            codigo="DOC-MANT-2",
+            titulo="Evidencia alternativa",
+            tipo_documento="REGISTRO",
+            estado="APROBADO",
+            version_actual="1",
+            elaborado_por_id=201,
+        )
+        version = DocumentoVersion(
+            id=1503,
+            empresa_id=101,
+            documento_id=503,
+            version="1",
+            estado="APROBADO",
+            elaborado_por_id=201,
+            archivo_storage_path="empresa_101/documento/evidencia-alternativa.pdf",
         )
         db.session.add_all([document, version])
         db.session.flush()
@@ -724,7 +749,7 @@ class Equipamiento5BModelsTest(unittest.TestCase):
         admin = self.user(201)
         technician = self.user(203)
         maintenance = self.add_maintenance(codigo="MANT-EVID")
-        maintenance.estado = "COMPLETADO"
+        maintenance.estado = "EN_PROCESO"
         document, version = self.add_document_version()
         db.session.commit()
 
@@ -756,18 +781,59 @@ class Equipamiento5BModelsTest(unittest.TestCase):
         self.assertIsNotNone(db.session.get(DocumentoVersion, version.id))
         self.assertTrue(EquipoHistorial.query.filter_by(tipo_evento="EVIDENCIA_MANTENIMIENTO_DESVINCULADA").first())
 
+    def test_service_rejects_link_and_unlink_evidence_when_completed_without_mutating(self):
+        admin = self.user(201)
+        maintenance = self.add_maintenance(codigo="MANT-EVID-CLOSED")
+        maintenance.estado = "COMPLETADO"
+        document, version = self.add_document_version()
+        existing = EquipoMantenimientoDocumento(
+            empresa_id=101,
+            mantenimiento_id=maintenance.id,
+            documento_id=document.id,
+            documento_version_id=version.id,
+            tipo_evidencia="INFORME",
+            vinculado_por_id=201,
+        )
+        db.session.add(existing)
+        db.session.commit()
+        initial_events = EquipoHistorial.query.filter(
+            EquipoHistorial.tipo_evento.in_([
+                "EVIDENCIA_MANTENIMIENTO_VINCULADA",
+                "EVIDENCIA_MANTENIMIENTO_DESVINCULADA",
+            ])
+        ).count()
+
+        with self.assertRaisesRegex(EquipoMantenimientoError, "mantenimiento completado"):
+            maintenance_service.vincular_evidencia_documental(admin, maintenance.id, document.id, version.id, "DUP")
+        with self.assertRaisesRegex(EquipoMantenimientoError, "mantenimiento completado"):
+            maintenance_service.desvincular_evidencia_documental(admin, existing.id, "Retiro posterior")
+        db.session.rollback()
+
+        self.assertIsNotNone(db.session.get(EquipoMantenimientoDocumento, existing.id))
+        self.assertEqual(EquipoMantenimientoDocumento.query.filter_by(mantenimiento_id=maintenance.id).count(), 1)
+        self.assertEqual(
+            EquipoHistorial.query.filter(
+                EquipoHistorial.tipo_evento.in_([
+                    "EVIDENCIA_MANTENIMIENTO_VINCULADA",
+                    "EVIDENCIA_MANTENIMIENTO_DESVINCULADA",
+                ])
+            ).count(),
+            initial_events,
+        )
+
     def test_service_rejects_invalid_evidence_company_version_cancelled_and_consultation_actions(self):
         admin = self.user(201)
         consultation = self.user(204)
         maintenance = self.add_maintenance(codigo="MANT-EVID-ERR")
         document, version = self.add_document_version()
+        _other_same_company_document, other_same_company_version = self.add_second_company_document_version()
         other_document, other_version = self.add_other_company_document_version()
         db.session.commit()
 
         with self.assertRaises(EquipoMantenimientoError):
             maintenance_service.vincular_evidencia_documental(admin, maintenance.id, other_document.id, other_version.id, "INFORME")
         with self.assertRaises(EquipoMantenimientoError):
-            maintenance_service.vincular_evidencia_documental(admin, maintenance.id, document.id, other_version.id, "INFORME")
+            maintenance_service.vincular_evidencia_documental(admin, maintenance.id, document.id, other_same_company_version.id, "INFORME")
 
         maintenance.estado = "CANCELADO"
         db.session.commit()
@@ -799,11 +865,6 @@ class Equipamiento5BModelsTest(unittest.TestCase):
 
         order = maintenance_service.programar_mantenimiento_desde_plan(technician, plan.id, date(2026, 8, 18))
         maintenance_service.iniciar_mantenimiento(technician, order.id, date(2026, 8, 18))
-        maintenance_service.completar_mantenimiento(technician, order.id, {
-            "fecha_finalizacion": date(2026, 8, 18),
-            "descripcion_trabajo": "Trabajo tecnico",
-            "resultado": "OK",
-        })
         evidence_doc, evidence_version = self.add_document_version()
         evidence = maintenance_service.vincular_evidencia_documental(
             technician, order.id, evidence_doc.id, evidence_version.id, "REGISTRO"
@@ -811,6 +872,11 @@ class Equipamiento5BModelsTest(unittest.TestCase):
         with self.assertRaises(EquipoMantenimientoError):
             maintenance_service.desvincular_evidencia_documental(technician, evidence.id)
         maintenance_service.desvincular_evidencia_documental(quality, evidence.id, "Retiro autorizado")
+        maintenance_service.completar_mantenimiento(technician, order.id, {
+            "fecha_finalizacion": date(2026, 8, 18),
+            "descripcion_trabajo": "Trabajo tecnico",
+            "resultado": "OK",
+        })
         new_plan = maintenance_service.crear_plan_preventivo(admin, {
             "equipo_id": 401,
             "codigo": "PM-ADMIN",
@@ -996,10 +1062,20 @@ class Equipamiento5BModelsTest(unittest.TestCase):
         tech_client = self.login(203)
         maintenance = self.add_maintenance(codigo="MANT-WEB-EVID")
         document, version = self.add_document_version()
+        other_same_company_document, other_same_company_version = self.add_second_company_document_version()
         other_document, other_version = self.add_other_company_document_version()
         db.session.commit()
 
-        tech_client.get(f"/equipamiento/mantenimientos/{maintenance.id}")
+        detail_response = tech_client.get(f"/equipamiento/mantenimientos/{maintenance.id}")
+        detail_body = detail_response.get_data(as_text=True)
+        self.assertIn('id="evidencia-documento-select"', detail_body)
+        self.assertIn('id="evidencia-version-select" required disabled', detail_body)
+        version_data = detail_body.split('<script type="application/json" id="evidencia-versiones-data">', 1)[1].split("</script>", 1)[0]
+        versions = json.loads(version_data)
+        self.assertIn({"id": version.id, "documento_id": document.id, "label": "DOC-MANT v1 - Evidencia de mantenimiento"}, versions)
+        self.assertIn({"id": other_same_company_version.id, "documento_id": other_same_company_document.id, "label": "DOC-MANT-2 v1 - Evidencia alternativa"}, versions)
+        self.assertNotIn("DOC-OTRA v1 - Documento otra empresa", detail_body)
+
         token = self.csrf_token(tech_client)
         bad = tech_client.post(f"/equipamiento/mantenimientos/{maintenance.id}/evidencias", data={
             "csrf_token": token,
@@ -1062,6 +1138,52 @@ class Equipamiento5BModelsTest(unittest.TestCase):
         self.assertIsNone(db.session.get(EquipoMantenimientoDocumento, evidence.id))
         self.assertIsNotNone(db.session.get(Documento, document.id))
         self.assertIsNotNone(db.session.get(DocumentoVersion, version.id))
+
+    def test_web_completed_maintenance_shows_evidence_read_only_and_rejects_mutations(self):
+        admin_client = self.login(201)
+        maintenance = self.add_maintenance(codigo="MANT-WEB-CLOSED")
+        maintenance.estado = "COMPLETADO"
+        document, version = self.add_document_version()
+        other_document, other_version = self.add_second_company_document_version()
+        evidence = EquipoMantenimientoDocumento(
+            empresa_id=101,
+            mantenimiento_id=maintenance.id,
+            documento_id=document.id,
+            documento_version_id=version.id,
+            tipo_evidencia="INFORME",
+            observaciones="Evidencia historica",
+            vinculado_por_id=201,
+        )
+        db.session.add(evidence)
+        db.session.commit()
+
+        detail = admin_client.get(f"/equipamiento/mantenimientos/{maintenance.id}")
+        body = detail.get_data(as_text=True)
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn("DOC-MANT", body)
+        self.assertIn("Evidencia historica", body)
+        self.assertNotIn('id="evidencia-documento-select"', body)
+        self.assertNotIn("Vincular", body)
+        self.assertNotIn("Desvincular", body)
+        token = self.csrf_token(admin_client)
+
+        response = admin_client.post(f"/equipamiento/mantenimientos/{maintenance.id}/evidencias", data={
+            "csrf_token": token,
+            "documento_id": other_document.id,
+            "documento_version_id": other_version.id,
+            "tipo_evidencia": "INFORME",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(EquipoMantenimientoDocumento.query.filter_by(mantenimiento_id=maintenance.id).count(), 1)
+        self.assertIsNotNone(db.session.get(EquipoMantenimientoDocumento, evidence.id))
+
+        response = admin_client.post(f"/equipamiento/mantenimientos/evidencias/{evidence.id}/desvincular", data={
+            "csrf_token": token,
+            "motivo": "Retiro web posterior",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(EquipoMantenimientoDocumento.query.filter_by(mantenimiento_id=maintenance.id).count(), 1)
+        self.assertIsNotNone(db.session.get(EquipoMantenimientoDocumento, evidence.id))
 
 
 if __name__ == "__main__":
