@@ -18,6 +18,10 @@ TIPOS_MANTENIMIENTO_EQUIPO = ("PREVENTIVO", "CORRECTIVO")
 
 ESTADOS_MANTENIMIENTO_EQUIPO = ("PROGRAMADO", "EN_PROCESO", "COMPLETADO", "CANCELADO")
 
+TIPOS_CONTROL_METROLOGICO = ("CALIBRACION", "VERIFICACION")
+
+ESTADOS_CALIBRACION_EQUIPO = ("PROGRAMADO", "EN_PROCESO", "COMPLETADO", "CANCELADO")
+
 TIPOS_EVENTO_EQUIPO = (
     "CREACION",
     "ACTUALIZACION",
@@ -37,6 +41,16 @@ TIPOS_EVENTO_EQUIPO = (
     "MANTENIMIENTO_CANCELADO",
     "EVIDENCIA_MANTENIMIENTO_VINCULADA",
     "EVIDENCIA_MANTENIMIENTO_DESVINCULADA",
+    "CALIBRACION_PROGRAMADA",
+    "VERIFICACION_PROGRAMADA",
+    "CALIBRACION_INICIADA",
+    "VERIFICACION_INICIADA",
+    "CALIBRACION_COMPLETADA",
+    "VERIFICACION_COMPLETADA",
+    "CALIBRACION_CANCELADA",
+    "VERIFICACION_CANCELADA",
+    "EVIDENCIA_CALIBRACION_VINCULADA",
+    "EVIDENCIA_CALIBRACION_DESVINCULADA",
 )
 
 
@@ -164,18 +178,69 @@ class Equipo(TenantMixin, BaseModel):
 
 class EquipoCalibracion(TenantMixin, BaseModel):
     __tablename__ = "equipo_calibraciones"
+    __table_args__ = (
+        db.UniqueConstraint("empresa_id", "codigo", name="uq_equipo_calibracion_empresa_codigo"),
+        db.CheckConstraint("tipo_control IN ('CALIBRACION', 'VERIFICACION')", name="ck_equipo_calibracion_tipo_valido"),
+        db.CheckConstraint("estado IN ('PROGRAMADO', 'EN_PROCESO', 'COMPLETADO', 'CANCELADO')", name="ck_equipo_calibracion_estado_valido"),
+        db.CheckConstraint("costo IS NULL OR costo >= 0", name="ck_equipo_calibracion_costo_no_negativo"),
+        db.Index("ix_equipo_calibracion_empresa_estado", "empresa_id", "estado"),
+        db.Index("ix_equipo_calibracion_empresa_fecha_planificada", "empresa_id", "fecha_planificada"),
+        db.Index("ix_equipo_calibracion_empresa_equipo_estado", "empresa_id", "equipo_id", "estado"),
+    )
 
     equipo_id = db.Column(db.BigInteger, db.ForeignKey("equipos.id"), nullable=False)
-    fecha_calibracion = db.Column(db.Date, nullable=False)
+    codigo = db.Column(db.String(50), nullable=False)
+    tipo_control = db.Column(db.String(30), nullable=False)
+    estado = db.Column(db.String(30), nullable=False, default="PROGRAMADO")
+    fecha_planificada = db.Column(db.Date, nullable=False)
+    fecha_calibracion = db.Column(db.Date)
+    fecha_inicio = db.Column(db.Date)
+    fecha_finalizacion = db.Column(db.Date)
     fecha_proxima = db.Column(db.Date)
+    periodicidad_meses = db.Column(db.Integer)
     proveedor = db.Column(db.String(150))
+    responsable_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
     resultado = db.Column(db.String(50))
     certificado_numero = db.Column(db.String(100))
     archivo_url = db.Column(db.String(255))
+    costo = db.Column(db.Numeric(12, 2))
+    moneda = db.Column(db.String(3))
+    cancelado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    motivo_cancelacion = db.Column(db.Text)
     observaciones = db.Column(db.Text)
 
     empresa = db.relationship("Empresa")
     equipo = db.relationship("Equipo", back_populates="calibraciones")
+    responsable = db.relationship("Usuario", foreign_keys=[responsable_id])
+    cancelado_por = db.relationship("Usuario", foreign_keys=[cancelado_por_id])
+    evidencias = db.relationship(
+        "EquipoCalibracionDocumento",
+        back_populates="calibracion",
+        lazy=True,
+        cascade="all, delete-orphan",
+    )
+
+
+class EquipoCalibracionDocumento(TenantMixin, BaseModel):
+    __tablename__ = "equipo_calibracion_documentos"
+    __table_args__ = (
+        db.UniqueConstraint("calibracion_id", "documento_version_id", name="uq_equipo_calibracion_documento_version"),
+        db.Index("ix_equipo_calibracion_documentos_empresa_calibracion", "empresa_id", "calibracion_id"),
+        db.Index("ix_equipo_calibracion_documentos_documento_version_id", "documento_version_id"),
+    )
+
+    calibracion_id = db.Column(db.BigInteger, db.ForeignKey("equipo_calibraciones.id"), nullable=False)
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
+    documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
+    tipo_evidencia = db.Column(db.String(50), nullable=False)
+    observaciones = db.Column(db.Text)
+    vinculado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+
+    empresa = db.relationship("Empresa")
+    calibracion = db.relationship("EquipoCalibracion", back_populates="evidencias")
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    vinculado_por = db.relationship("Usuario", foreign_keys=[vinculado_por_id])
 
 
 class EquipoPlanMantenimiento(TenantMixin, BaseModel):
@@ -306,7 +371,7 @@ class EquipoHistorial(TenantMixin, BaseModel):
     __tablename__ = "equipo_historial"
     __table_args__ = (
         db.CheckConstraint(
-            "tipo_evento IN ('CREACION', 'ACTUALIZACION', 'CAMBIO_UBICACION', 'CAMBIO_RESPONSABLE', 'CAMBIO_ESTADO_OPERATIVO', 'RETIRO', 'REACTIVACION', 'VINCULO_DOCUMENTO', 'PLAN_MANTENIMIENTO_CREADO', 'PLAN_MANTENIMIENTO_ACTUALIZADO', 'PLAN_MANTENIMIENTO_INACTIVADO', 'MANTENIMIENTO_PROGRAMADO', 'MANTENIMIENTO_CORRECTIVO_CREADO', 'MANTENIMIENTO_INICIADO', 'MANTENIMIENTO_COMPLETADO', 'MANTENIMIENTO_CANCELADO', 'EVIDENCIA_MANTENIMIENTO_VINCULADA', 'EVIDENCIA_MANTENIMIENTO_DESVINCULADA')",
+            "tipo_evento IN ('CREACION', 'ACTUALIZACION', 'CAMBIO_UBICACION', 'CAMBIO_RESPONSABLE', 'CAMBIO_ESTADO_OPERATIVO', 'RETIRO', 'REACTIVACION', 'VINCULO_DOCUMENTO', 'PLAN_MANTENIMIENTO_CREADO', 'PLAN_MANTENIMIENTO_ACTUALIZADO', 'PLAN_MANTENIMIENTO_INACTIVADO', 'MANTENIMIENTO_PROGRAMADO', 'MANTENIMIENTO_CORRECTIVO_CREADO', 'MANTENIMIENTO_INICIADO', 'MANTENIMIENTO_COMPLETADO', 'MANTENIMIENTO_CANCELADO', 'EVIDENCIA_MANTENIMIENTO_VINCULADA', 'EVIDENCIA_MANTENIMIENTO_DESVINCULADA', 'CALIBRACION_PROGRAMADA', 'VERIFICACION_PROGRAMADA', 'CALIBRACION_INICIADA', 'VERIFICACION_INICIADA', 'CALIBRACION_COMPLETADA', 'VERIFICACION_COMPLETADA', 'CALIBRACION_CANCELADA', 'VERIFICACION_CANCELADA', 'EVIDENCIA_CALIBRACION_VINCULADA', 'EVIDENCIA_CALIBRACION_DESVINCULADA')",
             name="ck_equipo_historial_tipo_evento_valido",
         ),
         db.Index("ix_equipo_historial_equipo_id", "equipo_id"),

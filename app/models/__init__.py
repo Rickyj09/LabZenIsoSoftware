@@ -15,6 +15,7 @@ from app.models.equipos import (
     AreaAmbiente,
     Equipo,
     EquipoCalibracion,
+    EquipoCalibracionDocumento,
     EquipoDocumento,
     EquipoHistorial,
     EquipoMantenimiento,
