@@ -39,6 +39,8 @@ MAX_PING_CONTENT_LENGTH = 4096
 def _onlyoffice_public_config():
     return {
         "enabled": bool(current_app.config["ONLYOFFICE_ENABLED"]),
+        "edit_enabled": bool(current_app.config["ONLYOFFICE_EDIT_ENABLED"]),
+        "conversion_enabled": bool(current_app.config["ONLYOFFICE_CONVERSION_ENABLED"]),
         "public_url": current_app.config["ONLYOFFICE_PUBLIC_URL"],
         "internal_url": current_app.config["ONLYOFFICE_INTERNAL_URL"],
         "callback_base_url": current_app.config["ONLYOFFICE_CALLBACK_BASE_URL"],

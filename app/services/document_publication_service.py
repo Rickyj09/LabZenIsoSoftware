@@ -1,7 +1,7 @@
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 from uuid import uuid4
 
 from flask import current_app, has_request_context, url_for
@@ -16,6 +16,7 @@ from app.models.documentos import (
     ESTADO_VIGENTE,
     FIRMA_PROCESO_COMPLETADO,
     PUBLICACION_ACCESO_AUTENTICADO,
+    PUBLICACION_ACCESO_TOKEN_PUBLICO,
     PUBLICACION_ACTIVA,
     PUBLICACION_OBSOLETA,
     PUBLICACION_PREPARADA,
@@ -423,7 +424,17 @@ class DocumentPublicationService:
                 **(publicacion.metadata_json or {}),
                 "canonical_url_warning": warning,
             }
-        return f"{base}{path}"
+        publication_url = f"{base}{path}"
+
+        if publicacion.modo_acceso == PUBLICACION_ACCESO_TOKEN_PUBLICO:
+            token = (publicacion.token or "").strip()
+            if not token:
+                raise DocumentPublicationError(
+                    "La publicacion TOKEN_PUBLICO requiere un token."
+                )
+            return f"{publication_url}?{urlencode({'token': token})}"
+
+        return publication_url
 
     def _refresh_publication_url(self, publicacion):
         publicacion.qr_payload = self._absolute_publication_url(publicacion)
