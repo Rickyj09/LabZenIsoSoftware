@@ -392,7 +392,7 @@ def instalaciones():
         like = f"%{q}%"
         query = query.filter(or_(Instalacion.codigo.ilike(like), Instalacion.nombre.ilike(like), Instalacion.responsable.ilike(like)))
     items = query.order_by(Instalacion.codigo.asc()).all()
-    return render_template("equipamiento/instalaciones_index.html", items=items, q=q, estado=estado)
+    return render_template("equipamiento/instalaciones_index.html", items=items, q=q, estado=estado, csrf_token=_maintenance_csrf_token())
 
 
 @bp.route("/instalaciones/nueva", methods=["GET", "POST"])
@@ -400,6 +400,7 @@ def instalaciones():
 @require_permission("instalaciones.crear")
 def nueva_instalacion():
     if request.method == "POST":
+        _validate_maintenance_csrf()
         try:
             item = create_instalacion(current_user, request.form)
             db.session.commit()
@@ -408,8 +409,8 @@ def nueva_instalacion():
         except EquipamientoError as exc:
             db.session.rollback()
             flash(str(exc), "warning")
-            return render_template("equipamiento/instalacion_form.html", item=None, form_data=request.form)
-    return render_template("equipamiento/instalacion_form.html", item=None, form_data={})
+            return render_template("equipamiento/instalacion_form.html", item=None, form_data=request.form, csrf_token=_maintenance_csrf_token())
+    return render_template("equipamiento/instalacion_form.html", item=None, form_data={}, csrf_token=_maintenance_csrf_token())
 
 
 @bp.route("/instalaciones/<int:item_id>/editar", methods=["GET", "POST"])
@@ -420,6 +421,7 @@ def editar_instalacion(item_id):
     if not item:
         abort(404)
     if request.method == "POST":
+        _validate_maintenance_csrf()
         try:
             update_instalacion(current_user, item, request.form)
             db.session.commit()
@@ -428,14 +430,15 @@ def editar_instalacion(item_id):
         except EquipamientoError as exc:
             db.session.rollback()
             flash(str(exc), "warning")
-            return render_template("equipamiento/instalacion_form.html", item=item, form_data=request.form)
-    return render_template("equipamiento/instalacion_form.html", item=item, form_data={})
+            return render_template("equipamiento/instalacion_form.html", item=item, form_data=request.form, csrf_token=_maintenance_csrf_token())
+    return render_template("equipamiento/instalacion_form.html", item=item, form_data={}, csrf_token=_maintenance_csrf_token())
 
 
 @bp.route("/instalaciones/<int:item_id>/inactivar", methods=["POST"])
 @login_required
 @require_permission("instalaciones.inactivar")
 def inactivar_instalacion(item_id):
+    _validate_maintenance_csrf()
     item = get_instalacion(current_user, item_id)
     if not item:
         abort(404)
@@ -467,6 +470,7 @@ def areas():
         estado=estado,
         instalacion_id=instalacion_id,
         instalaciones=active_instalaciones(current_user),
+        csrf_token=_maintenance_csrf_token(),
     )
 
 
@@ -475,6 +479,7 @@ def areas():
 @require_permission("areas.crear")
 def nueva_area():
     if request.method == "POST":
+        _validate_maintenance_csrf()
         try:
             create_area(current_user, request.form)
             db.session.commit()
@@ -483,8 +488,8 @@ def nueva_area():
         except EquipamientoError as exc:
             db.session.rollback()
             flash(str(exc), "warning")
-            return render_template("equipamiento/area_form.html", item=None, form_data=request.form, instalaciones=active_instalaciones(current_user))
-    return render_template("equipamiento/area_form.html", item=None, form_data={}, instalaciones=active_instalaciones(current_user))
+            return render_template("equipamiento/area_form.html", item=None, form_data=request.form, instalaciones=active_instalaciones(current_user), csrf_token=_maintenance_csrf_token())
+    return render_template("equipamiento/area_form.html", item=None, form_data={}, instalaciones=active_instalaciones(current_user), csrf_token=_maintenance_csrf_token())
 
 
 @bp.route("/areas/<int:item_id>/editar", methods=["GET", "POST"])
@@ -495,6 +500,7 @@ def editar_area(item_id):
     if not item:
         abort(404)
     if request.method == "POST":
+        _validate_maintenance_csrf()
         try:
             update_area(current_user, item, request.form)
             db.session.commit()
@@ -503,14 +509,15 @@ def editar_area(item_id):
         except EquipamientoError as exc:
             db.session.rollback()
             flash(str(exc), "warning")
-            return render_template("equipamiento/area_form.html", item=item, form_data=request.form, instalaciones=active_instalaciones(current_user))
-    return render_template("equipamiento/area_form.html", item=item, form_data={}, instalaciones=active_instalaciones(current_user))
+            return render_template("equipamiento/area_form.html", item=item, form_data=request.form, instalaciones=active_instalaciones(current_user), csrf_token=_maintenance_csrf_token())
+    return render_template("equipamiento/area_form.html", item=item, form_data={}, instalaciones=active_instalaciones(current_user), csrf_token=_maintenance_csrf_token())
 
 
 @bp.route("/areas/<int:item_id>/inactivar", methods=["POST"])
 @login_required
 @require_permission("areas.inactivar")
 def inactivar_area(item_id):
+    _validate_maintenance_csrf()
     item = get_area(current_user, item_id)
     if not item:
         abort(404)
@@ -771,6 +778,7 @@ def _equipo_form_context(item=None, form_data=None):
     return {
         "item": item,
         "form_data": form_data or {},
+        "csrf_token": _maintenance_csrf_token(),
         "instalaciones": active_instalaciones(current_user),
         "areas": active_areas(current_user),
         "estados_operativos": ESTADOS_OPERATIVOS_EQUIPO,
@@ -1470,6 +1478,7 @@ def programar_plan_mantenimiento(plan_id):
 @require_permission("equipos.crear")
 def nuevo_equipo():
     if request.method == "POST":
+        _validate_maintenance_csrf()
         try:
             item = create_equipo(current_user, request.form)
             db.session.commit()
@@ -1489,6 +1498,7 @@ def detalle_equipo(item_id):
     item = get_equipo(current_user, item_id)
     if not item:
         abort(404)
+    csrf_token = _maintenance_csrf_token()
     metrologia_items = (
         EquipoCalibracion.query
         .filter_by(empresa_id=current_user.empresa_id, equipo_id=item.id)
@@ -1508,6 +1518,7 @@ def detalle_equipo(item_id):
         estados_operativos=ESTADOS_OPERATIVOS_EQUIPO,
         document_versions=document_versions,
         metrologia_items=metrologia_items,
+        csrf_token=csrf_token,
         estado_calibracion_badge_class=_estado_calibracion_badge_class,
         equipo_history_change_labels=equipo_history_change_labels,
     )
@@ -1521,6 +1532,7 @@ def editar_equipo(item_id):
     if not item:
         abort(404)
     if request.method == "POST":
+        _validate_maintenance_csrf()
         try:
             update_equipo(current_user, item, request.form)
             db.session.commit()
@@ -1537,6 +1549,7 @@ def editar_equipo(item_id):
 @login_required
 @require_permission("equipos.cambiar_estado")
 def cambiar_estado_equipo(item_id):
+    _validate_maintenance_csrf()
     item = get_equipo(current_user, item_id)
     if not item:
         abort(404)
@@ -1554,6 +1567,7 @@ def cambiar_estado_equipo(item_id):
 @login_required
 @require_permission("equipos.inactivar")
 def inactivar_equipo(item_id):
+    _validate_maintenance_csrf()
     item = get_equipo(current_user, item_id)
     if not item:
         abort(404)
@@ -1567,6 +1581,7 @@ def inactivar_equipo(item_id):
 @login_required
 @require_permission("equipos.documentos.vincular")
 def vincular_documento_equipo(item_id):
+    _validate_maintenance_csrf()
     item = get_equipo(current_user, item_id)
     if not item:
         abort(404)

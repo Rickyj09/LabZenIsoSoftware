@@ -51,6 +51,7 @@
                         {% if can('instalaciones.editar') %}<a href="{{ url_for('equipamiento.editar_instalacion', item_id=item.id) }}" class="btn btn-sm btn-outline-primary">Editar</a>{% endif %}
                         {% if item.estado == 'activo' and can('instalaciones.inactivar') %}
                         <form method="post" action="{{ url_for('equipamiento.inactivar_instalacion', item_id=item.id) }}" class="d-inline" onsubmit="return confirm('Inactivar instalacion?');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <button class="btn btn-sm btn-outline-danger">Inactivar</button>
                         </form>
                         {% endif %}

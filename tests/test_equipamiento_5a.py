@@ -123,6 +123,10 @@ class Equipamiento5ATest(unittest.TestCase):
             session["_fresh"] = True
         return client
 
+    def csrf_token(self, client):
+        with client.session_transaction() as session:
+            return session["equipamiento_mantenimiento_csrf"]
+
     def user(self, user_id=201):
         return db.session.get(Usuario, user_id)
 
@@ -321,6 +325,179 @@ class Equipamiento5ATest(unittest.TestCase):
         self.assertEqual(client.get("/equipamiento/equipos").status_code, 200)
         self.assertEqual(client.get("/equipamiento/equipos/nuevo").status_code, 403)
 
+    def test_web_installation_mutations_require_valid_csrf(self):
+        client = self.login(201)
+        form = client.get("/equipamiento/instalaciones/nueva")
+        self.assertEqual(form.status_code, 200)
+        token = self.csrf_token(client)
+
+        missing = client.post("/equipamiento/instalaciones/nueva", data={"codigo": "LAB-NO-CSRF", "nombre": "Sin token"})
+        invalid = client.post("/equipamiento/instalaciones/nueva", data={"csrf_token": "bad-token", "codigo": "LAB-BAD-CSRF", "nombre": "Token invalido"})
+        self.assertEqual(missing.status_code, 403)
+        self.assertEqual(invalid.status_code, 403)
+        self.assertIsNone(Instalacion.query.filter_by(codigo="LAB-NO-CSRF").first())
+        self.assertIsNone(Instalacion.query.filter_by(codigo="LAB-BAD-CSRF").first())
+
+        created = client.post("/equipamiento/instalaciones/nueva", data={"csrf_token": token, "codigo": "LAB-CSRF", "nombre": "Laboratorio protegido"})
+        self.assertEqual(created.status_code, 302)
+        installation = Instalacion.query.filter_by(codigo="LAB-CSRF").one()
+
+        edit_form = client.get(f"/equipamiento/instalaciones/{installation.id}/editar")
+        self.assertEqual(edit_form.status_code, 200)
+        token = self.csrf_token(client)
+        rejected_edit = client.post(
+            f"/equipamiento/instalaciones/{installation.id}/editar",
+            data={"codigo": "LAB-CSRF", "nombre": "Nombre rechazado"},
+        )
+        self.assertEqual(rejected_edit.status_code, 403)
+        self.assertEqual(db.session.get(Instalacion, installation.id).nombre, "Laboratorio protegido")
+
+        accepted_edit = client.post(
+            f"/equipamiento/instalaciones/{installation.id}/editar",
+            data={"csrf_token": token, "codigo": "LAB-CSRF", "nombre": "Laboratorio editado"},
+        )
+        self.assertEqual(accepted_edit.status_code, 302)
+        self.assertEqual(db.session.get(Instalacion, installation.id).nombre, "Laboratorio editado")
+
+        rejected_inactivate = client.post(f"/equipamiento/instalaciones/{installation.id}/inactivar")
+        self.assertEqual(rejected_inactivate.status_code, 403)
+        self.assertEqual(db.session.get(Instalacion, installation.id).estado, "activo")
+
+        accepted_inactivate = client.post(f"/equipamiento/instalaciones/{installation.id}/inactivar", data={"csrf_token": token})
+        self.assertEqual(accepted_inactivate.status_code, 302)
+        self.assertEqual(db.session.get(Instalacion, installation.id).estado, "inactivo")
+
+    def test_web_area_mutations_require_valid_csrf(self):
+        installation, area = self.create_basic_location()
+        client = self.login(201)
+        form = client.get("/equipamiento/areas/nueva")
+        self.assertEqual(form.status_code, 200)
+        token = self.csrf_token(client)
+
+        missing = client.post("/equipamiento/areas/nueva", data={
+            "instalacion_id": str(installation.id),
+            "codigo": "AREA-NO-CSRF",
+            "nombre": "Area sin token",
+        })
+        invalid = client.post("/equipamiento/areas/nueva", data={
+            "csrf_token": "bad-token",
+            "instalacion_id": str(installation.id),
+            "codigo": "AREA-BAD-CSRF",
+            "nombre": "Area token invalido",
+        })
+        self.assertEqual(missing.status_code, 403)
+        self.assertEqual(invalid.status_code, 403)
+        self.assertIsNone(AreaAmbiente.query.filter_by(codigo="AREA-NO-CSRF").first())
+        self.assertIsNone(AreaAmbiente.query.filter_by(codigo="AREA-BAD-CSRF").first())
+
+        created = client.post("/equipamiento/areas/nueva", data={
+            "csrf_token": token,
+            "instalacion_id": str(installation.id),
+            "codigo": "AREA-CSRF",
+            "nombre": "Area protegida",
+            "requiere_control_ambiental": "1",
+        })
+        self.assertEqual(created.status_code, 302)
+        created_area = AreaAmbiente.query.filter_by(codigo="AREA-CSRF").one()
+
+        edit_form = client.get(f"/equipamiento/areas/{created_area.id}/editar")
+        self.assertEqual(edit_form.status_code, 200)
+        token = self.csrf_token(client)
+        rejected_edit = client.post(f"/equipamiento/areas/{created_area.id}/editar", data={
+            "instalacion_id": str(installation.id),
+            "codigo": "AREA-CSRF",
+            "nombre": "Area rechazada",
+        })
+        self.assertEqual(rejected_edit.status_code, 403)
+        self.assertEqual(db.session.get(AreaAmbiente, created_area.id).nombre, "Area protegida")
+
+        accepted_edit = client.post(f"/equipamiento/areas/{created_area.id}/editar", data={
+            "csrf_token": token,
+            "instalacion_id": str(installation.id),
+            "codigo": "AREA-CSRF",
+            "nombre": "Area editada",
+            "requiere_control_ambiental": "0",
+        })
+        self.assertEqual(accepted_edit.status_code, 302)
+        self.assertEqual(db.session.get(AreaAmbiente, created_area.id).nombre, "Area editada")
+
+        rejected_inactivate = client.post(f"/equipamiento/areas/{area.id}/inactivar")
+        self.assertEqual(rejected_inactivate.status_code, 403)
+        self.assertEqual(db.session.get(AreaAmbiente, area.id).estado, "activo")
+
+        accepted_inactivate = client.post(f"/equipamiento/areas/{area.id}/inactivar", data={"csrf_token": token})
+        self.assertEqual(accepted_inactivate.status_code, 302)
+        self.assertEqual(db.session.get(AreaAmbiente, area.id).estado, "inactivo")
+
+    def test_web_equipment_mutations_require_valid_csrf_and_preserve_history_on_reject(self):
+        installation, area = self.create_basic_location()
+        client = self.login(201)
+        form = client.get("/equipamiento/equipos/nuevo")
+        self.assertEqual(form.status_code, 200)
+        token = self.csrf_token(client)
+        equipment_payload = self.equipo_data(installation, area, code="EQ-CSRF")
+
+        missing = client.post("/equipamiento/equipos/nuevo", data={**equipment_payload, "codigo": "EQ-NO-CSRF"})
+        invalid = client.post("/equipamiento/equipos/nuevo", data={**equipment_payload, "csrf_token": "bad-token", "codigo": "EQ-BAD-CSRF"})
+        self.assertEqual(missing.status_code, 403)
+        self.assertEqual(invalid.status_code, 403)
+        self.assertIsNone(Equipo.query.filter_by(codigo="EQ-NO-CSRF").first())
+        self.assertIsNone(Equipo.query.filter_by(codigo="EQ-BAD-CSRF").first())
+
+        created = client.post("/equipamiento/equipos/nuevo", data={**equipment_payload, "csrf_token": token})
+        self.assertEqual(created.status_code, 302)
+        equipment = Equipo.query.filter_by(codigo="EQ-CSRF").one()
+
+        edit_form = client.get(f"/equipamiento/equipos/{equipment.id}/editar")
+        self.assertEqual(edit_form.status_code, 200)
+        token = self.csrf_token(client)
+        rejected_edit = client.post(
+            f"/equipamiento/equipos/{equipment.id}/editar",
+            data={**self.equipo_data(installation, area, code="EQ-CSRF"), "nombre": "Equipo rechazado"},
+        )
+        self.assertEqual(rejected_edit.status_code, 403)
+        self.assertEqual(db.session.get(Equipo, equipment.id).nombre, "Balanza analitica")
+
+        accepted_edit = client.post(
+            f"/equipamiento/equipos/{equipment.id}/editar",
+            data={**self.equipo_data(installation, area, code="EQ-CSRF"), "csrf_token": token, "nombre": "Equipo editado"},
+        )
+        self.assertEqual(accepted_edit.status_code, 302)
+        self.assertEqual(db.session.get(Equipo, equipment.id).nombre, "Equipo editado")
+
+        detail = client.get(f"/equipamiento/equipos/{equipment.id}")
+        self.assertEqual(detail.status_code, 200)
+        token = self.csrf_token(client)
+        history_count = EquipoHistorial.query.filter_by(equipo_id=equipment.id).count()
+        rejected_status = client.post(
+            f"/equipamiento/equipos/{equipment.id}/estado",
+            data={"estado_operativo": "FUERA_DE_SERVICIO", "descripcion": "Rechazado sin token"},
+        )
+        invalid_status = client.post(
+            f"/equipamiento/equipos/{equipment.id}/estado",
+            data={"csrf_token": "bad-token", "estado_operativo": "EN_MANTENIMIENTO", "descripcion": "Rechazado token invalido"},
+        )
+        self.assertEqual(rejected_status.status_code, 403)
+        self.assertEqual(invalid_status.status_code, 403)
+        self.assertEqual(db.session.get(Equipo, equipment.id).estado_operativo, "OPERATIVO")
+        self.assertEqual(EquipoHistorial.query.filter_by(equipo_id=equipment.id).count(), history_count)
+
+        accepted_status = client.post(
+            f"/equipamiento/equipos/{equipment.id}/estado",
+            data={"csrf_token": token, "estado_operativo": "FUERA_DE_SERVICIO", "descripcion": "Cambio protegido"},
+        )
+        self.assertEqual(accepted_status.status_code, 302)
+        self.assertEqual(db.session.get(Equipo, equipment.id).estado_operativo, "FUERA_DE_SERVICIO")
+        self.assertTrue(EquipoHistorial.query.filter_by(equipo_id=equipment.id, tipo_evento="CAMBIO_ESTADO_OPERATIVO").first())
+
+        rejected_inactivate = client.post(f"/equipamiento/equipos/{equipment.id}/inactivar")
+        self.assertEqual(rejected_inactivate.status_code, 403)
+        self.assertEqual(db.session.get(Equipo, equipment.id).estado, "activo")
+
+        accepted_inactivate = client.post(f"/equipamiento/equipos/{equipment.id}/inactivar", data={"csrf_token": token})
+        self.assertEqual(accepted_inactivate.status_code, 302)
+        self.assertEqual(db.session.get(Equipo, equipment.id).estado, "inactivo")
+
     def test_direct_url_access_to_other_company_records_returns_404(self):
         installation2, area2 = self.create_basic_location(user_id=204, code_suffix="2")
         equipment2 = create_equipo(self.user(204), self.equipo_data(installation2, area2, code="EQ-OTRA"))
@@ -417,10 +594,27 @@ class Equipamiento5ATest(unittest.TestCase):
         installation, area = self.create_basic_location()
         equipment = create_equipo(self.user(), self.equipo_data(installation, area))
         _document, version = self.add_document_version()
+        client = self.login(201)
+        detail = client.get(f"/equipamiento/equipos/{equipment.id}")
+        self.assertEqual(detail.status_code, 200)
+        token = self.csrf_token(client)
 
-        response = self.login(201).post(
+        missing_csrf = client.post(
+            f"/equipamiento/equipos/{equipment.id}/documentos",
+            data={"documento_version_id": str(version.id), "tipo_documento": "MANUAL"},
+        )
+        invalid_csrf = client.post(
+            f"/equipamiento/equipos/{equipment.id}/documentos",
+            data={"csrf_token": "bad-token", "documento_version_id": str(version.id), "tipo_documento": "MANUAL"},
+        )
+        self.assertEqual(missing_csrf.status_code, 403)
+        self.assertEqual(invalid_csrf.status_code, 403)
+        self.assertEqual(len(equipment.documentos), 0)
+
+        response = client.post(
             f"/equipamiento/equipos/{equipment.id}/documentos",
             data={
+                "csrf_token": token,
                 "documento_version_id": str(version.id),
                 "tipo_documento": "MANUAL",
                 "observaciones": "Manual vigente",

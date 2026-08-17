@@ -21,6 +21,7 @@
         {% endif %}
         {% if item.estado == 'activo' and can('equipos.inactivar') %}
         <form method="post" action="{{ url_for('equipamiento.inactivar_equipo', item_id=item.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button class="btn btn-outline-danger">Inactivar</button>
         </form>
         {% endif %}
@@ -74,6 +75,7 @@
         <div class="page-card h-100">
             <h5 class="mb-3">Cambiar estado operativo</h5>
             <form method="post" action="{{ url_for('equipamiento.cambiar_estado_equipo', item_id=item.id) }}" class="row g-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="col-md-5">
                     <select name="estado_operativo" class="form-select">
                         {% for status in estados_operativos %}
@@ -156,6 +158,7 @@
             </div>
             {% if can('equipos.documentos.vincular') %}
             <form method="post" action="{{ url_for('equipamiento.vincular_documento_equipo', item_id=item.id) }}" class="row g-2 mb-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="col-12">
                     <label for="document-version-filter" class="form-label">Buscar documento</label>
                     <input

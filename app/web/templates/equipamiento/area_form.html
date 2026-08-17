@@ -6,6 +6,7 @@
 <div class="page-card">
     <h1 class="mb-4">{% if item %}Editar area o ambiente{% else %}Nueva area o ambiente{% endif %}</h1>
     <form method="post" class="row g-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         {% set selected_instalacion = form_data.get('instalacion_id') or (item.instalacion_id if item else '') %}
         <div class="col-md-5"><label class="form-label">Instalacion</label><select name="instalacion_id" class="form-select" required><option value="">Selecciona</option>{% for inst in instalaciones %}<option value="{{ inst.id }}" {% if selected_instalacion|string == inst.id|string %}selected{% endif %}>{{ inst.codigo }} - {{ inst.nombre }}</option>{% endfor %}</select></div>
         <div class="col-md-3"><label class="form-label">Codigo</label><input name="codigo" class="form-control" required value="{{ form_data.get('codigo') or (item.codigo if item else '') }}"></div>

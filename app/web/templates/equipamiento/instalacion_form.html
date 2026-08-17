@@ -12,6 +12,7 @@
 <div class="page-card">
     <h1 class="mb-4">{% if item %}Editar instalacion{% else %}Nueva instalacion{% endif %}</h1>
     <form method="post" class="row g-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="col-md-3"><label class="form-label">Codigo</label><input name="codigo" class="form-control" required value="{{ form_data.get('codigo') or (item.codigo if item else '') }}"></div>
         <div class="col-md-6"><label class="form-label">Nombre</label><input name="nombre" class="form-control" required value="{{ form_data.get('nombre') or (item.nombre if item else '') }}"></div>
         <div class="col-md-3"><label class="form-label">Estado</label><select name="estado" class="form-select">{% set selected_estado = form_data.get('estado') or (item.estado if item else 'activo') %}<option value="activo" {% if selected_estado == 'activo' %}selected{% endif %}>Activo</option><option value="inactivo" {% if selected_estado == 'inactivo' %}selected{% endif %}>Inactivo</option></select></div>

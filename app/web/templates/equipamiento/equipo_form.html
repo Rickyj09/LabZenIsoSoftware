@@ -6,6 +6,7 @@
 <div class="page-card">
     <h1 class="mb-4">{% if item %}Editar equipo{% else %}Nuevo equipo{% endif %}</h1>
     <form method="post" class="row g-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         {% set selected_instalacion = form_data.get('instalacion_id') or (item.instalacion_id if item else '') %}
         {% set selected_area = form_data.get('area_ambiente_id') or (item.area_ambiente_id if item else '') %}
         <div class="col-md-3"><label class="form-label">Codigo interno</label><input name="codigo" class="form-control" required value="{{ form_data.get('codigo') or (item.codigo if item else '') }}"></div>
