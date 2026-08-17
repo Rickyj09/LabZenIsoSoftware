@@ -9,6 +9,9 @@ from app.extensions import db
 from app.models.documentos import Documento, DocumentoVersion
 from app.models.equipos import (
     AreaAmbiente,
+    AreaCondicionAmbiental,
+    AreaHistorialAmbiental,
+    AreaMedicionAmbiental,
     CRITICIDADES_EQUIPO,
     Equipo,
     EquipoCalibracion,
@@ -22,6 +25,7 @@ from app.models.equipos import (
 )
 from app.models.seguridad import Usuario
 from app.security.permissions import current_user_can, require_permission
+from app.services import area_condicion_ambiental_service as ambiente_service
 from app.services import equipo_calibracion_service as calibracion_service
 from app.services import equipo_mantenimiento_service as mantenimiento_service
 from app.services.equipo_calibracion_service import EquipoCalibracionError
@@ -43,6 +47,7 @@ from app.services.equipamiento_service import (
     update_equipo,
     update_instalacion,
 )
+from app.services.area_condicion_ambiental_service import CondicionAmbientalError
 
 bp = Blueprint("equipamiento", __name__, url_prefix="/equipamiento")
 
@@ -85,6 +90,27 @@ def _calibration_template_context(**extra):
     return context
 
 
+def _environment_template_context(**extra):
+    context = {
+        "csrf_token": _maintenance_csrf_token(),
+        "today": date.today(),
+        "format_decimal": _format_decimal,
+        "format_local_datetime": ambiente_service.format_local_datetime,
+        "estado_ambiental_badge_class": _estado_ambiental_badge_class,
+    }
+    context.update(extra)
+    return context
+
+
+def _format_decimal(value):
+    if value is None:
+        return "-"
+    text = format(value, "f") if hasattr(value, "as_tuple") else str(value)
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
 def _estado_mantenimiento_badge_class(estado):
     return {
         "PROGRAMADO": "text-bg-primary",
@@ -101,6 +127,17 @@ def _estado_calibracion_badge_class(estado):
         "COMPLETADO": "text-bg-success",
         "CANCELADO": "text-bg-secondary",
     }.get(estado, "text-bg-light")
+
+
+def _estado_ambiental_badge_class(estado):
+    return {
+        "CONFORME": "text-bg-success",
+        "FUERA_DE_LIMITE": "text-bg-danger",
+    }.get(estado, "text-bg-light")
+
+
+def _condicion_activa_badge_class(activa):
+    return "text-bg-success" if activa else "text-bg-secondary"
 
 
 CALIBRATION_HISTORY_EVENTS = (
@@ -182,6 +219,13 @@ def _get_calibration_or_404(item_id):
     return item
 
 
+def _get_environment_condition_or_404(item_id):
+    item = AreaCondicionAmbiental.query.filter_by(id=item_id, empresa_id=current_user.empresa_id).first()
+    if not item:
+        abort(404)
+    return item
+
+
 def _redirect_back_to_maintenance(item):
     return redirect(url_for("equipamiento.detalle_mantenimiento", item_id=item.id))
 
@@ -190,12 +234,70 @@ def _redirect_back_to_calibration(item):
     return redirect(url_for("equipamiento.detalle_calibracion", item_id=item.id))
 
 
+def _redirect_back_to_environment_condition(item):
+    return redirect(url_for("equipamiento.detalle_condicion_ambiental", item_id=item.id))
+
+
 def _estado_filter(query, model, estado):
     if estado == "activos":
         return query.filter(model.estado == "activo")
     if estado == "inactivos":
         return query.filter(model.estado == "inactivo")
     return query
+
+
+def _controlled_areas():
+    return (
+        AreaAmbiente.query
+        .filter_by(empresa_id=current_user.empresa_id, estado="activo", requiere_control_ambiental=True)
+        .order_by(AreaAmbiente.codigo.asc())
+        .all()
+    )
+
+
+def _latest_measurements_for_conditions(condition_ids):
+    latest = {}
+    if not condition_ids:
+        return latest
+    measurements = (
+        AreaMedicionAmbiental.query
+        .filter(
+            AreaMedicionAmbiental.empresa_id == current_user.empresa_id,
+            AreaMedicionAmbiental.condicion_ambiental_id.in_(condition_ids),
+        )
+        .order_by(AreaMedicionAmbiental.fecha_hora_medicion.desc(), AreaMedicionAmbiental.id.desc())
+        .all()
+    )
+    for measurement in measurements:
+        latest.setdefault(measurement.condicion_ambiental_id, measurement)
+    return latest
+
+
+def _environment_condition_form_context(item=None, form_data=None, area_id=None):
+    return _environment_template_context(
+        item=item,
+        form_data=form_data or {},
+        area_id=area_id,
+        areas=_controlled_areas(),
+    )
+
+
+def _active_environment_conditions(area_id=None):
+    query = AreaCondicionAmbiental.query.filter_by(empresa_id=current_user.empresa_id, activa=True)
+    if area_id:
+        query = query.filter_by(area_ambiente_id=area_id)
+    return query.order_by(AreaCondicionAmbiental.codigo.asc()).all()
+
+
+def _environment_measurement_form_context(form_data=None, area_id=None, condicion_id=None):
+    selected_area_id = area_id or (form_data or {}).get("area_ambiente_id")
+    return _environment_template_context(
+        form_data=form_data or {},
+        area_id=selected_area_id,
+        condicion_id=condicion_id or (form_data or {}).get("condicion_ambiental_id"),
+        areas=_controlled_areas(),
+        condiciones=_active_environment_conditions(selected_area_id),
+    )
 
 
 @bp.route("/")
@@ -361,6 +463,209 @@ def inactivar_area(item_id):
     db.session.commit()
     flash("Area o ambiente inactivado correctamente.", "warning")
     return redirect(url_for("equipamiento.areas"))
+
+
+@bp.route("/areas/<int:item_id>")
+@login_required
+@require_permission("areas.ver")
+def detalle_area(item_id):
+    item = get_area(current_user, item_id)
+    if not item:
+        abort(404)
+    condiciones = ambiente_service.condiciones_area(current_user, item.id) if item.requiere_control_ambiental else []
+    latest_measurements = _latest_measurements_for_conditions([condition.id for condition in condiciones])
+    history = (
+        AreaHistorialAmbiental.query
+        .filter_by(empresa_id=current_user.empresa_id, area_ambiente_id=item.id)
+        .order_by(AreaHistorialAmbiental.created_at.desc(), AreaHistorialAmbiental.id.desc())
+        .all()
+    )
+    return render_template(
+        "equipamiento/area_detalle.html",
+        **_environment_template_context(
+            item=item,
+            condiciones=condiciones,
+            latest_measurements=latest_measurements,
+            history=history,
+            condicion_activa_badge_class=_condicion_activa_badge_class,
+        ),
+    )
+
+
+@bp.route("/condiciones-ambientales")
+@login_required
+@require_permission(ambiente_service.PERM_VER)
+def condiciones_ambientales():
+    filters = {key: request.args.get(key, "").strip() for key in ("q", "estado", "vista")}
+    if filters["vista"] == "fuera_limite":
+        return redirect(url_for("equipamiento.mediciones_ambientales_fuera_limite"))
+    query = AreaCondicionAmbiental.query.filter_by(empresa_id=current_user.empresa_id).join(
+        AreaAmbiente,
+        AreaAmbiente.id == AreaCondicionAmbiental.area_ambiente_id,
+    ).filter(AreaAmbiente.empresa_id == current_user.empresa_id)
+    if filters["q"]:
+        like = f"%{filters['q']}%"
+        query = query.filter(or_(
+            AreaAmbiente.codigo.ilike(like),
+            AreaAmbiente.nombre.ilike(like),
+            AreaCondicionAmbiental.codigo.ilike(like),
+            AreaCondicionAmbiental.nombre.ilike(like),
+            AreaCondicionAmbiental.unidad.ilike(like),
+        ))
+    if filters["estado"] == "activas":
+        query = query.filter(AreaCondicionAmbiental.activa.is_(True))
+    elif filters["estado"] == "inactivas":
+        query = query.filter(AreaCondicionAmbiental.activa.is_(False))
+    items = query.order_by(AreaAmbiente.codigo.asc(), AreaCondicionAmbiental.codigo.asc()).all()
+    latest_measurements = _latest_measurements_for_conditions([item.id for item in items])
+    return render_template(
+        "equipamiento/condiciones_ambientales_index.html",
+        **_environment_template_context(
+            items=items,
+            filters=filters,
+            latest_measurements=latest_measurements,
+            condicion_activa_badge_class=_condicion_activa_badge_class,
+        ),
+    )
+
+
+@bp.route("/condiciones-ambientales/nueva", methods=["GET", "POST"])
+@login_required
+@require_permission(ambiente_service.PERM_GESTIONAR)
+def nueva_condicion_ambiental():
+    area_id = request.args.get("area_id", "").strip()
+    if request.method == "POST":
+        _validate_maintenance_csrf()
+        area_id = request.form.get("area_ambiente_id")
+        try:
+            item = ambiente_service.crear_condicion(current_user, area_id, request.form)
+            if not request.form.get("activa"):
+                ambiente_service.inactivar_condicion(current_user, item.id, "Configuracion creada como inactiva.")
+            db.session.commit()
+            flash("Condicion ambiental creada correctamente.", "success")
+            return redirect(url_for("equipamiento.detalle_condicion_ambiental", item_id=item.id))
+        except (CondicionAmbientalError, ValueError) as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template(
+                "equipamiento/condicion_ambiental_form.html",
+                **_environment_condition_form_context(form_data=request.form, area_id=area_id),
+            )
+    return render_template(
+        "equipamiento/condicion_ambiental_form.html",
+        **_environment_condition_form_context(form_data={"activa": "1"}, area_id=area_id),
+    )
+
+
+@bp.route("/condiciones-ambientales/<int:item_id>")
+@login_required
+@require_permission(ambiente_service.PERM_VER)
+def detalle_condicion_ambiental(item_id):
+    item = _get_environment_condition_or_404(item_id)
+    measurements = (
+        AreaMedicionAmbiental.query
+        .filter_by(empresa_id=current_user.empresa_id, condicion_ambiental_id=item.id)
+        .order_by(AreaMedicionAmbiental.fecha_hora_medicion.desc(), AreaMedicionAmbiental.id.desc())
+        .all()
+    )
+    history = (
+        AreaHistorialAmbiental.query
+        .filter_by(empresa_id=current_user.empresa_id, condicion_ambiental_id=item.id)
+        .order_by(AreaHistorialAmbiental.created_at.desc(), AreaHistorialAmbiental.id.desc())
+        .all()
+    )
+    return render_template(
+        "equipamiento/condicion_ambiental_detalle.html",
+        **_environment_template_context(
+            item=item,
+            measurements=measurements,
+            history=history,
+            condicion_activa_badge_class=_condicion_activa_badge_class,
+        ),
+    )
+
+
+@bp.route("/condiciones-ambientales/<int:item_id>/editar", methods=["GET", "POST"])
+@login_required
+@require_permission(ambiente_service.PERM_GESTIONAR)
+def editar_condicion_ambiental(item_id):
+    item = _get_environment_condition_or_404(item_id)
+    if request.method == "POST":
+        _validate_maintenance_csrf()
+        try:
+            ambiente_service.actualizar_condicion(current_user, item.id, request.form)
+            db.session.commit()
+            flash("Condicion ambiental actualizada correctamente.", "success")
+            return redirect(url_for("equipamiento.detalle_condicion_ambiental", item_id=item.id))
+        except (CondicionAmbientalError, ValueError) as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template(
+                "equipamiento/condicion_ambiental_form.html",
+                **_environment_condition_form_context(item=item, form_data=request.form, area_id=item.area_ambiente_id),
+            )
+    return render_template(
+        "equipamiento/condicion_ambiental_form.html",
+        **_environment_condition_form_context(item=item, area_id=item.area_ambiente_id),
+    )
+
+
+@bp.route("/condiciones-ambientales/<int:item_id>/inactivar", methods=["POST"])
+@login_required
+@require_permission(ambiente_service.PERM_GESTIONAR)
+def inactivar_condicion_ambiental(item_id):
+    _validate_maintenance_csrf()
+    item = _get_environment_condition_or_404(item_id)
+    try:
+        ambiente_service.inactivar_condicion(current_user, item.id, request.form.get("observaciones"))
+        db.session.commit()
+        flash("Condicion ambiental inactivada correctamente.", "warning")
+    except CondicionAmbientalError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_back_to_environment_condition(item)
+
+
+@bp.route("/condiciones-ambientales/mediciones/nueva", methods=["GET", "POST"])
+@login_required
+@require_permission(ambiente_service.PERM_GESTIONAR)
+def nueva_medicion_ambiental():
+    area_id = (request.args.get("area_id") or request.args.get("area_ambiente_id") or "").strip()
+    condicion_id = (request.args.get("condicion_id") or request.args.get("condicion_ambiental_id") or "").strip()
+    if request.method == "POST":
+        _validate_maintenance_csrf()
+        area_id = request.form.get("area_ambiente_id")
+        condicion_id = request.form.get("condicion_ambiental_id")
+        try:
+            measurement = ambiente_service.registrar_medicion(current_user, area_id, condicion_id, request.form)
+            db.session.commit()
+            flash(
+                f"Medicion registrada: {measurement.estado.replace('_', ' ')}.",
+                "success" if measurement.estado == "CONFORME" else "warning",
+            )
+            return redirect(url_for("equipamiento.detalle_condicion_ambiental", item_id=measurement.condicion_ambiental_id))
+        except (CondicionAmbientalError, ValueError) as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template(
+                "equipamiento/medicion_ambiental_form.html",
+                **_environment_measurement_form_context(form_data=request.form, area_id=area_id, condicion_id=condicion_id),
+            )
+    return render_template(
+        "equipamiento/medicion_ambiental_form.html",
+        **_environment_measurement_form_context(area_id=area_id, condicion_id=condicion_id),
+    )
+
+
+@bp.route("/condiciones-ambientales/fuera-limite")
+@login_required
+@require_permission(ambiente_service.PERM_VER)
+def mediciones_ambientales_fuera_limite():
+    measurements = ambiente_service.mediciones_fuera_de_limite(current_user)
+    return render_template(
+        "equipamiento/mediciones_ambientales_fuera_limite.html",
+        **_environment_template_context(measurements=measurements),
+    )
 
 
 @bp.route("/equipos")

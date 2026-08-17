@@ -1,0 +1,36 @@
+{% extends "base_admin.html" %}
+{% block title %}Condiciones ambientales{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li><li class="breadcrumb-item active">Condiciones ambientales</li></ol></nav>
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div><h1 class="mb-1">Condiciones ambientales</h1><p class="text-muted mb-0">Variables controladas por area o ambiente</p></div>
+        <div class="d-flex gap-2 flex-wrap">{% if can('equipos.editar') %}<a href="{{ url_for('equipamiento.nueva_condicion_ambiental') }}" class="btn btn-primary">Nueva condicion</a><a href="{{ url_for('equipamiento.nueva_medicion_ambiental') }}" class="btn btn-outline-primary">Registrar medicion</a>{% endif %}<a href="{{ url_for('equipamiento.mediciones_ambientales_fuera_limite') }}" class="btn btn-outline-danger">Fuera de limite</a></div>
+    </div>
+    <form method="get" class="row g-3 mb-4">
+        <div class="col-md-5"><label class="form-label">Texto</label><input name="q" class="form-control" value="{{ filters.q }}" placeholder="Area, codigo, nombre o unidad"></div>
+        <div class="col-md-3"><label class="form-label">Estado</label><select name="estado" class="form-select"><option value="">Todas</option><option value="activas" {% if filters.estado == 'activas' %}selected{% endif %}>Activas</option><option value="inactivas" {% if filters.estado == 'inactivas' %}selected{% endif %}>Inactivas</option></select></div>
+        <div class="col-md-2 d-flex align-items-end"><button class="btn btn-outline-primary w-100">Filtrar</button></div>
+    </form>
+    <div class="table-responsive"><table class="table table-hover align-middle"><thead class="table-light"><tr><th>Area</th><th>Codigo</th><th>Nombre</th><th>Unidad</th><th>Minimo</th><th>Maximo</th><th>Referencia</th><th>Estado</th><th>Ultima medicion</th><th></th></tr></thead><tbody>
+        {% for item in items %}
+        {% set latest = latest_measurements.get(item.id) %}
+        <tr>
+            <td><a href="{{ url_for('equipamiento.detalle_area', item_id=item.area_ambiente.id) }}">{{ item.area_ambiente.codigo }}</a><div class="small text-muted">{{ item.area_ambiente.nombre }}</div></td>
+            <td><a href="{{ url_for('equipamiento.detalle_condicion_ambiental', item_id=item.id) }}">{{ item.codigo }}</a></td>
+            <td>{{ item.nombre }}</td>
+            <td>{{ item.unidad }}</td>
+            <td>{{ format_decimal(item.limite_minimo) }}</td>
+            <td>{{ format_decimal(item.limite_maximo) }}</td>
+            <td>{{ format_decimal(item.valor_referencia) }}</td>
+            <td><span class="badge {{ condicion_activa_badge_class(item.activa) }}">{% if item.activa %}ACTIVA{% else %}INACTIVA{% endif %}</span></td>
+            <td>{% if latest %}<span class="badge {{ estado_ambiental_badge_class(latest.estado) }}">{{ latest.estado.replace('_', ' ') }}</span> {{ format_decimal(latest.valor) }} {{ latest.unidad_aplicada }}<div class="small text-muted">{{ format_local_datetime(latest.fecha_hora_medicion) }}</div>{% else %}-{% endif %}</td>
+            <td class="text-end"><a href="{{ url_for('equipamiento.detalle_condicion_ambiental', item_id=item.id) }}" class="btn btn-sm btn-outline-primary">Ver</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="text-center text-muted py-4">No hay condiciones ambientales con los filtros seleccionados.</td></tr>
+        {% endfor %}
+    </tbody></table></div>
+</div>
+{% endblock %}

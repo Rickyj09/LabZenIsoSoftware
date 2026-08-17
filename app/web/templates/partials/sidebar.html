@@ -179,6 +179,10 @@
                href="{{ url_for('equipamiento.calibraciones') }}">
                 Calibraciones y verificaciones
             </a>
+            <a class="sidebar-link {% if request.endpoint in ['equipamiento.condiciones_ambientales', 'equipamiento.nueva_condicion_ambiental', 'equipamiento.detalle_condicion_ambiental', 'equipamiento.editar_condicion_ambiental', 'equipamiento.nueva_medicion_ambiental', 'equipamiento.mediciones_ambientales_fuera_limite'] %}active{% endif %}"
+               href="{{ url_for('equipamiento.condiciones_ambientales') }}">
+                Condiciones ambientales
+            </a>
             {% endif %}
 
             {% if can('equipos.mantenimientos.ver') %}

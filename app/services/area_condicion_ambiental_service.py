@@ -30,6 +30,23 @@ def _clean(value, upper=False):
     return value or None
 
 
+def local_timezone():
+    return datetime.now().astimezone().tzinfo
+
+
+def to_local_datetime(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(local_timezone())
+
+
+def format_local_datetime(value, fmt="%Y-%m-%d %H:%M"):
+    local_value = to_local_datetime(value)
+    return local_value.strftime(fmt) if local_value else ""
+
+
 def _as_decimal(value, field_name, required=False):
     if value in ("", None):
         if required:
@@ -55,8 +72,8 @@ def _as_datetime(value):
         except ValueError as exc:
             raise CondicionAmbientalError("La fecha y hora de medicion debe tener formato ISO.") from exc
     if measurement_time.tzinfo is None:
-        return measurement_time.replace(tzinfo=timezone.utc)
-    return measurement_time
+        return measurement_time.replace(tzinfo=local_timezone()).astimezone(timezone.utc)
+    return measurement_time.astimezone(timezone.utc)
 
 
 def _require_permission(user, permission):

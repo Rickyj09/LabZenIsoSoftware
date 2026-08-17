@@ -23,6 +23,8 @@ from app.services.area_condicion_ambiental_service import CondicionAmbientalErro
 
 
 EQUIPAMIENTO_PERMISSIONS = (
+    "equipamiento.dashboard.ver",
+    "areas.ver",
     "equipos.ver",
     "equipos.editar",
 )
@@ -79,9 +81,12 @@ class Equipamiento5DCondicionesAmbientalesTest(unittest.TestCase):
         db.session.add_all([manager, reader])
         db.session.flush()
         db.session.add_all([
-            RolPermiso(id=3001, rol_id=manager.id, permiso_id=permissions["equipos.ver"].id),
-            RolPermiso(id=3002, rol_id=manager.id, permiso_id=permissions["equipos.editar"].id),
-            RolPermiso(id=3003, rol_id=reader.id, permiso_id=permissions["equipos.ver"].id),
+            RolPermiso(id=3001, rol_id=manager.id, permiso_id=permissions["equipamiento.dashboard.ver"].id),
+            RolPermiso(id=3002, rol_id=manager.id, permiso_id=permissions["areas.ver"].id),
+            RolPermiso(id=3003, rol_id=manager.id, permiso_id=permissions["equipos.ver"].id),
+            RolPermiso(id=3004, rol_id=manager.id, permiso_id=permissions["equipos.editar"].id),
+            RolPermiso(id=3005, rol_id=reader.id, permiso_id=permissions["areas.ver"].id),
+            RolPermiso(id=3006, rol_id=reader.id, permiso_id=permissions["equipos.ver"].id),
             UsuarioRol(id=4001, usuario_id=201, rol_id=manager.id),
             UsuarioRol(id=4002, usuario_id=202, rol_id=reader.id),
             UsuarioRol(id=4003, usuario_id=205, rol_id=manager.id),
@@ -139,6 +144,17 @@ class Equipamiento5DCondicionesAmbientalesTest(unittest.TestCase):
     def user(self, user_id=201):
         return db.session.get(Usuario, user_id)
 
+    def login(self, user_id=201):
+        client = self.app.test_client()
+        with client.session_transaction() as session:
+            session["_user_id"] = str(user_id)
+            session["_fresh"] = True
+        return client
+
+    def csrf_token(self, client):
+        with client.session_transaction() as session:
+            return session["equipamiento_mantenimiento_csrf"]
+
     def create_temperature(self, **overrides):
         data = {
             "codigo": "TEMPERATURA",
@@ -149,6 +165,16 @@ class Equipamiento5DCondicionesAmbientalesTest(unittest.TestCase):
         }
         data.update(overrides)
         return ambient_service.crear_condicion(self.user(), 401, data)
+
+    def utc_from_local_input(self, value):
+        return datetime.fromisoformat(value).replace(
+            tzinfo=ambient_service.local_timezone()
+        ).astimezone(timezone.utc)
+
+    def stored_as_utc(self, value):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
     def test_model_schema_supports_configurable_environmental_conditions(self):
         inspector = inspect(db.engine)
@@ -317,6 +343,347 @@ class Equipamiento5DCondicionesAmbientalesTest(unittest.TestCase):
         self.assertEqual(ambient_service.condiciones_area(self.user(202), 401), [condition])
         with self.assertRaisesRegex(CondicionAmbientalError, "permisos"):
             ambient_service.registrar_medicion(self.user(202), 401, condition.id, {"valor": "23"})
+
+    def test_web_menu_listing_area_detail_and_company_scope(self):
+        client = self.login()
+        condition = self.create_temperature()
+        other_condition = ambient_service.crear_condicion(self.user(205), 404, {
+            "codigo": "TEMPERATURA",
+            "nombre": "Temperatura externa",
+            "unidad": "°C",
+            "limite_minimo": "20",
+        })
+        db.session.commit()
+
+        dashboard = client.get("/equipamiento/condiciones-ambientales").get_data(as_text=True)
+        listing = client.get("/equipamiento/condiciones-ambientales").get_data(as_text=True)
+        area_detail = client.get("/equipamiento/areas/401").get_data(as_text=True)
+        no_control_area = client.get("/equipamiento/areas/402").get_data(as_text=True)
+
+        self.assertIn("Condiciones ambientales", dashboard)
+        self.assertIn("TEMPERATURA", listing)
+        self.assertNotIn("Temperatura externa", listing)
+        self.assertIn("Nueva condicion", area_detail)
+        self.assertIn(f"/equipamiento/condiciones-ambientales/{condition.id}", area_detail)
+        self.assertIn("Esta area no tiene control ambiental habilitado", no_control_area)
+        self.assertEqual(client.get(f"/equipamiento/condiciones-ambientales/{other_condition.id}").status_code, 404)
+
+    def test_web_create_condition_form_posts_valid_unilateral_and_rejects_invalid_limits_and_cross_company_area(self):
+        client = self.login()
+        form = client.get("/equipamiento/condiciones-ambientales/nueva?area_id=401")
+        self.assertEqual(form.status_code, 200)
+        self.assertIn("Nueva condicion ambiental", form.get_data(as_text=True))
+        token = self.csrf_token(client)
+
+        response = client.post("/equipamiento/condiciones-ambientales/nueva", data={
+            "csrf_token": token,
+            "area_ambiente_id": "401",
+            "codigo": "TEMPERATURA",
+            "nombre": "Temperatura ambiente",
+            "unidad": "°C",
+            "limite_minimo": "20",
+            "limite_maximo": "25",
+            "valor_referencia": "23",
+            "activa": "1",
+        })
+        self.assertEqual(response.status_code, 302)
+        condition = AreaCondicionAmbiental.query.filter_by(codigo="TEMPERATURA").one()
+        self.assertEqual(condition.area_ambiente_id, 401)
+
+        response = client.post("/equipamiento/condiciones-ambientales/nueva", data={
+            "csrf_token": token,
+            "area_ambiente_id": "401",
+            "codigo": "PRESION_MIN",
+            "nombre": "Presion minima",
+            "unidad": "hPa",
+            "limite_minimo": "1010",
+            "limite_maximo": "",
+            "activa": "1",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNotNone(AreaCondicionAmbiental.query.filter_by(codigo="PRESION_MIN").first())
+
+        invalid = client.post("/equipamiento/condiciones-ambientales/nueva", data={
+            "csrf_token": token,
+            "area_ambiente_id": "401",
+            "codigo": "BAD",
+            "nombre": "Bad",
+            "unidad": "°C",
+            "limite_minimo": "30",
+            "limite_maximo": "20",
+            "activa": "1",
+        })
+        self.assertEqual(invalid.status_code, 200)
+        self.assertIsNone(AreaCondicionAmbiental.query.filter_by(codigo="BAD").first())
+
+        cross_company = client.post("/equipamiento/condiciones-ambientales/nueva", data={
+            "csrf_token": token,
+            "area_ambiente_id": "404",
+            "codigo": "CRUZ",
+            "nombre": "Cruzada",
+            "unidad": "°C",
+            "limite_minimo": "20",
+            "activa": "1",
+        })
+        self.assertEqual(cross_company.status_code, 200)
+        self.assertIsNone(AreaCondicionAmbiental.query.filter_by(codigo="CRUZ").first())
+
+    def test_web_edit_limits_preserves_measurement_snapshots_and_shows_history(self):
+        client = self.login()
+        condition = self.create_temperature()
+        measurement = ambient_service.registrar_medicion(self.user(), 401, condition.id, {
+            "valor": "23",
+            "fecha_hora_medicion": datetime(2026, 8, 17, 8, 30, tzinfo=timezone.utc),
+        })
+        db.session.commit()
+        client.get(f"/equipamiento/condiciones-ambientales/{condition.id}/editar")
+        token = self.csrf_token(client)
+
+        response = client.post(f"/equipamiento/condiciones-ambientales/{condition.id}/editar", data={
+            "csrf_token": token,
+            "area_ambiente_id": "401",
+            "codigo": "TEMPERATURA",
+            "nombre": "Temperatura ambiente ajustada",
+            "unidad": "°C",
+            "limite_minimo": "21",
+            "limite_maximo": "24",
+            "valor_referencia": "22",
+            "observaciones": "Ajuste de limites",
+        })
+        self.assertEqual(response.status_code, 302)
+        body = client.get(f"/equipamiento/condiciones-ambientales/{condition.id}").get_data(as_text=True)
+        persisted = db.session.get(AreaMedicionAmbiental, measurement.id)
+
+        self.assertEqual(persisted.estado, "CONFORME")
+        self.assertEqual(str(persisted.limite_minimo_aplicado), "20.0000")
+        self.assertEqual(str(persisted.limite_maximo_aplicado), "25.0000")
+        self.assertIn("Temperatura ambiente ajustada", body)
+        self.assertIn("20", body)
+        self.assertIn("25", body)
+        self.assertIn("CONDICION AMBIENTAL ACTUALIZADA", body)
+
+    def test_web_register_measurements_result_ui_outliers_history_and_immutability(self):
+        client = self.login()
+        condition = self.create_temperature()
+        db.session.commit()
+        form = client.get(f"/equipamiento/condiciones-ambientales/mediciones/nueva?area_id=401&condicion_id={condition.id}")
+        self.assertEqual(form.status_code, 200)
+        self.assertIn("Registrar medicion ambiental", form.get_data(as_text=True))
+        token = self.csrf_token(client)
+
+        ok = client.post("/equipamiento/condiciones-ambientales/mediciones/nueva", data={
+            "csrf_token": token,
+            "area_ambiente_id": "401",
+            "condicion_ambiental_id": str(condition.id),
+            "fecha_hora_medicion": "2026-08-17T08:30",
+            "valor": "23",
+            "observaciones": "Dentro de rango",
+        })
+        self.assertEqual(ok.status_code, 302)
+        outlier = client.post("/equipamiento/condiciones-ambientales/mediciones/nueva", data={
+            "csrf_token": token,
+            "area_ambiente_id": "401",
+            "condicion_ambiental_id": str(condition.id),
+            "fecha_hora_medicion": "2026-08-17T09:30",
+            "valor": "27",
+            "observaciones": "Fuera de rango",
+        })
+        self.assertEqual(outlier.status_code, 302)
+
+        body = client.get(f"/equipamiento/condiciones-ambientales/{condition.id}").get_data(as_text=True)
+        outliers = client.get("/equipamiento/condiciones-ambientales/fuera-limite").get_data(as_text=True)
+        self.assertIn("CONFORME", body)
+        self.assertIn("FUERA DE LIMITE", body)
+        self.assertIn("23", body)
+        self.assertIn("27", body)
+        self.assertIn("20", body)
+        self.assertIn("25", body)
+        self.assertIn("MEDICION AMBIENTAL FUERA DE LIMITE", body)
+        self.assertIn("Fuera de rango", outliers)
+        self.assertNotIn("Dentro de rango", outliers)
+        self.assertNotIn("Editar medicion", body)
+        self.assertNotIn("Eliminar medicion", body)
+
+    def test_web_measurement_datetime_is_formatted_consistently_across_environmental_views(self):
+        client = self.login()
+        condition = self.create_temperature()
+        other_company_condition = ambient_service.crear_condicion(self.user(205), 404, {
+            "codigo": "TEMPERATURA",
+            "nombre": "Temperatura externa",
+            "unidad": "°C",
+            "limite_minimo": "20",
+        })
+        measurement_time = datetime(2026, 8, 17, 15, 55, tzinfo=timezone.utc)
+        measurement = ambient_service.registrar_medicion(self.user(), 401, condition.id, {
+            "valor": "27",
+            "fecha_hora_medicion": measurement_time,
+        })
+        ambient_service.registrar_medicion(self.user(205), 404, other_company_condition.id, {
+            "valor": "19",
+            "fecha_hora_medicion": measurement_time,
+            "observaciones": "Fuera de otra empresa",
+        })
+        db.session.flush()
+        event = AreaHistorialAmbiental.query.filter_by(medicion_ambiental_id=measurement.id).one()
+        event.created_at = measurement_time
+        db.session.commit()
+
+        expected = ambient_service.format_local_datetime(measurement_time)
+        raw_utc = measurement_time.strftime("%Y-%m-%d %H:%M")
+        before = self.stored_as_utc(db.session.get(AreaMedicionAmbiental, measurement.id).fecha_hora_medicion)
+
+        condition_detail = client.get(f"/equipamiento/condiciones-ambientales/{condition.id}").get_data(as_text=True)
+        listing = client.get("/equipamiento/condiciones-ambientales").get_data(as_text=True)
+        area_detail = client.get("/equipamiento/areas/401").get_data(as_text=True)
+        outliers = client.get("/equipamiento/condiciones-ambientales/fuera-limite").get_data(as_text=True)
+
+        for body in (condition_detail, listing, area_detail, outliers):
+            self.assertIn(expected, body)
+            self.assertNotIn("Fuera de otra empresa", body)
+        self.assertGreaterEqual(condition_detail.count(expected), 2)
+        if raw_utc != expected:
+            self.assertNotIn(raw_utc, condition_detail)
+            self.assertNotIn(raw_utc, listing)
+            self.assertNotIn(raw_utc, area_detail)
+            self.assertNotIn(raw_utc, outliers)
+
+        after = self.stored_as_utc(db.session.get(AreaMedicionAmbiental, measurement.id).fecha_hora_medicion)
+        self.assertEqual(after, before)
+
+    def test_web_datetime_local_input_is_stored_once_as_utc_and_rendered_as_local_time(self):
+        client = self.login()
+        condition = self.create_temperature()
+        db.session.commit()
+        client.get(f"/equipamiento/condiciones-ambientales/mediciones/nueva?area_id=401&condicion_id={condition.id}")
+        token = self.csrf_token(client)
+        local_input = "2026-08-17T10:55"
+
+        response = client.post("/equipamiento/condiciones-ambientales/mediciones/nueva", data={
+            "csrf_token": token,
+            "area_ambiente_id": "401",
+            "condicion_ambiental_id": str(condition.id),
+            "fecha_hora_medicion": local_input,
+            "valor": "23",
+        })
+
+        self.assertEqual(response.status_code, 302)
+        measurement = AreaMedicionAmbiental.query.filter_by(condicion_ambiental_id=condition.id).one()
+        expected_utc = self.utc_from_local_input(local_input)
+        self.assertEqual(self.stored_as_utc(measurement.fecha_hora_medicion), expected_utc)
+
+        body = client.get(f"/equipamiento/condiciones-ambientales/{condition.id}").get_data(as_text=True)
+        self.assertIn("2026-08-17 10:55", body)
+
+    def test_web_measurement_area_change_keeps_area_and_loads_active_conditions(self):
+        client = self.login()
+        temperature = self.create_temperature()
+        humidity = ambient_service.crear_condicion(self.user(), 401, {
+            "codigo": "HUMEDAD_RELATIVA",
+            "nombre": "Humedad relativa",
+            "unidad": "%",
+            "limite_minimo": "40",
+            "limite_maximo": "60",
+        })
+        other_area_condition = ambient_service.crear_condicion(self.user(), 405, {
+            "codigo": "PRESION",
+            "nombre": "Presion ambiental",
+            "unidad": "hPa",
+            "limite_minimo": "1010",
+        })
+        other_company_condition = ambient_service.crear_condicion(self.user(205), 404, {
+            "codigo": "PARTICULAS",
+            "nombre": "Particulas externas",
+            "unidad": "ppm",
+            "limite_maximo": "10",
+        })
+        db.session.commit()
+
+        body = client.get("/equipamiento/condiciones-ambientales/mediciones/nueva?area_ambiente_id=401").get_data(as_text=True)
+
+        self.assertIn('value="401" selected', body)
+        self.assertIn(f'value="{temperature.id}"', body)
+        self.assertIn(f'value="{humidity.id}"', body)
+        self.assertNotIn(f'value="{other_area_condition.id}"', body)
+        self.assertNotIn("Particulas externas", body)
+        self.assertNotIn('areaSelect.value = ""', body)
+        self.assertNotIn('area_ambiente_id" value=""', body)
+
+    def test_web_measurement_preselects_area_and_condition_from_condition_detail_link(self):
+        client = self.login()
+        condition = self.create_temperature()
+        db.session.commit()
+
+        body = client.get(
+            f"/equipamiento/condiciones-ambientales/mediciones/nueva?area_id=401&condicion_id={condition.id}"
+        ).get_data(as_text=True)
+
+        self.assertIn('value="401" selected', body)
+        self.assertIn(f'value="{condition.id}" selected', body)
+
+    def test_web_inactivate_condition_keeps_measurements_and_blocks_new_measurements(self):
+        client = self.login()
+        condition = self.create_temperature()
+        measurement = ambient_service.registrar_medicion(self.user(), 401, condition.id, {"valor": "23"})
+        db.session.commit()
+        client.get(f"/equipamiento/condiciones-ambientales/{condition.id}")
+        token = self.csrf_token(client)
+
+        response = client.post(f"/equipamiento/condiciones-ambientales/{condition.id}/inactivar", data={
+            "csrf_token": token,
+            "observaciones": "Fin de control",
+        })
+        self.assertEqual(response.status_code, 302)
+        body = client.get(f"/equipamiento/condiciones-ambientales/{condition.id}").get_data(as_text=True)
+        self.assertIn("INACTIVA", body)
+        self.assertIn("23", body)
+        self.assertIn("CONDICION AMBIENTAL INACTIVADA", body)
+        self.assertIsNotNone(db.session.get(AreaMedicionAmbiental, measurement.id))
+
+        blocked = client.post("/equipamiento/condiciones-ambientales/mediciones/nueva", data={
+            "csrf_token": token,
+            "area_ambiente_id": "401",
+            "condicion_ambiental_id": str(condition.id),
+            "valor": "22",
+        })
+        self.assertEqual(blocked.status_code, 200)
+        self.assertEqual(AreaMedicionAmbiental.query.filter_by(condicion_ambiental_id=condition.id).count(), 1)
+
+    def test_web_measurement_rejects_condition_from_other_area_and_other_company(self):
+        client = self.login()
+        condition = self.create_temperature()
+        other_area_condition = ambient_service.crear_condicion(self.user(), 405, {
+            "codigo": "HUMEDAD_RELATIVA",
+            "nombre": "Humedad relativa",
+            "unidad": "%",
+            "limite_minimo": "40",
+            "limite_maximo": "60",
+        })
+        other_company_condition = ambient_service.crear_condicion(self.user(205), 404, {
+            "codigo": "TEMPERATURA",
+            "nombre": "Temperatura externa",
+            "unidad": "°C",
+            "limite_minimo": "20",
+        })
+        db.session.commit()
+        client.get("/equipamiento/condiciones-ambientales/mediciones/nueva?area_id=401")
+        token = self.csrf_token(client)
+
+        wrong_area = client.post("/equipamiento/condiciones-ambientales/mediciones/nueva", data={
+            "csrf_token": token,
+            "area_ambiente_id": "401",
+            "condicion_ambiental_id": str(other_area_condition.id),
+            "valor": "50",
+        })
+        cross_company = client.post("/equipamiento/condiciones-ambientales/mediciones/nueva", data={
+            "csrf_token": token,
+            "area_ambiente_id": "401",
+            "condicion_ambiental_id": str(other_company_condition.id),
+            "valor": "23",
+        })
+
+        self.assertEqual(wrong_area.status_code, 200)
+        self.assertEqual(cross_company.status_code, 200)
+        self.assertEqual(AreaMedicionAmbiental.query.filter_by(condicion_ambiental_id=condition.id).count(), 0)
 
 
 if __name__ == "__main__":

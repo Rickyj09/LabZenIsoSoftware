@@ -1,0 +1,65 @@
+{% extends "base_admin.html" %}
+{% block title %}{{ item.codigo }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.areas') }}">Areas y ambientes</a></li><li class="breadcrumb-item active">{{ item.codigo }}</li></ol></nav>
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+    <div><h2 class="mb-1">{{ item.codigo }}</h2><div class="text-muted">{{ item.nombre }}</div></div>
+    <div class="d-flex gap-2 flex-wrap"><a href="{{ url_for('equipamiento.areas') }}" class="btn btn-outline-secondary">Volver</a>{% if can('areas.editar') %}<a href="{{ url_for('equipamiento.editar_area', item_id=item.id) }}" class="btn btn-outline-primary">Editar area</a>{% endif %}</div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-4">
+        <div class="page-card h-100">
+            <h5 class="mb-3">Datos del area</h5>
+            <dl class="row mb-0">
+                <dt class="col-sm-5">Instalacion</dt><dd class="col-sm-7">{{ item.instalacion.codigo }} - {{ item.instalacion.nombre }}</dd>
+                <dt class="col-sm-5">Tipo</dt><dd class="col-sm-7">{{ item.tipo or '-' }}</dd>
+                <dt class="col-sm-5">Ubicacion</dt><dd class="col-sm-7">{{ item.ubicacion_interna or '-' }}</dd>
+                <dt class="col-sm-5">Responsable</dt><dd class="col-sm-7">{{ item.responsable or '-' }}</dd>
+                <dt class="col-sm-5">Control ambiental</dt><dd class="col-sm-7">{% if item.requiere_control_ambiental %}<span class="badge text-bg-info">Si</span>{% else %}<span class="badge text-bg-light">No</span>{% endif %}</dd>
+                <dt class="col-sm-5">Estado</dt><dd class="col-sm-7"><span class="badge {% if item.estado == 'activo' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{{ item.estado }}</span></dd>
+            </dl>
+        </div>
+    </div>
+    <div class="col-lg-8">
+        <div class="page-card mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                <h5 class="mb-0">Condiciones ambientales</h5>
+                {% if item.requiere_control_ambiental and can('equipos.editar') %}<a href="{{ url_for('equipamiento.nueva_condicion_ambiental', area_id=item.id) }}" class="btn btn-sm btn-primary">Nueva condicion</a>{% endif %}
+            </div>
+            {% if not item.requiere_control_ambiental %}
+            <div class="text-muted">Esta area no tiene control ambiental habilitado.</div>
+            {% else %}
+            <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Codigo</th><th>Nombre</th><th>Unidad</th><th>Limites</th><th>Estado</th><th>Ultima medicion</th><th></th></tr></thead><tbody>
+                {% for condition in condiciones %}
+                {% set latest = latest_measurements.get(condition.id) %}
+                <tr>
+                    <td><a href="{{ url_for('equipamiento.detalle_condicion_ambiental', item_id=condition.id) }}">{{ condition.codigo }}</a></td>
+                    <td>{{ condition.nombre }}</td>
+                    <td>{{ condition.unidad }}</td>
+                    <td>{{ format_decimal(condition.limite_minimo) }} / {{ format_decimal(condition.limite_maximo) }}</td>
+                    <td><span class="badge {{ condicion_activa_badge_class(condition.activa) }}">{% if condition.activa %}ACTIVA{% else %}INACTIVA{% endif %}</span></td>
+                    <td>{% if latest %}<span class="badge {{ estado_ambiental_badge_class(latest.estado) }}">{{ latest.estado.replace('_', ' ') }}</span> {{ format_decimal(latest.valor) }} {{ latest.unidad_aplicada }}<div class="small text-muted">{{ format_local_datetime(latest.fecha_hora_medicion) }}</div>{% else %}-{% endif %}</td>
+                    <td class="text-end"><a href="{{ url_for('equipamiento.detalle_condicion_ambiental', item_id=condition.id) }}" class="btn btn-sm btn-outline-primary">Ver</a></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7" class="text-center text-muted py-3">Sin condiciones configuradas.</td></tr>
+                {% endfor %}
+            </tbody></table></div>
+            {% if condiciones|selectattr('activa')|list and can('equipos.editar') %}<a href="{{ url_for('equipamiento.nueva_medicion_ambiental', area_id=item.id) }}" class="btn btn-outline-primary">Registrar medicion</a>{% endif %}
+            {% endif %}
+        </div>
+        <div class="page-card">
+            <h5 class="mb-3">Historial ambiental</h5>
+            <div class="table-responsive"><table class="table table-sm align-middle"><thead><tr><th>Fecha</th><th>Evento</th><th>Descripcion</th><th>Usuario</th></tr></thead><tbody>
+                {% for event in history %}
+                <tr><td>{{ format_local_datetime(event.created_at) }}</td><td>{{ event.tipo_evento.replace('_', ' ') }}</td><td>{{ event.descripcion or '' }}</td><td>{{ event.usuario.nombre if event.usuario else '' }}</td></tr>
+                {% else %}
+                <tr><td colspan="4" class="text-center text-muted py-3">Sin historial ambiental registrado.</td></tr>
+                {% endfor %}
+            </tbody></table></div>
+        </div>
+    </div>
+</div>
+{% endblock %}

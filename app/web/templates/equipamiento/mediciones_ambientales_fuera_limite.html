@@ -1,0 +1,28 @@
+{% extends "base_admin.html" %}
+{% block title %}Mediciones fuera de limite{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.condiciones_ambientales') }}">Condiciones ambientales</a></li><li class="breadcrumb-item active">Fuera de limite</li></ol></nav>
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div><h1 class="mb-1">Mediciones fuera de limite</h1><p class="text-muted mb-0">Consulta de mediciones ambientales con evaluacion FUERA DE LIMITE</p></div>
+        <a href="{{ url_for('equipamiento.condiciones_ambientales') }}" class="btn btn-outline-secondary">Volver</a>
+    </div>
+    <div class="table-responsive"><table class="table table-hover align-middle"><thead class="table-light"><tr><th>Area</th><th>Condicion</th><th>Valor</th><th>Estado</th><th>Limites aplicados</th><th>Fecha/hora</th><th>Usuario</th><th>Observaciones</th></tr></thead><tbody>
+        {% for measurement in measurements %}
+        <tr>
+            <td>{{ measurement.area_ambiente.codigo }}<div class="small text-muted">{{ measurement.area_ambiente.nombre }}</div></td>
+            <td><a href="{{ url_for('equipamiento.detalle_condicion_ambiental', item_id=measurement.condicion_ambiental.id) }}">{{ measurement.condicion_ambiental.codigo }}</a><div class="small text-muted">{{ measurement.condicion_ambiental.nombre }}</div></td>
+            <td>{{ format_decimal(measurement.valor) }} {{ measurement.unidad_aplicada }}</td>
+            <td><span class="badge {{ estado_ambiental_badge_class(measurement.estado) }}">{{ measurement.estado.replace('_', ' ') }}</span></td>
+            <td>{{ format_decimal(measurement.limite_minimo_aplicado) }} / {{ format_decimal(measurement.limite_maximo_aplicado) }}</td>
+            <td>{{ format_local_datetime(measurement.fecha_hora_medicion) }}</td>
+            <td>{{ measurement.registrado_por.nombre if measurement.registrado_por else '-' }}</td>
+            <td>{{ measurement.observaciones or '-' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" class="text-center text-muted py-4">No hay mediciones fuera de limite.</td></tr>
+        {% endfor %}
+    </tbody></table></div>
+</div>
+{% endblock %}
