@@ -24,6 +24,22 @@ ESTADOS_CALIBRACION_EQUIPO = ("PROGRAMADO", "EN_PROCESO", "COMPLETADO", "CANCELA
 
 ESTADOS_MEDICION_AMBIENTAL = ("CONFORME", "FUERA_DE_LIMITE")
 
+TIPOS_MATERIAL_REFERENCIA = ("MATERIAL_REFERENCIA", "PATRON_REFERENCIA")
+
+ESTADOS_MATERIAL_REFERENCIA = ("DISPONIBLE", "EN_USO", "AGOTADO", "VENCIDO", "RETIRADO")
+
+TIPOS_EVIDENCIA_MATERIAL_REFERENCIA = ("CERTIFICADO", "FICHA_TECNICA", "HOJA_SEGURIDAD", "OTRO")
+
+TIPOS_EVENTO_MATERIAL_REFERENCIA = (
+    "MATERIAL_REFERENCIA_CREADO",
+    "MATERIAL_REFERENCIA_PUESTO_EN_USO",
+    "MATERIAL_REFERENCIA_AGOTADO",
+    "MATERIAL_REFERENCIA_VENCIDO",
+    "MATERIAL_REFERENCIA_RETIRADO",
+    "EVIDENCIA_MATERIAL_REFERENCIA_VINCULADA",
+    "EVIDENCIA_MATERIAL_REFERENCIA_DESVINCULADA",
+)
+
 TIPOS_EVENTO_AREA_AMBIENTAL = (
     "CONDICION_AMBIENTAL_CREADA",
     "CONDICION_AMBIENTAL_ACTUALIZADA",
@@ -214,6 +230,131 @@ class AreaHistorialAmbiental(TenantMixin, BaseModel):
     area_ambiente = db.relationship("AreaAmbiente", back_populates="historial_ambiental")
     condicion_ambiental = db.relationship("AreaCondicionAmbiental", foreign_keys=[condicion_ambiental_id])
     medicion_ambiental = db.relationship("AreaMedicionAmbiental", foreign_keys=[medicion_ambiental_id])
+    usuario = db.relationship("Usuario", foreign_keys=[usuario_id])
+
+
+class MaterialReferencia(TenantMixin, BaseModel):
+    __tablename__ = "materiales_referencia"
+    __table_args__ = (
+        db.UniqueConstraint("empresa_id", "codigo", name="uq_materiales_referencia_empresa_codigo"),
+        db.CheckConstraint(
+            "tipo IN ('MATERIAL_REFERENCIA', 'PATRON_REFERENCIA')",
+            name="ck_materiales_referencia_tipo_valido",
+        ),
+        db.CheckConstraint(
+            "estado IN ('DISPONIBLE', 'EN_USO', 'AGOTADO', 'VENCIDO', 'RETIRADO')",
+            name="ck_materiales_referencia_estado_valido",
+        ),
+        db.CheckConstraint(
+            "fecha_caducidad IS NULL OR fecha_caducidad >= fecha_recepcion",
+            name="ck_materiales_referencia_caducidad_recepcion",
+        ),
+        db.CheckConstraint(
+            "cantidad_inicial IS NULL OR cantidad_inicial >= 0",
+            name="ck_materiales_referencia_cantidad_inicial_no_negativa",
+        ),
+        db.CheckConstraint(
+            "cantidad_disponible IS NULL OR cantidad_disponible >= 0",
+            name="ck_materiales_referencia_cantidad_disponible_no_negativa",
+        ),
+        db.CheckConstraint(
+            "cantidad_inicial IS NULL OR cantidad_disponible IS NULL OR cantidad_disponible <= cantidad_inicial",
+            name="ck_materiales_referencia_cantidad_disponible_maxima",
+        ),
+        db.Index("ix_materiales_referencia_empresa_tipo", "empresa_id", "tipo"),
+        db.Index("ix_materiales_referencia_empresa_estado", "empresa_id", "estado"),
+        db.Index("ix_materiales_referencia_empresa_caducidad", "empresa_id", "fecha_caducidad"),
+        db.Index("ix_materiales_referencia_responsable_id", "responsable_id"),
+    )
+
+    codigo = db.Column(db.String(50), nullable=False)
+    nombre = db.Column(db.String(150), nullable=False)
+    descripcion = db.Column(db.Text)
+    tipo = db.Column(db.String(30), nullable=False)
+    fabricante = db.Column(db.String(150))
+    proveedor = db.Column(db.String(150))
+    lote = db.Column(db.String(100))
+    certificado_numero = db.Column(db.String(100))
+    referencia_fabricante = db.Column(db.String(100))
+    fecha_recepcion = db.Column(db.Date, nullable=False)
+    fecha_apertura = db.Column(db.Date)
+    fecha_puesta_en_uso = db.Column(db.Date)
+    fecha_caducidad = db.Column(db.Date)
+    estado = db.Column(db.String(30), nullable=False, default="DISPONIBLE")
+    ubicacion = db.Column(db.String(150))
+    condiciones_almacenamiento = db.Column(db.Text)
+    observaciones = db.Column(db.Text)
+    responsable_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    cantidad_inicial = db.Column(db.Numeric(14, 4))
+    cantidad_disponible = db.Column(db.Numeric(14, 4))
+    unidad = db.Column(db.String(30))
+    activo = db.Column(db.Boolean, nullable=False, default=True)
+
+    empresa = db.relationship("Empresa")
+    responsable = db.relationship("Usuario", foreign_keys=[responsable_id])
+    evidencias = db.relationship(
+        "MaterialReferenciaDocumento",
+        back_populates="material_referencia",
+        lazy=True,
+        cascade="all, delete-orphan",
+    )
+    historial = db.relationship(
+        "MaterialReferenciaHistorial",
+        back_populates="material_referencia",
+        lazy=True,
+        order_by="MaterialReferenciaHistorial.created_at.desc(), MaterialReferenciaHistorial.id.desc()",
+        cascade="all, delete-orphan",
+    )
+
+
+class MaterialReferenciaDocumento(TenantMixin, BaseModel):
+    __tablename__ = "material_referencia_documentos"
+    __table_args__ = (
+        db.UniqueConstraint("material_referencia_id", "documento_version_id", name="uq_material_referencia_documento_version"),
+        db.CheckConstraint(
+            "tipo_evidencia IN ('CERTIFICADO', 'FICHA_TECNICA', 'HOJA_SEGURIDAD', 'OTRO')",
+            name="ck_material_referencia_documentos_tipo_valido",
+        ),
+        db.Index("ix_material_referencia_documentos_empresa_material", "empresa_id", "material_referencia_id"),
+        db.Index("ix_material_referencia_documentos_documento_version_id", "documento_version_id"),
+    )
+
+    material_referencia_id = db.Column(db.BigInteger, db.ForeignKey("materiales_referencia.id"), nullable=False)
+    documento_id = db.Column(db.BigInteger, db.ForeignKey("documentos.id"), nullable=False)
+    documento_version_id = db.Column(db.BigInteger, db.ForeignKey("documento_versiones.id"), nullable=False)
+    tipo_evidencia = db.Column(db.String(50), nullable=False)
+    observaciones = db.Column(db.Text)
+    vinculado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+
+    empresa = db.relationship("Empresa")
+    material_referencia = db.relationship("MaterialReferencia", back_populates="evidencias")
+    documento = db.relationship("Documento", foreign_keys=[documento_id])
+    documento_version = db.relationship("DocumentoVersion", foreign_keys=[documento_version_id])
+    vinculado_por = db.relationship("Usuario", foreign_keys=[vinculado_por_id])
+
+
+class MaterialReferenciaHistorial(TenantMixin, BaseModel):
+    __tablename__ = "material_referencia_historial"
+    __table_args__ = (
+        db.CheckConstraint(
+            "tipo_evento IN ('MATERIAL_REFERENCIA_CREADO', 'MATERIAL_REFERENCIA_PUESTO_EN_USO', 'MATERIAL_REFERENCIA_AGOTADO', 'MATERIAL_REFERENCIA_VENCIDO', 'MATERIAL_REFERENCIA_RETIRADO', 'EVIDENCIA_MATERIAL_REFERENCIA_VINCULADA', 'EVIDENCIA_MATERIAL_REFERENCIA_DESVINCULADA')",
+            name="ck_material_referencia_historial_tipo_evento_valido",
+        ),
+        db.Index("ix_material_referencia_historial_empresa_material", "empresa_id", "material_referencia_id"),
+        db.Index("ix_material_referencia_historial_tipo_evento", "tipo_evento"),
+    )
+
+    material_referencia_id = db.Column(db.BigInteger, db.ForeignKey("materiales_referencia.id"), nullable=False)
+    tipo_evento = db.Column(db.String(60), nullable=False)
+    estado_anterior = db.Column(db.String(30))
+    estado_nuevo = db.Column(db.String(30))
+    descripcion = db.Column(db.Text)
+    usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    datos_antes = db.Column(db.JSON)
+    datos_despues = db.Column(db.JSON)
+
+    empresa = db.relationship("Empresa")
+    material_referencia = db.relationship("MaterialReferencia", back_populates="historial")
     usuario = db.relationship("Usuario", foreign_keys=[usuario_id])
 
 

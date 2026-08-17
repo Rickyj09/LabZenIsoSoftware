@@ -25,6 +25,9 @@ from app.models.equipos import (
     EquipoMantenimientoDocumento,
     EquipoPlanMantenimiento,
     Instalacion,
+    MaterialReferencia,
+    MaterialReferenciaDocumento,
+    MaterialReferenciaHistorial,
 )
 from app.models.documentos import (
     CarpetaDocumental,
