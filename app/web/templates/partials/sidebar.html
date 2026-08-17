@@ -175,6 +175,10 @@
                href="{{ url_for('equipamiento.equipos') }}">
                 Equipos
             </a>
+            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('equipamiento.calibracion') or request.endpoint == 'equipamiento.nueva_calibracion' or request.endpoint == 'equipamiento.detalle_calibracion' %}active{% endif %}"
+               href="{{ url_for('equipamiento.calibraciones') }}">
+                Calibraciones y verificaciones
+            </a>
             {% endif %}
 
             {% if can('equipos.mantenimientos.ver') %}

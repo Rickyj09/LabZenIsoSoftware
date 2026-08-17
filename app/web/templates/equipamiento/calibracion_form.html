@@ -1,0 +1,21 @@
+{% extends "base_admin.html" %}
+{% block title %}Nuevo control metrologico{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.calibraciones') }}">Calibraciones y verificaciones</a></li><li class="breadcrumb-item active">Nuevo</li></ol></nav>
+<div class="page-card">
+    <div class="mb-4"><h1 class="mb-1">Nuevo control metrologico</h1><p class="text-muted mb-0">Programa una calibracion o verificacion para un equipo activo.</p></div>
+    <form method="post" class="row g-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="col-md-6"><label class="form-label">Equipo</label><select name="equipo_id" class="form-select" required><option value="">Selecciona equipo</option>{% for equipo in equipos %}<option value="{{ equipo.id }}" {% if form_data.equipo_id|string == equipo.id|string %}selected{% endif %}>{{ equipo.codigo }} - {{ equipo.nombre }}</option>{% endfor %}</select></div>
+        <div class="col-md-3"><label class="form-label">Tipo</label><select name="tipo_control" class="form-select" required><option value="">Selecciona tipo</option><option value="CALIBRACION" {% if form_data.tipo_control == 'CALIBRACION' %}selected{% endif %}>Calibracion</option><option value="VERIFICACION" {% if form_data.tipo_control == 'VERIFICACION' %}selected{% endif %}>Verificacion</option></select></div>
+        <div class="col-md-3"><label class="form-label">Codigo</label><input name="codigo" class="form-control" value="{{ form_data.codigo or '' }}" placeholder="Automatico si se omite"></div>
+        <div class="col-md-3"><label class="form-label">Fecha planificada</label><input type="date" name="fecha_planificada" class="form-control" value="{{ form_data.fecha_planificada or today }}" required></div>
+        <div class="col-md-3"><label class="form-label">Periodicidad meses</label><input type="number" min="1" name="periodicidad_meses" class="form-control" value="{{ form_data.periodicidad_meses or '' }}"></div>
+        <div class="col-md-3"><label class="form-label">Responsable</label><select name="responsable_id" class="form-select"><option value="">Sin responsable</option>{% for user in responsables %}<option value="{{ user.id }}" {% if form_data.responsable_id|string == user.id|string %}selected{% endif %}>{{ user.nombre }} {{ user.apellido or '' }}</option>{% endfor %}</select></div>
+        <div class="col-md-3"><label class="form-label">Proveedor/laboratorio</label><input name="proveedor" class="form-control" value="{{ form_data.proveedor or '' }}"></div>
+        <div class="col-12"><label class="form-label">Observaciones</label><textarea name="observaciones" class="form-control" rows="3">{{ form_data.observaciones or '' }}</textarea></div>
+        <div class="col-12 d-flex gap-2"><button class="btn btn-primary">Guardar</button><a href="{{ url_for('equipamiento.calibraciones') }}" class="btn btn-outline-secondary">Cancelar</a></div>
+    </form>
+</div>
+{% endblock %}

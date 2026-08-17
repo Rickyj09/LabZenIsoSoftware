@@ -131,6 +131,17 @@ class Equipamiento5CCalibracionesTest(unittest.TestCase):
     def user(self, user_id):
         return db.session.get(Usuario, user_id)
 
+    def login(self, user_id):
+        client = self.app.test_client()
+        with client.session_transaction() as session:
+            session["_user_id"] = str(user_id)
+            session["_fresh"] = True
+        return client
+
+    def csrf_token(self, client):
+        with client.session_transaction() as session:
+            return session["equipamiento_mantenimiento_csrf"]
+
     def add_control(self, estado="PROGRAMADO", tipo_control="CALIBRACION", empresa_id=101, equipo_id=401, codigo="CAL-TEST"):
         control = EquipoCalibracion(
             empresa_id=empresa_id,
@@ -352,6 +363,232 @@ class Equipamiento5CCalibracionesTest(unittest.TestCase):
         with self.assertRaisesRegex(EquipoCalibracionError, "no pertenece"):
             calibration_service.vincular_evidencia_documental(other_admin, control.id, document.id, version.id, "CERTIFICADO")
         self.assertEqual(calibration_service.controles_pendientes(admin), [control])
+
+    def test_web_lists_controls_with_company_scope_and_basic_filters(self):
+        client = self.login(201)
+        calibration = self.add_control(codigo="CAL-WEB-LIST")
+        verification = self.add_control(tipo_control="VERIFICACION", codigo="VER-WEB-LIST")
+        self.add_control(empresa_id=102, equipo_id=402, codigo="CAL-OTHER")
+        db.session.commit()
+
+        response = client.get("/equipamiento/calibraciones")
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(calibration.codigo, body)
+        self.assertIn(verification.codigo, body)
+        self.assertNotIn("CAL-OTHER", body)
+        self.assertIn("Calibraciones y verificaciones", body)
+
+        filtered = client.get("/equipamiento/calibraciones?tipo=VERIFICACION").get_data(as_text=True)
+        self.assertIn("VER-WEB-LIST", filtered)
+        self.assertNotIn("CAL-WEB-LIST", filtered)
+        searched = client.get("/equipamiento/calibraciones?q=CAL-WEB").get_data(as_text=True)
+        self.assertIn("CAL-WEB-LIST", searched)
+        self.assertNotIn("VER-WEB-LIST", searched)
+
+    def test_web_create_form_programs_calibration_verification_and_rejects_cross_company_equipment(self):
+        client = self.login(201)
+        form = client.get("/equipamiento/calibraciones/nueva")
+        self.assertEqual(form.status_code, 200)
+        self.assertIn("Nuevo control metrologico", form.get_data(as_text=True))
+        token = self.csrf_token(client)
+
+        response = client.post("/equipamiento/calibraciones/nueva", data={
+            "csrf_token": token,
+            "equipo_id": 401,
+            "codigo": "CAL-WEB-CREATE",
+            "tipo_control": "CALIBRACION",
+            "fecha_planificada": "2026-09-01",
+            "periodicidad_meses": "12",
+            "responsable_id": 202,
+            "proveedor": "Lab web",
+        })
+        self.assertEqual(response.status_code, 302)
+        calibration = EquipoCalibracion.query.filter_by(codigo="CAL-WEB-CREATE").one()
+        self.assertEqual(calibration.tipo_control, "CALIBRACION")
+        self.assertEqual(calibration.estado, "PROGRAMADO")
+
+        response = client.post("/equipamiento/calibraciones/nueva", data={
+            "csrf_token": token,
+            "equipo_id": 401,
+            "codigo": "VER-WEB-CREATE",
+            "tipo_control": "VERIFICACION",
+            "fecha_planificada": "2026-09-02",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNotNone(EquipoCalibracion.query.filter_by(codigo="VER-WEB-CREATE", tipo_control="VERIFICACION").first())
+
+        response = client.post("/equipamiento/calibraciones/nueva", data={
+            "csrf_token": token,
+            "equipo_id": 402,
+            "codigo": "CAL-CROSS",
+            "tipo_control": "CALIBRACION",
+            "fecha_planificada": "2026-09-03",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(EquipoCalibracion.query.filter_by(codigo="CAL-CROSS").first())
+
+    def test_web_detail_access_state_actions_complete_and_next_date(self):
+        client = self.login(201)
+        control = self.add_control(codigo="CAL-WEB-FLOW")
+        other_control = self.add_control(empresa_id=102, equipo_id=402, codigo="CAL-WEB-OTHER")
+        db.session.commit()
+
+        detail = client.get(f"/equipamiento/calibraciones/{control.id}")
+        body = detail.get_data(as_text=True)
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn("CAL-WEB-FLOW", body)
+        self.assertIn("Iniciar", body)
+        self.assertEqual(client.get(f"/equipamiento/calibraciones/{other_control.id}").status_code, 404)
+        token = self.csrf_token(client)
+
+        response = client.post(f"/equipamiento/calibraciones/{control.id}/iniciar", data={
+            "csrf_token": token,
+            "fecha_inicio": "2026-08-16",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(control.estado, "EN_PROCESO")
+        body = client.get(f"/equipamiento/calibraciones/{control.id}").get_data(as_text=True)
+        self.assertIn("Completar", body)
+        self.assertNotIn("<h5 class=\"mb-3\">Iniciar control</h5>", body)
+
+        response = client.post(f"/equipamiento/calibraciones/{control.id}/completar", data={
+            "csrf_token": token,
+            "fecha_finalizacion": "2026-08-16",
+            "resultado": "APTO",
+            "costo": "80.00",
+            "moneda": "USD",
+            "observaciones": "Control finalizado",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(control.estado, "COMPLETADO")
+        body = client.get(f"/equipamiento/calibraciones/{control.id}").get_data(as_text=True)
+        self.assertIn("APTO", body)
+        self.assertIn("80.00", body)
+        self.assertIn("2027-02-16", body)
+        self.assertNotIn("<h5 class=\"mb-3\">Completar control</h5>", body)
+
+    def test_web_cancel_requires_reason_and_turns_detail_read_only(self):
+        client = self.login(201)
+        control = self.add_control(codigo="VER-WEB-CANCEL", tipo_control="VERIFICACION")
+        document, version = self.add_document_version()
+        evidence = EquipoCalibracionDocumento(
+            empresa_id=101,
+            calibracion_id=control.id,
+            documento_id=document.id,
+            documento_version_id=version.id,
+            tipo_evidencia="CERTIFICADO",
+            vinculado_por_id=201,
+        )
+        db.session.add(evidence)
+        db.session.commit()
+        client.get(f"/equipamiento/calibraciones/{control.id}")
+        token = self.csrf_token(client)
+
+        response = client.post(f"/equipamiento/calibraciones/{control.id}/cancelar", data={
+            "csrf_token": token,
+            "motivo": "bad",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(control.estado, "PROGRAMADO")
+
+        response = client.post(f"/equipamiento/calibraciones/{control.id}/cancelar", data={
+            "csrf_token": token,
+            "motivo": "Cancelacion autorizada",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(control.estado, "CANCELADO")
+        body = client.get(f"/equipamiento/calibraciones/{control.id}").get_data(as_text=True)
+        self.assertIn("Cancelacion autorizada", body)
+        self.assertIn("DOC-CAL", body)
+        self.assertNotIn("Vincular", body)
+        self.assertNotIn("Desvincular", body)
+        self.assertNotIn("Iniciar", body)
+        self.assertNotIn("Completar", body)
+
+    def test_web_evidence_selector_link_unlink_and_completed_read_only(self):
+        client = self.login(201)
+        control = self.add_control(codigo="CAL-WEB-EVID")
+        document, version = self.add_document_version()
+        other_document, other_version = self.add_document_version(document_id=503, version_id=1503, code="DOC-CAL-2")
+        other_company_document, other_company_version = self.add_document_version(empresa_id=102, document_id=502, version_id=1502, code="DOC-OTRA")
+        db.session.commit()
+
+        detail = client.get(f"/equipamiento/calibraciones/{control.id}")
+        body = detail.get_data(as_text=True)
+        self.assertIn('id="calibracion-documento-select"', body)
+        self.assertIn('id="calibracion-version-select" required disabled', body)
+        version_data = body.split('<script type="application/json" id="calibracion-versiones-data">', 1)[1].split("</script>", 1)[0]
+        self.assertIn(f'"documento_id": {document.id}', version_data)
+        self.assertIn(f'"documento_id": {other_document.id}', version_data)
+        self.assertNotIn("DOC-OTRA", body)
+        token = self.csrf_token(client)
+
+        bad = client.post(f"/equipamiento/calibraciones/{control.id}/evidencias", data={
+            "csrf_token": token,
+            "documento_id": document.id,
+            "documento_version_id": other_version.id,
+            "tipo_evidencia": "CERTIFICADO",
+        })
+        self.assertEqual(bad.status_code, 302)
+        self.assertEqual(EquipoCalibracionDocumento.query.filter_by(calibracion_id=control.id).count(), 0)
+
+        response = client.post(f"/equipamiento/calibraciones/{control.id}/evidencias", data={
+            "csrf_token": token,
+            "documento_id": document.id,
+            "documento_version_id": version.id,
+            "tipo_evidencia": "CERTIFICADO",
+            "observaciones": "Certificado web",
+        })
+        self.assertEqual(response.status_code, 302)
+        evidence = EquipoCalibracionDocumento.query.filter_by(calibracion_id=control.id).one()
+        body = client.get(f"/equipamiento/calibraciones/{control.id}").get_data(as_text=True)
+        self.assertIn("Certificado web", body)
+        self.assertIn("Desvincular", body)
+
+        response = client.post(f"/equipamiento/calibraciones/evidencias/{evidence.id}/desvincular", data={
+            "csrf_token": token,
+            "motivo": "Cambio de certificado",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(EquipoCalibracionDocumento.query.filter_by(calibracion_id=control.id).count(), 0)
+
+        evidence = calibration_service.vincular_evidencia_documental(self.user(201), control.id, document.id, version.id, "CERTIFICADO", "Final")
+        calibration_service.iniciar_control(self.user(201), control.id, date(2026, 8, 20))
+        calibration_service.completar_control(self.user(201), control.id, {
+            "fecha_finalizacion": date(2026, 8, 21),
+            "resultado": "APTO",
+        })
+        db.session.commit()
+        body = client.get(f"/equipamiento/calibraciones/{control.id}").get_data(as_text=True)
+        self.assertIn("Final", body)
+        self.assertNotIn('id="calibracion-documento-select"', body)
+        self.assertNotIn("Vincular", body)
+        self.assertNotIn("Desvincular", body)
+        response = client.post(f"/equipamiento/calibraciones/evidencias/{evidence.id}/desvincular", data={
+            "csrf_token": token,
+            "motivo": "Retiro posterior",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNotNone(db.session.get(EquipoCalibracionDocumento, evidence.id))
+
+    def test_web_equipment_detail_shows_metrology_controls_and_history_events(self):
+        client = self.login(201)
+        admin = self.user(201)
+        control = calibration_service.programar_control(admin, 401, {
+            "codigo": "CAL-EQ-DETAIL",
+            "tipo_control": "CALIBRACION",
+            "fecha_planificada": date(2026, 9, 1),
+        })
+        db.session.commit()
+
+        response = client.get("/equipamiento/equipos/401")
+        body = response.get_data(as_text=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Calibraciones y verificaciones", body)
+        self.assertIn("CAL-EQ-DETAIL", body)
+        self.assertIn(f"/equipamiento/calibraciones/{control.id}", body)
+        self.assertIn("CALIBRACION PROGRAMADA", body)
 
 
 if __name__ == "__main__":

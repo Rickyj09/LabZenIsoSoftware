@@ -11,6 +11,8 @@ from app.models.equipos import (
     AreaAmbiente,
     CRITICIDADES_EQUIPO,
     Equipo,
+    EquipoCalibracion,
+    EquipoCalibracionDocumento,
     EquipoHistorial,
     EquipoMantenimiento,
     EquipoMantenimientoDocumento,
@@ -20,7 +22,9 @@ from app.models.equipos import (
 )
 from app.models.seguridad import Usuario
 from app.security.permissions import current_user_can, require_permission
+from app.services import equipo_calibracion_service as calibracion_service
 from app.services import equipo_mantenimiento_service as mantenimiento_service
+from app.services.equipo_calibracion_service import EquipoCalibracionError
 from app.services.equipo_mantenimiento_service import EquipoMantenimientoError
 from app.services.equipamiento_service import (
     EquipamientoError,
@@ -71,6 +75,16 @@ def _maintenance_template_context(**extra):
     return context
 
 
+def _calibration_template_context(**extra):
+    context = {
+        "csrf_token": _maintenance_csrf_token(),
+        "today": date.today(),
+        "estado_badge_class": _estado_calibracion_badge_class,
+    }
+    context.update(extra)
+    return context
+
+
 def _estado_mantenimiento_badge_class(estado):
     return {
         "PROGRAMADO": "text-bg-primary",
@@ -78,6 +92,29 @@ def _estado_mantenimiento_badge_class(estado):
         "COMPLETADO": "text-bg-success",
         "CANCELADO": "text-bg-secondary",
     }.get(estado, "text-bg-light")
+
+
+def _estado_calibracion_badge_class(estado):
+    return {
+        "PROGRAMADO": "text-bg-primary",
+        "EN_PROCESO": "text-bg-warning",
+        "COMPLETADO": "text-bg-success",
+        "CANCELADO": "text-bg-secondary",
+    }.get(estado, "text-bg-light")
+
+
+CALIBRATION_HISTORY_EVENTS = (
+    "CALIBRACION_PROGRAMADA",
+    "VERIFICACION_PROGRAMADA",
+    "CALIBRACION_INICIADA",
+    "VERIFICACION_INICIADA",
+    "CALIBRACION_COMPLETADA",
+    "VERIFICACION_COMPLETADA",
+    "CALIBRACION_CANCELADA",
+    "VERIFICACION_CANCELADA",
+    "EVIDENCIA_CALIBRACION_VINCULADA",
+    "EVIDENCIA_CALIBRACION_DESVINCULADA",
+)
 
 
 def _active_equipment():
@@ -138,8 +175,19 @@ def _get_maintenance_or_404(item_id):
     return item
 
 
+def _get_calibration_or_404(item_id):
+    item = EquipoCalibracion.query.filter_by(id=item_id, empresa_id=current_user.empresa_id).first()
+    if not item:
+        abort(404)
+    return item
+
+
 def _redirect_back_to_maintenance(item):
     return redirect(url_for("equipamiento.detalle_mantenimiento", item_id=item.id))
+
+
+def _redirect_back_to_calibration(item):
+    return redirect(url_for("equipamiento.detalle_calibracion", item_id=item.id))
 
 
 def _estado_filter(query, model, estado):
@@ -417,6 +465,177 @@ def mantenimientos():
             equipos=Equipo.query.filter_by(empresa_id=current_user.empresa_id).order_by(Equipo.codigo.asc()).all(),
         ),
     )
+
+
+@bp.route("/calibraciones")
+@login_required
+@require_permission(calibracion_service.PERM_VER)
+def calibraciones():
+    filters = {key: request.args.get(key, "").strip() for key in ("q", "tipo", "estado")}
+    query = EquipoCalibracion.query.filter_by(empresa_id=current_user.empresa_id)
+    if filters["q"]:
+        like = f"%{filters['q']}%"
+        query = query.join(Equipo, Equipo.id == EquipoCalibracion.equipo_id).filter(
+            Equipo.empresa_id == current_user.empresa_id,
+            or_(
+                EquipoCalibracion.codigo.ilike(like),
+                Equipo.codigo.ilike(like),
+                Equipo.nombre.ilike(like),
+                EquipoCalibracion.proveedor.ilike(like),
+            ),
+        )
+    if filters["tipo"]:
+        query = query.filter(EquipoCalibracion.tipo_control == filters["tipo"])
+    if filters["estado"]:
+        query = query.filter(EquipoCalibracion.estado == filters["estado"])
+    items = query.order_by(EquipoCalibracion.fecha_planificada.asc(), EquipoCalibracion.codigo.asc()).all()
+    return render_template(
+        "equipamiento/calibraciones_index.html",
+        **_calibration_template_context(items=items, filters=filters),
+    )
+
+
+def _calibration_form_context(form_data=None):
+    return _calibration_template_context(
+        form_data=form_data or {},
+        equipos=_active_equipment(),
+        responsables=_active_users(),
+    )
+
+
+@bp.route("/calibraciones/nueva", methods=["GET", "POST"])
+@login_required
+@require_permission(calibracion_service.PERM_GESTIONAR)
+def nueva_calibracion():
+    if request.method == "POST":
+        _validate_maintenance_csrf()
+        try:
+            item = calibracion_service.programar_control(
+                current_user,
+                request.form.get("equipo_id"),
+                request.form,
+            )
+            db.session.commit()
+            flash("Control metrologico programado correctamente.", "success")
+            return redirect(url_for("equipamiento.detalle_calibracion", item_id=item.id))
+        except (EquipoCalibracionError, ValueError) as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template("equipamiento/calibracion_form.html", **_calibration_form_context(form_data=request.form))
+    return render_template("equipamiento/calibracion_form.html", **_calibration_form_context())
+
+
+@bp.route("/calibraciones/<int:item_id>")
+@login_required
+@require_permission(calibracion_service.PERM_VER)
+def detalle_calibracion(item_id):
+    item = _get_calibration_or_404(item_id)
+    history = (
+        EquipoHistorial.query
+        .filter_by(empresa_id=current_user.empresa_id, equipo_id=item.equipo_id)
+        .filter(EquipoHistorial.tipo_evento.in_(CALIBRATION_HISTORY_EVENTS))
+        .order_by(EquipoHistorial.created_at.desc(), EquipoHistorial.id.desc())
+        .all()
+    )
+    return render_template(
+        "equipamiento/calibracion_detalle.html",
+        **_calibration_template_context(
+            item=item,
+            history=history,
+            documentos=_documents_for_evidence(),
+            document_versions=_document_versions_for_evidence(),
+        ),
+    )
+
+
+@bp.route("/calibraciones/<int:item_id>/iniciar", methods=["POST"])
+@login_required
+@require_permission(calibracion_service.PERM_GESTIONAR)
+def iniciar_calibracion(item_id):
+    _validate_maintenance_csrf()
+    item = _get_calibration_or_404(item_id)
+    try:
+        calibracion_service.iniciar_control(current_user, item.id, request.form.get("fecha_inicio"))
+        db.session.commit()
+        flash("Control metrologico iniciado correctamente.", "success")
+    except EquipoCalibracionError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_back_to_calibration(item)
+
+
+@bp.route("/calibraciones/<int:item_id>/completar", methods=["POST"])
+@login_required
+@require_permission(calibracion_service.PERM_GESTIONAR)
+def completar_calibracion(item_id):
+    _validate_maintenance_csrf()
+    item = _get_calibration_or_404(item_id)
+    try:
+        calibracion_service.completar_control(current_user, item.id, request.form)
+        db.session.commit()
+        flash("Control metrologico completado correctamente.", "success")
+    except EquipoCalibracionError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_back_to_calibration(item)
+
+
+@bp.route("/calibraciones/<int:item_id>/cancelar", methods=["POST"])
+@login_required
+@require_permission(calibracion_service.PERM_GESTIONAR)
+def cancelar_calibracion(item_id):
+    _validate_maintenance_csrf()
+    item = _get_calibration_or_404(item_id)
+    try:
+        calibracion_service.cancelar_control(current_user, item.id, request.form.get("motivo"))
+        db.session.commit()
+        flash("Control metrologico cancelado correctamente.", "warning")
+    except EquipoCalibracionError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_back_to_calibration(item)
+
+
+@bp.route("/calibraciones/<int:item_id>/evidencias", methods=["POST"])
+@login_required
+@require_permission(calibracion_service.PERM_VINCULAR_EVIDENCIA)
+def vincular_evidencia_calibracion(item_id):
+    _validate_maintenance_csrf()
+    item = _get_calibration_or_404(item_id)
+    try:
+        calibracion_service.vincular_evidencia_documental(
+            current_user,
+            item.id,
+            request.form.get("documento_id"),
+            request.form.get("documento_version_id"),
+            request.form.get("tipo_evidencia"),
+            request.form.get("observaciones"),
+        )
+        db.session.commit()
+        flash("Evidencia vinculada correctamente.", "success")
+    except EquipoCalibracionError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_back_to_calibration(item)
+
+
+@bp.route("/calibraciones/evidencias/<int:evidencia_id>/desvincular", methods=["POST"])
+@login_required
+@require_permission(calibracion_service.PERM_DESVINCULAR_EVIDENCIA)
+def desvincular_evidencia_calibracion(evidencia_id):
+    _validate_maintenance_csrf()
+    evidence = EquipoCalibracionDocumento.query.filter_by(id=evidencia_id, empresa_id=current_user.empresa_id).first()
+    if not evidence:
+        abort(404)
+    item_id = evidence.calibracion_id
+    try:
+        calibracion_service.desvincular_evidencia_documental(current_user, evidence.id, request.form.get("motivo"))
+        db.session.commit()
+        flash("Evidencia desvinculada correctamente.", "warning")
+    except EquipoCalibracionError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return redirect(url_for("equipamiento.detalle_calibracion", item_id=item_id))
 
 
 @bp.route("/mantenimientos/correctivo/nuevo", methods=["GET", "POST"])
@@ -722,6 +941,12 @@ def detalle_equipo(item_id):
     item = get_equipo(current_user, item_id)
     if not item:
         abort(404)
+    metrologia_items = (
+        EquipoCalibracion.query
+        .filter_by(empresa_id=current_user.empresa_id, equipo_id=item.id)
+        .order_by(EquipoCalibracion.fecha_planificada.desc(), EquipoCalibracion.codigo.desc())
+        .all()
+    )
     document_versions = (
         DocumentoVersion.query
         .join(Documento, Documento.id == DocumentoVersion.documento_id)
@@ -734,6 +959,8 @@ def detalle_equipo(item_id):
         item=item,
         estados_operativos=ESTADOS_OPERATIVOS_EQUIPO,
         document_versions=document_versions,
+        metrologia_items=metrologia_items,
+        estado_calibracion_badge_class=_estado_calibracion_badge_class,
         equipo_history_change_labels=equipo_history_change_labels,
     )
 

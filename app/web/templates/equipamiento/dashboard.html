@@ -18,6 +18,7 @@
         {% if can('instalaciones.ver') %}<a href="{{ url_for('equipamiento.instalaciones') }}" class="btn btn-outline-primary">Instalaciones</a>{% endif %}
         {% if can('areas.ver') %}<a href="{{ url_for('equipamiento.areas') }}" class="btn btn-outline-primary">Areas</a>{% endif %}
         {% if can('equipos.ver') %}<a href="{{ url_for('equipamiento.equipos') }}" class="btn btn-primary">Equipos</a>{% endif %}
+        {% if can('equipos.ver') %}<a href="{{ url_for('equipamiento.calibraciones') }}" class="btn btn-outline-primary">Calibraciones y verificaciones</a>{% endif %}
     </div>
 </div>
 
