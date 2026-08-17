@@ -1,0 +1,37 @@
+{% extends "base_admin.html" %}
+{% block title %}Materiales y patrones de referencia{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li><li class="breadcrumb-item active">Materiales y patrones de referencia</li></ol></nav>
+<div class="page-card">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div><h1 class="mb-1">Materiales y patrones de referencia</h1><p class="text-muted mb-0">Control manual de trazabilidad, estado y evidencia documental.</p></div>
+        {% if can('equipos.editar') %}<a href="{{ url_for('equipamiento.nuevo_material_referencia') }}" class="btn btn-primary">Nuevo registro</a>{% endif %}
+    </div>
+    <form method="get" class="row g-3 mb-4">
+        <div class="col-md-4"><label class="form-label">Texto</label><input name="q" class="form-control" value="{{ filters.q }}" placeholder="Codigo, nombre o lote"></div>
+        <div class="col-md-3"><label class="form-label">Tipo</label><select name="tipo" class="form-select"><option value="">Todos</option>{% for tipo in tipos_material_referencia %}<option value="{{ tipo }}" {% if filters.tipo == tipo %}selected{% endif %}>{{ tipo_material_label(tipo) }}</option>{% endfor %}</select></div>
+        <div class="col-md-3"><label class="form-label">Estado</label><select name="estado" class="form-select"><option value="">Todos</option>{% for estado in estados_material_referencia %}<option value="{{ estado }}" {% if filters.estado == estado %}selected{% endif %}>{{ estado.replace('_', ' ') }}</option>{% endfor %}</select></div>
+        <div class="col-md-2 d-flex align-items-end"><button class="btn btn-outline-primary w-100">Filtrar</button></div>
+    </form>
+    <div class="table-responsive"><table class="table table-hover align-middle"><thead class="table-light"><tr><th>Codigo</th><th>Nombre</th><th>Tipo</th><th>Lote</th><th>Estado</th><th>Fabricante / proveedor</th><th>Recepcion</th><th>Caducidad</th><th>Responsable</th><th></th></tr></thead><tbody>
+        {% for item in items %}
+        {% set vencido = esta_vencido(item, today) %}
+        <tr>
+            <td><a href="{{ url_for('equipamiento.detalle_material_referencia', item_id=item.id) }}">{{ item.codigo }}</a>{% if vencido %}<div><span class="badge text-bg-danger">Vencido por fecha</span></div>{% endif %}</td>
+            <td>{{ item.nombre }}</td>
+            <td>{{ tipo_material_label(item.tipo) }}</td>
+            <td>{{ item.lote or '-' }}</td>
+            <td><span class="badge {{ estado_material_badge_class(item.estado) }}">{{ item.estado.replace('_', ' ') }}</span></td>
+            <td>{{ item.fabricante or '-' }}<div class="small text-muted">{{ item.proveedor or '' }}</div></td>
+            <td>{{ item.fecha_recepcion or '-' }}</td>
+            <td>{{ item.fecha_caducidad or '-' }}</td>
+            <td>{{ item.responsable.nombre if item.responsable else '-' }}</td>
+            <td class="text-end"><a href="{{ url_for('equipamiento.detalle_material_referencia', item_id=item.id) }}" class="btn btn-sm btn-outline-primary">Ver</a></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="text-center text-muted py-4">No hay materiales o patrones con los filtros seleccionados.</td></tr>
+        {% endfor %}
+    </tbody></table></div>
+</div>
+{% endblock %}

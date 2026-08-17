@@ -20,14 +20,21 @@ from app.models.equipos import (
     EquipoMantenimiento,
     EquipoMantenimientoDocumento,
     EquipoPlanMantenimiento,
+    ESTADOS_MATERIAL_REFERENCIA,
     ESTADOS_OPERATIVOS_EQUIPO,
     Instalacion,
+    MaterialReferencia,
+    MaterialReferenciaDocumento,
+    MaterialReferenciaHistorial,
+    TIPOS_EVIDENCIA_MATERIAL_REFERENCIA,
+    TIPOS_MATERIAL_REFERENCIA,
 )
 from app.models.seguridad import Usuario
 from app.security.permissions import current_user_can, require_permission
 from app.services import area_condicion_ambiental_service as ambiente_service
 from app.services import equipo_calibracion_service as calibracion_service
 from app.services import equipo_mantenimiento_service as mantenimiento_service
+from app.services import material_referencia_service as material_referencia_service
 from app.services.equipo_calibracion_service import EquipoCalibracionError
 from app.services.equipo_mantenimiento_service import EquipoMantenimientoError
 from app.services.equipamiento_service import (
@@ -48,6 +55,7 @@ from app.services.equipamiento_service import (
     update_instalacion,
 )
 from app.services.area_condicion_ambiental_service import CondicionAmbientalError
+from app.services.material_referencia_service import MaterialReferenciaError
 
 bp = Blueprint("equipamiento", __name__, url_prefix="/equipamiento")
 
@@ -102,6 +110,25 @@ def _environment_template_context(**extra):
     return context
 
 
+def _material_reference_template_context(**extra):
+    context = {
+        "csrf_token": _maintenance_csrf_token(),
+        "today": date.today(),
+        "format_decimal": _format_decimal,
+        "format_local_datetime": ambiente_service.format_local_datetime,
+        "esta_vencido": material_referencia_service.esta_vencido,
+        "estado_material_badge_class": _estado_material_badge_class,
+        "tipo_material_label": _tipo_material_label,
+        "tipos_material_referencia": TIPOS_MATERIAL_REFERENCIA,
+        "estados_material_referencia": ESTADOS_MATERIAL_REFERENCIA,
+        "tipos_evidencia_material_referencia": TIPOS_EVIDENCIA_MATERIAL_REFERENCIA,
+        "terminal_states": material_referencia_service.TERMINAL_STATES,
+        "operative_states": material_referencia_service.OPERATIVE_STATES,
+    }
+    context.update(extra)
+    return context
+
+
 def _format_decimal(value):
     if value is None:
         return "-"
@@ -138,6 +165,23 @@ def _estado_ambiental_badge_class(estado):
 
 def _condicion_activa_badge_class(activa):
     return "text-bg-success" if activa else "text-bg-secondary"
+
+
+def _estado_material_badge_class(estado):
+    return {
+        "DISPONIBLE": "text-bg-success",
+        "EN_USO": "text-bg-primary",
+        "AGOTADO": "text-bg-secondary",
+        "VENCIDO": "text-bg-danger",
+        "RETIRADO": "text-bg-dark",
+    }.get(estado, "text-bg-light")
+
+
+def _tipo_material_label(tipo):
+    return {
+        "MATERIAL_REFERENCIA": "Material de referencia",
+        "PATRON_REFERENCIA": "Patron de referencia",
+    }.get(tipo, tipo or "-")
 
 
 CALIBRATION_HISTORY_EVENTS = (
@@ -226,6 +270,13 @@ def _get_environment_condition_or_404(item_id):
     return item
 
 
+def _get_material_reference_or_404(item_id):
+    item = MaterialReferencia.query.filter_by(id=item_id, empresa_id=current_user.empresa_id).first()
+    if not item:
+        abort(404)
+    return item
+
+
 def _redirect_back_to_maintenance(item):
     return redirect(url_for("equipamiento.detalle_mantenimiento", item_id=item.id))
 
@@ -236,6 +287,10 @@ def _redirect_back_to_calibration(item):
 
 def _redirect_back_to_environment_condition(item):
     return redirect(url_for("equipamiento.detalle_condicion_ambiental", item_id=item.id))
+
+
+def _redirect_back_to_material_reference(item):
+    return redirect(url_for("equipamiento.detalle_material_referencia", item_id=item.id))
 
 
 def _estado_filter(query, model, estado):
@@ -798,6 +853,194 @@ def calibraciones():
         "equipamiento/calibraciones_index.html",
         **_calibration_template_context(items=items, filters=filters),
     )
+
+
+@bp.route("/materiales-referencia")
+@login_required
+@require_permission(material_referencia_service.PERM_VER)
+def materiales_referencia():
+    filters = {key: request.args.get(key, "").strip() for key in ("q", "tipo", "estado")}
+    query = MaterialReferencia.query.filter_by(empresa_id=current_user.empresa_id)
+    if filters["q"]:
+        like = f"%{filters['q']}%"
+        query = query.filter(or_(
+            MaterialReferencia.codigo.ilike(like),
+            MaterialReferencia.nombre.ilike(like),
+            MaterialReferencia.lote.ilike(like),
+        ))
+    if filters["tipo"]:
+        query = query.filter(MaterialReferencia.tipo == filters["tipo"])
+    if filters["estado"]:
+        query = query.filter(MaterialReferencia.estado == filters["estado"])
+    items = query.order_by(MaterialReferencia.codigo.asc()).all()
+    return render_template(
+        "equipamiento/materiales_referencia_index.html",
+        **_material_reference_template_context(items=items, filters=filters),
+    )
+
+
+def _material_reference_form_context(form_data=None):
+    return _material_reference_template_context(
+        form_data=form_data or {},
+        responsables=_active_users(),
+    )
+
+
+@bp.route("/materiales-referencia/nuevo", methods=["GET", "POST"])
+@login_required
+@require_permission(material_referencia_service.PERM_GESTIONAR)
+def nuevo_material_referencia():
+    if request.method == "POST":
+        _validate_maintenance_csrf()
+        try:
+            item = material_referencia_service.crear_material_referencia(current_user, request.form)
+            db.session.commit()
+            flash("Material o patron de referencia creado correctamente.", "success")
+            return redirect(url_for("equipamiento.detalle_material_referencia", item_id=item.id))
+        except (MaterialReferenciaError, ValueError) as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template(
+                "equipamiento/material_referencia_form.html",
+                **_material_reference_form_context(form_data=request.form),
+            )
+    return render_template(
+        "equipamiento/material_referencia_form.html",
+        **_material_reference_form_context(form_data={"tipo": "MATERIAL_REFERENCIA"}),
+    )
+
+
+@bp.route("/materiales-referencia/<int:item_id>")
+@login_required
+@require_permission(material_referencia_service.PERM_VER)
+def detalle_material_referencia(item_id):
+    item = _get_material_reference_or_404(item_id)
+    history = (
+        MaterialReferenciaHistorial.query
+        .filter_by(empresa_id=current_user.empresa_id, material_referencia_id=item.id)
+        .order_by(MaterialReferenciaHistorial.created_at.desc(), MaterialReferenciaHistorial.id.desc())
+        .all()
+    )
+    return render_template(
+        "equipamiento/material_referencia_detalle.html",
+        **_material_reference_template_context(
+            item=item,
+            history=history,
+            documentos=_documents_for_evidence(),
+            document_versions=_document_versions_for_evidence(),
+        ),
+    )
+
+
+@bp.route("/materiales-referencia/<int:item_id>/poner-en-uso", methods=["POST"])
+@login_required
+@require_permission(material_referencia_service.PERM_GESTIONAR)
+def poner_en_uso_material_referencia(item_id):
+    _validate_maintenance_csrf()
+    item = _get_material_reference_or_404(item_id)
+    try:
+        material_referencia_service.poner_en_uso(
+            current_user,
+            item.id,
+            request.form.get("fecha"),
+            request.form.get("observaciones"),
+        )
+        db.session.commit()
+        flash("Material o patron de referencia puesto en uso correctamente.", "success")
+    except MaterialReferenciaError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_back_to_material_reference(item)
+
+
+@bp.route("/materiales-referencia/<int:item_id>/agotar", methods=["POST"])
+@login_required
+@require_permission(material_referencia_service.PERM_GESTIONAR)
+def agotar_material_referencia(item_id):
+    _validate_maintenance_csrf()
+    item = _get_material_reference_or_404(item_id)
+    try:
+        material_referencia_service.agotar(current_user, item.id, request.form.get("motivo"))
+        db.session.commit()
+        flash("Material o patron de referencia marcado como agotado.", "warning")
+    except MaterialReferenciaError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_back_to_material_reference(item)
+
+
+@bp.route("/materiales-referencia/<int:item_id>/retirar", methods=["POST"])
+@login_required
+@require_permission(material_referencia_service.PERM_GESTIONAR)
+def retirar_material_referencia(item_id):
+    _validate_maintenance_csrf()
+    item = _get_material_reference_or_404(item_id)
+    try:
+        material_referencia_service.retirar(current_user, item.id, request.form.get("motivo"))
+        db.session.commit()
+        flash("Material o patron de referencia retirado correctamente.", "warning")
+    except MaterialReferenciaError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_back_to_material_reference(item)
+
+
+@bp.route("/materiales-referencia/<int:item_id>/marcar-vencido", methods=["POST"])
+@login_required
+@require_permission(material_referencia_service.PERM_GESTIONAR)
+def marcar_vencido_material_referencia(item_id):
+    _validate_maintenance_csrf()
+    item = _get_material_reference_or_404(item_id)
+    try:
+        material_referencia_service.marcar_vencido(current_user, item.id)
+        db.session.commit()
+        flash("Material o patron de referencia marcado como vencido.", "warning")
+    except MaterialReferenciaError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_back_to_material_reference(item)
+
+
+@bp.route("/materiales-referencia/<int:item_id>/evidencias", methods=["POST"])
+@login_required
+@require_permission(material_referencia_service.PERM_VINCULAR_EVIDENCIA)
+def vincular_evidencia_material_referencia(item_id):
+    _validate_maintenance_csrf()
+    item = _get_material_reference_or_404(item_id)
+    try:
+        material_referencia_service.vincular_evidencia_documental(
+            current_user,
+            item.id,
+            request.form.get("documento_id"),
+            request.form.get("documento_version_id"),
+            request.form.get("tipo_evidencia"),
+            request.form.get("observaciones"),
+        )
+        db.session.commit()
+        flash("Evidencia vinculada correctamente.", "success")
+    except MaterialReferenciaError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_back_to_material_reference(item)
+
+
+@bp.route("/materiales-referencia/evidencias/<int:evidencia_id>/desvincular", methods=["POST"])
+@login_required
+@require_permission(material_referencia_service.PERM_DESVINCULAR_EVIDENCIA)
+def desvincular_evidencia_material_referencia(evidencia_id):
+    _validate_maintenance_csrf()
+    evidence = MaterialReferenciaDocumento.query.filter_by(id=evidencia_id, empresa_id=current_user.empresa_id).first()
+    if not evidence:
+        abort(404)
+    item_id = evidence.material_referencia_id
+    try:
+        material_referencia_service.desvincular_evidencia_documental(current_user, evidence.id, request.form.get("motivo"))
+        db.session.commit()
+        flash("Evidencia desvinculada correctamente.", "warning")
+    except MaterialReferenciaError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return redirect(url_for("equipamiento.detalle_material_referencia", item_id=item_id))
 
 
 def _calibration_form_context(form_data=None):

@@ -20,6 +20,7 @@
         {% if can('equipos.ver') %}<a href="{{ url_for('equipamiento.equipos') }}" class="btn btn-primary">Equipos</a>{% endif %}
         {% if can('equipos.ver') %}<a href="{{ url_for('equipamiento.calibraciones') }}" class="btn btn-outline-primary">Calibraciones y verificaciones</a>{% endif %}
         {% if can('equipos.ver') %}<a href="{{ url_for('equipamiento.condiciones_ambientales') }}" class="btn btn-outline-primary">Condiciones ambientales</a>{% endif %}
+        {% if can('equipos.ver') %}<a href="{{ url_for('equipamiento.materiales_referencia') }}" class="btn btn-outline-primary">Materiales y patrones</a>{% endif %}
     </div>
 </div>
 

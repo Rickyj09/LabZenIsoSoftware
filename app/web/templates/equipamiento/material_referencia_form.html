@@ -1,0 +1,33 @@
+{% extends "base_admin.html" %}
+{% block title %}Nuevo material o patron de referencia{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb" class="mb-3"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.dashboard') }}">Instalaciones y Equipamiento</a></li><li class="breadcrumb-item"><a href="{{ url_for('equipamiento.materiales_referencia') }}">Materiales y patrones de referencia</a></li><li class="breadcrumb-item active">Nuevo</li></ol></nav>
+<div class="page-card">
+    <div class="mb-4"><h1 class="mb-1">Nuevo material o patron de referencia</h1><p class="text-muted mb-0">Registra materiales y patrones con trazabilidad documental.</p></div>
+    <form method="post" class="row g-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="col-md-3"><label class="form-label">Codigo</label><input name="codigo" class="form-control" value="{{ form_data.codigo or '' }}" required></div>
+        <div class="col-md-6"><label class="form-label">Nombre</label><input name="nombre" class="form-control" value="{{ form_data.nombre or '' }}" required></div>
+        <div class="col-md-3"><label class="form-label">Tipo</label><select name="tipo" class="form-select" required><option value="">Selecciona tipo</option>{% for tipo in tipos_material_referencia %}<option value="{{ tipo }}" {% if form_data.tipo == tipo %}selected{% endif %}>{{ tipo_material_label(tipo) }}</option>{% endfor %}</select></div>
+        <div class="col-12"><label class="form-label">Descripcion</label><textarea name="descripcion" class="form-control" rows="2">{{ form_data.descripcion or '' }}</textarea></div>
+
+        <div class="col-md-3"><label class="form-label">Fabricante</label><input name="fabricante" class="form-control" value="{{ form_data.fabricante or '' }}"></div>
+        <div class="col-md-3"><label class="form-label">Proveedor</label><input name="proveedor" class="form-control" value="{{ form_data.proveedor or '' }}"></div>
+        <div class="col-md-2"><label class="form-label">Lote</label><input name="lote" class="form-control" value="{{ form_data.lote or '' }}"></div>
+        <div class="col-md-2"><label class="form-label">Certificado numero</label><input name="certificado_numero" class="form-control" value="{{ form_data.certificado_numero or '' }}"></div>
+        <div class="col-md-2"><label class="form-label">Referencia fabricante</label><input name="referencia_fabricante" class="form-control" value="{{ form_data.referencia_fabricante or '' }}"></div>
+
+        <div class="col-md-3"><label class="form-label">Fecha recepcion</label><input type="date" name="fecha_recepcion" class="form-control" value="{{ form_data.fecha_recepcion or today }}" required></div>
+        <div class="col-md-3"><label class="form-label">Fecha caducidad</label><input type="date" name="fecha_caducidad" class="form-control" value="{{ form_data.fecha_caducidad or '' }}"></div>
+        <div class="col-md-3"><label class="form-label">Cantidad inicial</label><input type="number" step="0.0001" min="0" name="cantidad_inicial" class="form-control" value="{{ form_data.cantidad_inicial or '' }}"></div>
+        <div class="col-md-3"><label class="form-label">Cantidad disponible</label><input type="number" step="0.0001" min="0" name="cantidad_disponible" class="form-control" value="{{ form_data.cantidad_disponible or '' }}"></div>
+        <div class="col-md-3"><label class="form-label">Unidad</label><input name="unidad" class="form-control" value="{{ form_data.unidad or '' }}"></div>
+        <div class="col-md-3"><label class="form-label">Ubicacion</label><input name="ubicacion" class="form-control" value="{{ form_data.ubicacion or '' }}"></div>
+        <div class="col-md-6"><label class="form-label">Responsable</label><select name="responsable_id" class="form-select"><option value="">Sin responsable</option>{% for user in responsables %}<option value="{{ user.id }}" {% if form_data.responsable_id|string == user.id|string %}selected{% endif %}>{{ user.nombre }} {{ user.apellido or '' }}</option>{% endfor %}</select></div>
+        <div class="col-12"><label class="form-label">Condiciones de almacenamiento</label><textarea name="condiciones_almacenamiento" class="form-control" rows="2">{{ form_data.condiciones_almacenamiento or '' }}</textarea></div>
+        <div class="col-12"><label class="form-label">Observaciones</label><textarea name="observaciones" class="form-control" rows="3">{{ form_data.observaciones or '' }}</textarea></div>
+        <div class="col-12 d-flex gap-2"><button class="btn btn-primary">Guardar</button><a href="{{ url_for('equipamiento.materiales_referencia') }}" class="btn btn-outline-secondary">Cancelar</a></div>
+    </form>
+</div>
+{% endblock %}

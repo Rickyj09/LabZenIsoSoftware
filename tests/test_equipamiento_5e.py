@@ -97,6 +97,17 @@ class Equipamiento5EMaterialesReferenciaTest(unittest.TestCase):
     def user(self, user_id=201):
         return db.session.get(Usuario, user_id)
 
+    def login(self, user_id=201):
+        client = self.app.test_client()
+        with client.session_transaction() as session:
+            session["_user_id"] = str(user_id)
+            session["_fresh"] = True
+        return client
+
+    def csrf_token(self, client):
+        with client.session_transaction() as session:
+            return session["equipamiento_mantenimiento_csrf"]
+
     def create_material(self, user_id=201, **overrides):
         data = {
             "codigo": "MR-001",
@@ -297,6 +308,244 @@ class Equipamiento5EMaterialesReferenciaTest(unittest.TestCase):
         material_service.poner_en_uso(admin, material.id, date(2026, 8, 20))
         self.assertEqual(material_service.en_uso(admin), [material])
         self.assertTrue(all(event.empresa_id == 101 for event in material.historial))
+
+    def test_web_lists_materials_with_company_scope_menu_and_filters(self):
+        client = self.login()
+        material = self.create_material(codigo="MR-WEB-LIST", lote="LOTE-A")
+        standard = self.create_material(codigo="PR-WEB-LIST", nombre="Patron masa", tipo="PATRON_REFERENCIA", lote="LOTE-B")
+        self.create_material(user_id=205, codigo="MR-OTHER", responsable_id=205)
+        db.session.commit()
+
+        response = client.get("/equipamiento/materiales-referencia")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Materiales y patrones de referencia", body)
+        self.assertIn(material.codigo, body)
+        self.assertIn(standard.codigo, body)
+        self.assertNotIn("MR-OTHER", body)
+        self.assertIn("Materiales y patrones", client.get("/equipamiento/").get_data(as_text=True))
+        self.assertIn("Materiales y patrones de referencia", client.get("/equipamiento/").get_data(as_text=True))
+
+        by_type = client.get("/equipamiento/materiales-referencia?tipo=PATRON_REFERENCIA").get_data(as_text=True)
+        self.assertIn("PR-WEB-LIST", by_type)
+        self.assertNotIn("MR-WEB-LIST", by_type)
+        by_text = client.get("/equipamiento/materiales-referencia?q=LOTE-A").get_data(as_text=True)
+        self.assertIn("MR-WEB-LIST", by_text)
+        self.assertNotIn("PR-WEB-LIST", by_text)
+        by_state = client.get("/equipamiento/materiales-referencia?estado=DISPONIBLE").get_data(as_text=True)
+        self.assertIn("MR-WEB-LIST", by_state)
+
+    def test_web_create_form_creates_material_and_standard_and_shows_backend_validation(self):
+        client = self.login()
+        form = client.get("/equipamiento/materiales-referencia/nuevo")
+        self.assertEqual(form.status_code, 200)
+        self.assertIn("Nuevo material o patron de referencia", form.get_data(as_text=True))
+        token = self.csrf_token(client)
+
+        response = client.post("/equipamiento/materiales-referencia/nuevo", data={
+            "csrf_token": token,
+            "codigo": "MR-WEB-CREATE",
+            "nombre": "Buffer web",
+            "tipo": "MATERIAL_REFERENCIA",
+            "fabricante": "Fabricante web",
+            "proveedor": "Proveedor web",
+            "lote": "L-WEB",
+            "certificado_numero": "CERT-WEB",
+            "referencia_fabricante": "REF-WEB",
+            "fecha_recepcion": "2026-08-17",
+            "fecha_caducidad": "2027-08-17",
+            "ubicacion": "Bodega web",
+            "condiciones_almacenamiento": "2-8 C",
+            "responsable_id": "202",
+            "cantidad_inicial": "100",
+            "unidad": "mL",
+        })
+        self.assertEqual(response.status_code, 302)
+        material = MaterialReferencia.query.filter_by(codigo="MR-WEB-CREATE").one()
+        self.assertEqual(material.tipo, "MATERIAL_REFERENCIA")
+        self.assertEqual(material.estado, "DISPONIBLE")
+
+        response = client.post("/equipamiento/materiales-referencia/nuevo", data={
+            "csrf_token": token,
+            "codigo": "PR-WEB-CREATE",
+            "nombre": "Pesa patron web",
+            "tipo": "PATRON_REFERENCIA",
+            "fecha_recepcion": "2026-08-17",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNotNone(MaterialReferencia.query.filter_by(codigo="PR-WEB-CREATE", tipo="PATRON_REFERENCIA").first())
+
+        invalid = client.post("/equipamiento/materiales-referencia/nuevo", data={
+            "csrf_token": token,
+            "codigo": "MR-WEB-BAD",
+            "nombre": "Bad",
+            "tipo": "MATERIAL_REFERENCIA",
+            "fecha_recepcion": "2026-08-17",
+            "fecha_caducidad": "2026-08-16",
+        })
+        self.assertEqual(invalid.status_code, 200)
+        self.assertIn("caducidad", invalid.get_data(as_text=True))
+        self.assertIsNone(MaterialReferencia.query.filter_by(codigo="MR-WEB-BAD").first())
+
+        cross_company = client.post("/equipamiento/materiales-referencia/nuevo", data={
+            "csrf_token": token,
+            "codigo": "MR-WEB-CROSS",
+            "nombre": "Cross",
+            "tipo": "MATERIAL_REFERENCIA",
+            "fecha_recepcion": "2026-08-17",
+            "responsable_id": "205",
+        })
+        self.assertEqual(cross_company.status_code, 200)
+        self.assertIsNone(MaterialReferencia.query.filter_by(codigo="MR-WEB-CROSS").first())
+
+    def test_web_detail_state_transitions_expiration_and_history(self):
+        client = self.login()
+        material = self.create_material(
+            codigo="MR-WEB-FLOW",
+            fecha_recepcion=date(2026, 7, 1),
+            fecha_caducidad=date(2026, 8, 1),
+        )
+        other_material = self.create_material(user_id=205, codigo="MR-WEB-OTHER", responsable_id=205)
+        db.session.commit()
+
+        detail = client.get(f"/equipamiento/materiales-referencia/{material.id}")
+        body = detail.get_data(as_text=True)
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn("MR-WEB-FLOW", body)
+        self.assertIn("Vencido por fecha", body)
+        self.assertIn("L-2026", body)
+        self.assertIn("CERT-001", body)
+        self.assertIn("Almacen frio", body)
+        self.assertIn("Tecnico", body)
+        self.assertIn("Poner en uso", body)
+        self.assertEqual(client.get(f"/equipamiento/materiales-referencia/{other_material.id}").status_code, 404)
+        token = self.csrf_token(client)
+
+        response = client.post(f"/equipamiento/materiales-referencia/{material.id}/poner-en-uso", data={
+            "csrf_token": token,
+            "fecha": "2026-08-02",
+            "observaciones": "Apertura web",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(material.estado, "EN_USO")
+        self.assertEqual(material.fecha_apertura, date(2026, 8, 2))
+        body = client.get(f"/equipamiento/materiales-referencia/{material.id}").get_data(as_text=True)
+        self.assertIn("EN USO", body)
+        self.assertIn("2026-08-02", body)
+        self.assertIn("MATERIAL REFERENCIA PUESTO EN USO", body)
+        self.assertIn("Marcar vencido", body)
+
+        response = client.post(f"/equipamiento/materiales-referencia/{material.id}/marcar-vencido", data={"csrf_token": token})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(material.estado, "VENCIDO")
+        body = client.get(f"/equipamiento/materiales-referencia/{material.id}").get_data(as_text=True)
+        self.assertIn("VENCIDO", body)
+        self.assertIn("MATERIAL REFERENCIA VENCIDO", body)
+        self.assertNotIn("<h5 class=\"mb-3\">Poner en uso</h5>", body)
+        self.assertNotIn("Marcar agotado", body)
+        self.assertNotIn("Retirar", body)
+
+    def test_web_agotar_and_retirar_turn_detail_read_only(self):
+        client = self.login()
+        exhausted = self.create_material(codigo="MR-WEB-AGOTAR")
+        retired = self.create_material(codigo="MR-WEB-RETIRAR")
+        db.session.commit()
+        client.get(f"/equipamiento/materiales-referencia/{exhausted.id}")
+        token = self.csrf_token(client)
+
+        response = client.post(f"/equipamiento/materiales-referencia/{exhausted.id}/agotar", data={
+            "csrf_token": token,
+            "motivo": "Consumo web",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(exhausted.estado, "AGOTADO")
+        body = client.get(f"/equipamiento/materiales-referencia/{exhausted.id}").get_data(as_text=True)
+        self.assertIn("AGOTADO", body)
+        self.assertIn("MATERIAL REFERENCIA AGOTADO", body)
+        self.assertNotIn("Vincular</button>", body)
+        self.assertNotIn("Desvincular", body)
+
+        missing_reason = client.post(f"/equipamiento/materiales-referencia/{retired.id}/retirar", data={
+            "csrf_token": token,
+            "motivo": "",
+        })
+        self.assertEqual(missing_reason.status_code, 302)
+        self.assertEqual(retired.estado, "DISPONIBLE")
+        response = client.post(f"/equipamiento/materiales-referencia/{retired.id}/retirar", data={
+            "csrf_token": token,
+            "motivo": "Decision tecnica web",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(retired.estado, "RETIRADO")
+        body = client.get(f"/equipamiento/materiales-referencia/{retired.id}").get_data(as_text=True)
+        self.assertIn("RETIRADO", body)
+        self.assertNotIn("Poner en uso", body)
+        self.assertNotIn("Marcar agotado", body)
+
+    def test_web_evidence_selector_link_unlink_and_terminal_immutability(self):
+        client = self.login()
+        material = self.create_material(codigo="MR-WEB-EVID")
+        document, version = self.add_document_version()
+        other_document, other_version = self.add_document_version(document_id=503, version_id=1503, code="DOC-MR-2")
+        other_company_document, other_company_version = self.add_document_version(empresa_id=102, document_id=502, version_id=1502, code="DOC-OTRA")
+        db.session.commit()
+
+        detail = client.get(f"/equipamiento/materiales-referencia/{material.id}")
+        body = detail.get_data(as_text=True)
+        self.assertIn('id="material-documento-select"', body)
+        self.assertIn('id="material-version-select" required disabled', body)
+        version_data = body.split('<script type="application/json" id="material-versiones-data">', 1)[1].split("</script>", 1)[0]
+        self.assertIn(f'"documento_id": {document.id}', version_data)
+        self.assertIn(f'"documento_id": {other_document.id}', version_data)
+        self.assertNotIn("DOC-OTRA", body)
+        self.assertNotIn(f'"documento_id": {other_company_document.id}', version_data)
+        token = self.csrf_token(client)
+
+        bad = client.post(f"/equipamiento/materiales-referencia/{material.id}/evidencias", data={
+            "csrf_token": token,
+            "documento_id": document.id,
+            "documento_version_id": other_version.id,
+            "tipo_evidencia": "CERTIFICADO",
+        })
+        self.assertEqual(bad.status_code, 302)
+        self.assertEqual(MaterialReferenciaDocumento.query.filter_by(material_referencia_id=material.id).count(), 0)
+
+        response = client.post(f"/equipamiento/materiales-referencia/{material.id}/evidencias", data={
+            "csrf_token": token,
+            "documento_id": document.id,
+            "documento_version_id": version.id,
+            "tipo_evidencia": "CERTIFICADO",
+            "observaciones": "Certificado web",
+        })
+        self.assertEqual(response.status_code, 302)
+        evidence = MaterialReferenciaDocumento.query.filter_by(material_referencia_id=material.id).one()
+        body = client.get(f"/equipamiento/materiales-referencia/{material.id}").get_data(as_text=True)
+        self.assertIn("Certificado web", body)
+        self.assertIn("EVIDENCIA MATERIAL REFERENCIA VINCULADA", body)
+        self.assertIn("Desvincular", body)
+
+        response = client.post(f"/equipamiento/materiales-referencia/evidencias/{evidence.id}/desvincular", data={
+            "csrf_token": token,
+            "motivo": "Cambio de certificado",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(MaterialReferenciaDocumento.query.filter_by(material_referencia_id=material.id).count(), 0)
+
+        evidence = material_service.vincular_evidencia_documental(self.user(), material.id, document.id, version.id, "CERTIFICADO", "Final")
+        material_service.retirar(self.user(), material.id, "Cierre")
+        db.session.commit()
+        body = client.get(f"/equipamiento/materiales-referencia/{material.id}").get_data(as_text=True)
+        self.assertIn("Final", body)
+        self.assertNotIn('id="material-documento-select"', body)
+        self.assertNotIn("Vincular</button>", body)
+        self.assertNotIn("Desvincular", body)
+        response = client.post(f"/equipamiento/materiales-referencia/evidencias/{evidence.id}/desvincular", data={
+            "csrf_token": token,
+            "motivo": "Retiro posterior",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNotNone(db.session.get(MaterialReferenciaDocumento, evidence.id))
 
 
 if __name__ == "__main__":

@@ -183,6 +183,10 @@
                href="{{ url_for('equipamiento.condiciones_ambientales') }}">
                 Condiciones ambientales
             </a>
+            <a class="sidebar-link {% if request.endpoint in ['equipamiento.materiales_referencia', 'equipamiento.nuevo_material_referencia', 'equipamiento.detalle_material_referencia'] %}active{% endif %}"
+               href="{{ url_for('equipamiento.materiales_referencia') }}">
+                Materiales y patrones de referencia
+            </a>
             {% endif %}
 
             {% if can('equipos.mantenimientos.ver') %}
