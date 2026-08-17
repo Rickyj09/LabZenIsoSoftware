@@ -12,7 +12,10 @@ from app.models.laboratorio import (
     CadenaCustodia,
 )
 from app.models.equipos import (
+    AreaCondicionAmbiental,
+    AreaHistorialAmbiental,
     AreaAmbiente,
+    AreaMedicionAmbiental,
     Equipo,
     EquipoCalibracion,
     EquipoCalibracionDocumento,

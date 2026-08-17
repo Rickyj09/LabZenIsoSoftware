@@ -22,6 +22,16 @@ TIPOS_CONTROL_METROLOGICO = ("CALIBRACION", "VERIFICACION")
 
 ESTADOS_CALIBRACION_EQUIPO = ("PROGRAMADO", "EN_PROCESO", "COMPLETADO", "CANCELADO")
 
+ESTADOS_MEDICION_AMBIENTAL = ("CONFORME", "FUERA_DE_LIMITE")
+
+TIPOS_EVENTO_AREA_AMBIENTAL = (
+    "CONDICION_AMBIENTAL_CREADA",
+    "CONDICION_AMBIENTAL_ACTUALIZADA",
+    "CONDICION_AMBIENTAL_INACTIVADA",
+    "MEDICION_AMBIENTAL_REGISTRADA",
+    "MEDICION_AMBIENTAL_FUERA_DE_LIMITE",
+)
+
 TIPOS_EVENTO_EQUIPO = (
     "CREACION",
     "ACTUALIZACION",
@@ -96,6 +106,115 @@ class AreaAmbiente(TenantMixin, BaseModel):
     empresa = db.relationship("Empresa", back_populates="areas_ambientes")
     instalacion = db.relationship("Instalacion", back_populates="areas")
     equipos = db.relationship("Equipo", back_populates="area_ambiente", lazy=True)
+    condiciones_ambientales = db.relationship(
+        "AreaCondicionAmbiental",
+        back_populates="area_ambiente",
+        lazy=True,
+        cascade="all, delete-orphan",
+    )
+    mediciones_ambientales = db.relationship(
+        "AreaMedicionAmbiental",
+        back_populates="area_ambiente",
+        lazy=True,
+        cascade="all, delete-orphan",
+    )
+    historial_ambiental = db.relationship(
+        "AreaHistorialAmbiental",
+        back_populates="area_ambiente",
+        lazy=True,
+        order_by="AreaHistorialAmbiental.created_at.desc(), AreaHistorialAmbiental.id.desc()",
+        cascade="all, delete-orphan",
+    )
+
+
+class AreaCondicionAmbiental(TenantMixin, BaseModel):
+    __tablename__ = "area_condiciones_ambientales"
+    __table_args__ = (
+        db.UniqueConstraint("empresa_id", "area_ambiente_id", "codigo", name="uq_area_condicion_ambiental_codigo"),
+        db.CheckConstraint(
+            "limite_minimo IS NOT NULL OR limite_maximo IS NOT NULL",
+            name="ck_area_condicion_ambiental_limite_requerido",
+        ),
+        db.CheckConstraint(
+            "limite_minimo IS NULL OR limite_maximo IS NULL OR limite_minimo <= limite_maximo",
+            name="ck_area_condicion_ambiental_limites_ordenados",
+        ),
+        db.Index("ix_area_condiciones_ambientales_empresa_area", "empresa_id", "area_ambiente_id"),
+        db.Index("ix_area_condiciones_ambientales_empresa_activa", "empresa_id", "activa"),
+    )
+
+    area_ambiente_id = db.Column(db.BigInteger, db.ForeignKey("areas_ambientes.id"), nullable=False)
+    codigo = db.Column(db.String(50), nullable=False)
+    nombre = db.Column(db.String(150), nullable=False)
+    unidad = db.Column(db.String(30), nullable=False)
+    limite_minimo = db.Column(db.Numeric(14, 4))
+    limite_maximo = db.Column(db.Numeric(14, 4))
+    valor_referencia = db.Column(db.Numeric(14, 4))
+    activa = db.Column(db.Boolean, nullable=False, default=True)
+    observaciones = db.Column(db.Text)
+
+    empresa = db.relationship("Empresa")
+    area_ambiente = db.relationship("AreaAmbiente", back_populates="condiciones_ambientales")
+    mediciones = db.relationship(
+        "AreaMedicionAmbiental",
+        back_populates="condicion_ambiental",
+        lazy=True,
+        cascade="all, delete-orphan",
+    )
+
+
+class AreaMedicionAmbiental(TenantMixin, BaseModel):
+    __tablename__ = "area_mediciones_ambientales"
+    __table_args__ = (
+        db.CheckConstraint("estado IN ('CONFORME', 'FUERA_DE_LIMITE')", name="ck_area_medicion_ambiental_estado_valido"),
+        db.Index("ix_area_mediciones_ambientales_empresa_area", "empresa_id", "area_ambiente_id"),
+        db.Index("ix_area_mediciones_ambientales_condicion", "condicion_ambiental_id"),
+        db.Index("ix_area_mediciones_ambientales_fecha", "fecha_hora_medicion"),
+        db.Index("ix_area_mediciones_ambientales_empresa_estado", "empresa_id", "estado"),
+    )
+
+    area_ambiente_id = db.Column(db.BigInteger, db.ForeignKey("areas_ambientes.id"), nullable=False)
+    condicion_ambiental_id = db.Column(db.BigInteger, db.ForeignKey("area_condiciones_ambientales.id"), nullable=False)
+    fecha_hora_medicion = db.Column(db.DateTime(timezone=True), nullable=False)
+    valor = db.Column(db.Numeric(14, 4), nullable=False)
+    estado = db.Column(db.String(30), nullable=False)
+    limite_minimo_aplicado = db.Column(db.Numeric(14, 4))
+    limite_maximo_aplicado = db.Column(db.Numeric(14, 4))
+    unidad_aplicada = db.Column(db.String(30), nullable=False)
+    observaciones = db.Column(db.Text)
+    registrado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"), nullable=False)
+
+    empresa = db.relationship("Empresa")
+    area_ambiente = db.relationship("AreaAmbiente", back_populates="mediciones_ambientales")
+    condicion_ambiental = db.relationship("AreaCondicionAmbiental", back_populates="mediciones")
+    registrado_por = db.relationship("Usuario", foreign_keys=[registrado_por_id])
+
+
+class AreaHistorialAmbiental(TenantMixin, BaseModel):
+    __tablename__ = "area_historial_ambiental"
+    __table_args__ = (
+        db.CheckConstraint(
+            "tipo_evento IN ('CONDICION_AMBIENTAL_CREADA', 'CONDICION_AMBIENTAL_ACTUALIZADA', 'CONDICION_AMBIENTAL_INACTIVADA', 'MEDICION_AMBIENTAL_REGISTRADA', 'MEDICION_AMBIENTAL_FUERA_DE_LIMITE')",
+            name="ck_area_historial_ambiental_tipo_evento_valido",
+        ),
+        db.Index("ix_area_historial_ambiental_empresa_area", "empresa_id", "area_ambiente_id"),
+        db.Index("ix_area_historial_ambiental_tipo_evento", "tipo_evento"),
+    )
+
+    area_ambiente_id = db.Column(db.BigInteger, db.ForeignKey("areas_ambientes.id"), nullable=False)
+    condicion_ambiental_id = db.Column(db.BigInteger, db.ForeignKey("area_condiciones_ambientales.id"))
+    medicion_ambiental_id = db.Column(db.BigInteger, db.ForeignKey("area_mediciones_ambientales.id"))
+    tipo_evento = db.Column(db.String(50), nullable=False)
+    descripcion = db.Column(db.Text)
+    datos_antes = db.Column(db.JSON)
+    datos_despues = db.Column(db.JSON)
+    usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+
+    empresa = db.relationship("Empresa")
+    area_ambiente = db.relationship("AreaAmbiente", back_populates="historial_ambiental")
+    condicion_ambiental = db.relationship("AreaCondicionAmbiental", foreign_keys=[condicion_ambiental_id])
+    medicion_ambiental = db.relationship("AreaMedicionAmbiental", foreign_keys=[medicion_ambiental_id])
+    usuario = db.relationship("Usuario", foreign_keys=[usuario_id])
 
 
 class Equipo(TenantMixin, BaseModel):
