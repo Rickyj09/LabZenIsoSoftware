@@ -1521,6 +1521,7 @@ def detalle_equipo(item_id):
         csrf_token=csrf_token,
         estado_calibracion_badge_class=_estado_calibracion_badge_class,
         equipo_history_change_labels=equipo_history_change_labels,
+        format_local_datetime=ambiente_service.format_local_datetime,
     )
 
 

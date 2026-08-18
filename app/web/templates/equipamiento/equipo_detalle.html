@@ -48,7 +48,7 @@
             <dl class="row mb-0">
                 <dt class="col-sm-4">Instalacion</dt><dd class="col-sm-8">{{ item.instalacion.nombre if item.instalacion else '-' }}</dd>
                 <dt class="col-sm-4">Area</dt><dd class="col-sm-8">{{ item.area_ambiente.nombre if item.area_ambiente else '-' }}</dd>
-                <dt class="col-sm-4">Ubicacion</dt><dd class="col-sm-8">{{ item.ubicacion_especifica or item.ubicacion or '-' }}</dd>
+                <dt class="col-sm-4">Ubicacion</dt><dd class="col-sm-8">{{ item.ubicacion_especifica or '-' }}</dd>
                 <dt class="col-sm-4">Responsable</dt><dd class="col-sm-8">{{ item.responsable or '-' }}</dd>
             </dl>
         </div>
@@ -130,7 +130,7 @@
                         {% for event in item.historial %}
                         {% set previous_change, new_change = equipo_history_change_labels(event) %}
                         <tr>
-                            <td>{{ event.created_at.strftime('%Y-%m-%d %H:%M') if event.created_at else '' }}</td>
+                            <td>{{ format_local_datetime(event.created_at) }}</td>
                             <td>{{ event.tipo_evento.replace('_', ' ') }}</td>
                             <td>
                                 <div>{{ event.descripcion or '' }}</div>

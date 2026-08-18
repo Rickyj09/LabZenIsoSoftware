@@ -1,5 +1,9 @@
+import os
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from flask import current_app, has_app_context
 
 from app.extensions import db
 from app.models.equipos import (
@@ -31,7 +35,14 @@ def _clean(value, upper=False):
 
 
 def local_timezone():
-    return datetime.now().astimezone().tzinfo
+    timezone_name = None
+    if has_app_context():
+        timezone_name = current_app.config.get("APP_TIMEZONE")
+    timezone_name = timezone_name or os.getenv("APP_TIMEZONE") or "America/Guayaquil"
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        return datetime.now().astimezone().tzinfo
 
 
 def to_local_datetime(value):

@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
@@ -24,6 +24,7 @@ from app.services.equipamiento_service import (
     link_document_version,
     update_equipo,
 )
+from app.services import area_condicion_ambiental_service as ambient_service
 
 
 EQUIPAMIENTO_PERMISSIONS = (
@@ -56,6 +57,7 @@ class Equipamiento5ATest(unittest.TestCase):
             "SQLALCHEMY_ENGINE_OPTIONS": {},
             "DOCUMENT_STORAGE_ROOT": self.temp_directory.name,
             "DOCUMENT_LEGACY_STORAGE_ROOT": self.temp_directory.name,
+            "APP_TIMEZONE": "America/Guayaquil",
         })
         self.context = self.app.app_context()
         self.context.push()
@@ -269,8 +271,140 @@ class Equipamiento5ATest(unittest.TestCase):
         self.assertIn("Mesa de balanzas 2", body)
         self.assertNotIn("2:4:Mesa", body)
         self.assertIn("CAMBIO UBICACION", body)
-        self.assertIn("2026-08-04 12:56", body)
+        self.assertIn(ambient_service.format_local_datetime(event.created_at), body)
         self.assertIn("Calidad", body)
+
+    def test_detail_renders_installation_area_and_specific_location_independently(self):
+        installation = create_instalacion(self.user(), {
+            "codigo": "INST-BETA-001",
+            "nombre": "Laboratorio Beta Equipamiento",
+            "estado": "activo",
+        })
+        db.session.flush()
+        area = create_area(self.user(), {
+            "instalacion_id": installation.id,
+            "codigo": "AREA-BETA-001",
+            "nombre": "Laboratorio Beta Equipos",
+            "tipo": "Laboratorio",
+            "estado": "activo",
+        })
+        equipment = create_equipo(self.user(), {
+            **self.equipo_data(installation, area, code="EQ-BETA-001"),
+            "nombre": "Balanza analitica Beta",
+            "ubicacion": "AREA-BETA-001 - Laboratorio Beta Equipos",
+            "ubicacion_especifica": "Meson tecnico Beta 1",
+        })
+        db.session.commit()
+
+        response = self.login(201).get(f"/equipamiento/equipos/{equipment.id}")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(equipment.instalacion.nombre, "Laboratorio Beta Equipamiento")
+        self.assertEqual(equipment.area_ambiente.nombre, "Laboratorio Beta Equipos")
+        self.assertEqual(equipment.ubicacion_especifica, "Meson tecnico Beta 1")
+        self.assertIn("Laboratorio Beta Equipamiento", body)
+        self.assertIn("Laboratorio Beta Equipos", body)
+        self.assertIn("Meson tecnico Beta 1", body)
+        self.assertNotIn("AREA-BETA-001 - Laboratorio Beta Equipos", body)
+
+    def test_web_equipment_preserves_area_specific_location_and_observations_independently(self):
+        client = self.login(201)
+        installation = create_instalacion(self.user(), {
+            "codigo": "INST-BETA-001",
+            "nombre": "Laboratorio Beta Equipamiento",
+            "estado": "activo",
+        })
+        db.session.flush()
+        area = create_area(self.user(), {
+            "instalacion_id": installation.id,
+            "codigo": "AREA-BETA-001",
+            "nombre": "Laboratorio Beta Equipos",
+            "tipo": "Laboratorio",
+            "estado": "activo",
+        })
+        db.session.commit()
+
+        form = client.get("/equipamiento/equipos/nuevo")
+        self.assertEqual(form.status_code, 200)
+        token = self.csrf_token(client)
+        create_payload = {
+            **self.equipo_data(installation, area, code="EQ-BETA-001"),
+            "csrf_token": token,
+            "nombre": "Balanza analitica Beta",
+            "ubicacion_especifica": "Meson tecnico Beta 1",
+            "observaciones": "Observacion beta independiente",
+        }
+
+        created = client.post("/equipamiento/equipos/nuevo", data=create_payload)
+        self.assertEqual(created.status_code, 302)
+        equipment = Equipo.query.filter_by(codigo="EQ-BETA-001").one()
+
+        self.assertEqual(equipment.area_ambiente_id, area.id)
+        self.assertIsNone(equipment.ubicacion)
+        self.assertEqual(equipment.ubicacion_especifica, "Meson tecnico Beta 1")
+        self.assertEqual(equipment.observaciones, "Observacion beta independiente")
+
+        edit_form = client.get(f"/equipamiento/equipos/{equipment.id}/editar")
+        edit_body = edit_form.get_data(as_text=True)
+
+        self.assertEqual(edit_form.status_code, 200)
+        self.assertIn(
+            f'<option value="{area.id}" selected>AREA-BETA-001 - Laboratorio Beta Equipos</option>',
+            edit_body,
+        )
+        self.assertIn('id="equipo-ubicacion-especifica" name="ubicacion_especifica"', edit_body)
+        self.assertIn('value="Meson tecnico Beta 1"', edit_body)
+        self.assertIn('id="equipo-observaciones" name="observaciones"', edit_body)
+        self.assertIn(">Observacion beta independiente</textarea>", edit_body)
+
+        detail = client.get(f"/equipamiento/equipos/{equipment.id}")
+        detail_body = detail.get_data(as_text=True)
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn("Laboratorio Beta Equipos", detail_body)
+        self.assertIn("Meson tecnico Beta 1", detail_body)
+        self.assertNotIn("AREA-BETA-001 - Laboratorio Beta Equipos", detail_body)
+
+        token = self.csrf_token(client)
+        edit_payload = {
+            **self.equipo_data(installation, area, code="EQ-BETA-001"),
+            "csrf_token": token,
+            "nombre": "Balanza analitica Beta",
+            "ubicacion_especifica": "Meson tecnico Beta 2",
+            "observaciones": "Observacion beta modificada",
+        }
+
+        edited = client.post(f"/equipamiento/equipos/{equipment.id}/editar", data=edit_payload)
+        self.assertEqual(edited.status_code, 302)
+        db.session.refresh(equipment)
+
+        self.assertEqual(equipment.area_ambiente_id, area.id)
+        self.assertIsNone(equipment.ubicacion)
+        self.assertEqual(equipment.ubicacion_especifica, "Meson tecnico Beta 2")
+        self.assertEqual(equipment.observaciones, "Observacion beta modificada")
+
+    def test_detail_renders_equipment_history_timestamp_in_application_timezone(self):
+        installation, area = self.create_basic_location()
+        equipment = create_equipo(self.user(), self.equipo_data(installation, area, code="EQ-TZ"))
+        db.session.flush()
+        event = EquipoHistorial(
+            empresa_id=101,
+            equipo_id=equipment.id,
+            tipo_evento="CREACION",
+            descripcion="Equipo creado.",
+            usuario_id=201,
+            created_at=datetime(2026, 8, 18, 1, 56, tzinfo=timezone.utc),
+        )
+        db.session.add(event)
+        db.session.commit()
+
+        response = self.login(201).get(f"/equipamiento/equipos/{equipment.id}")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("2026-08-17 20:56", body)
+        self.assertNotIn("2026-08-18 01:56", body)
 
     def test_equipment_code_unique_per_company_and_repeat_allowed_between_companies(self):
         installation, area = self.create_basic_location()

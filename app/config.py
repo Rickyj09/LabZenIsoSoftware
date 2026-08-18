@@ -127,6 +127,7 @@ def validate_document_signature_dev_config(config):
 class Config:
     APP_ENV = os.getenv("FLASK_ENV", "development").lower()
     SECRET_KEY = os.getenv("SECRET_KEY", "labzeniso-dev-secret-key")
+    APP_TIMEZONE = os.getenv("APP_TIMEZONE", "America/Guayaquil")
 
     SQLALCHEMY_DATABASE_URI = os.getenv(
         "DATABASE_URL",
