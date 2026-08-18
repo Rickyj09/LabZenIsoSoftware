@@ -203,10 +203,10 @@
                                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('documentacion.detalle', item_id=documento.id) }}">Detalle</a>
                                 {% endif %}
                                 {% if publicacion %}
-                                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('documentacion_publicaciones.ver_publicacion', public_id=publicacion.public_id) }}">Ver vigente</a>
+                                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('documentacion_publicaciones.ver_publicacion', public_id=publicacion.public_id, token=publicacion.token) if publicacion.modo_acceso == 'TOKEN_PUBLICO' else url_for('documentacion_publicaciones.ver_publicacion', public_id=publicacion.public_id) }}">Ver vigente</a>
                                 {% endif %}
                                 {% if publicacion and can('documentos.descargar') %}
-                                <a class="btn btn-sm btn-outline-success" href="{{ url_for('documentacion_publicaciones.descargar_pdf_publicado', public_id=publicacion.public_id) }}">Descargar</a>
+                                <a class="btn btn-sm btn-outline-success" href="{{ url_for('documentacion_publicaciones.descargar_pdf_publicado', public_id=publicacion.public_id, token=publicacion.token) if publicacion.modo_acceso == 'TOKEN_PUBLICO' else url_for('documentacion_publicaciones.descargar_pdf_publicado', public_id=publicacion.public_id) }}">Descargar</a>
                                 {% endif %}
                                 {% if documento and can('documentos.ver_historial') %}
                                 <a class="btn btn-sm btn-outline-dark" href="{{ url_for('documentacion.detalle', item_id=documento.id) }}#historial">Historial</a>

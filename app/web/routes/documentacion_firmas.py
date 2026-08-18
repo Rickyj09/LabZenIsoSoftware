@@ -90,6 +90,25 @@ def verificar_identidad(identity_id):
     return redirect(url_for("documentacion_firmas.identidades"))
 
 
+@bp.route("/identidades/<int:identity_id>/verificar-criptografica", methods=["POST"])
+@login_required
+@require_permission(SIGNATURE_IDENTITY_PERMISSION)
+def verificar_identidad_criptografica(identity_id):
+    service = DocumentSignatureIdentityService()
+    try:
+        service.verify_identity_cryptographic_pdf(
+            actor=current_user,
+            identity_id=identity_id,
+            file_storage=request.files.get("enrollment_pdf"),
+            **_request_metadata(),
+        )
+        flash("Identidad verificada criptograficamente desde PDF firmado de enrolamiento.", "success")
+    except DocumentSignatureIdentityError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return redirect(url_for("documentacion_firmas.identidades"))
+
+
 @bp.route("/identidades/<int:identity_id>/revocar", methods=["POST"])
 @login_required
 @require_permission(SIGNATURE_IDENTITY_PERMISSION)

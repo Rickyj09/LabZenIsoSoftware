@@ -20,6 +20,7 @@ from app.models.documentos import (
     ESTADO_SUSTITUIDO,
     ESTADO_VIGENTE,
     FIRMA_PROCESO_COMPLETADO,
+    PUBLICACION_ACCESO_TOKEN_PUBLICO,
     PUBLICACION_ACTIVA,
     PUBLICACION_OBSOLETA,
     PUBLICACION_PREPARADA,
@@ -399,3 +400,68 @@ class DocumentPublicationTest(unittest.TestCase):
         self.assertEqual(result["procesadas"], 1)
         self.assertEqual(delivery.estado_envio, ENTREGA_OMITIDO)
         self.assertIn("DOCUMENT_DISTRIBUTION_EMAIL_ENABLED=false", delivery.ultimo_error)
+
+    def test_token_public_publication_requires_token_and_links_include_it(self):
+        self.complete_signature_process()
+        publication = DocumentPublicationService().publish_as_current(
+            documento=db.session.get(Documento, 501),
+            version_doc=db.session.get(DocumentoVersion, 1501),
+            usuario=db.session.get(Usuario, 201),
+        )
+        publication.modo_acceso = PUBLICACION_ACCESO_TOKEN_PUBLICO
+        publication.token = "public-token-501"
+        db.session.commit()
+
+        client = self.app.test_client()
+        self.assertEqual(client.get(f"/documentos/publicados/{publication.public_id}").status_code, 404)
+        self.assertEqual(client.get(f"/documentos/publicados/{publication.public_id}?token=public-token-501").status_code, 200)
+
+        user = db.session.get(Usuario, 201)
+        user.set_password("secret")
+        db.session.commit()
+        logged = self.app.test_client()
+        logged.post("/auth/login", data={"username": "calidad", "password": "secret"})
+        detail_html = logged.get("/documentacion/501").get_data(as_text=True)
+        vigente_html = logged.get("/documentacion/documentos-vigentes").get_data(as_text=True)
+        self.assertIn(f"/documentos/publicados/{publication.public_id}?token=public-token-501", detail_html)
+        self.assertIn(f"/documentos/publicados/{publication.public_id}?token=public-token-501", vigente_html)
+
+    def test_obsolete_publication_links_to_token_public_current_publication(self):
+        previous = db.session.get(DocumentoVersion, 1500)
+        version = db.session.get(DocumentoVersion, 1501)
+        document = db.session.get(Documento, 501)
+        now = datetime.now(timezone.utc)
+        previous_publication = DocumentoPublicacion(
+            empresa_id=101,
+            documento_id=document.id,
+            documento_version_id=previous.id,
+            public_id="pub-obsoleta-token",
+            token="old-token",
+            estado=PUBLICACION_OBSOLETA,
+            activa=False,
+            qr_payload="https://labzeniso.test/documentos/publicados/pub-obsoleta-token",
+            qr_embebido=True,
+            vigente_desde=now,
+        )
+        db.session.add(previous_publication)
+        db.session.commit()
+        self.complete_signature_process()
+        current = DocumentPublicationService().publish_as_current(
+            documento=document,
+            version_doc=version,
+            usuario=db.session.get(Usuario, 201),
+        )
+        previous_publication.estado = PUBLICACION_OBSOLETA
+        previous_publication.activa = False
+        previous_publication.modo_acceso = PUBLICACION_ACCESO_TOKEN_PUBLICO
+        previous_publication.token = "old-token"
+        current.modo_acceso = PUBLICACION_ACCESO_TOKEN_PUBLICO
+        current.token = "current-token"
+        db.session.commit()
+
+        response = self.app.test_client().get(f"/documentos/publicados/{previous_publication.public_id}?token=old-token")
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(f"/documentos/publicados/{current.public_id}?token=current-token", html)
+        self.assertEqual(self.app.test_client().get(f"/documentos/publicados/{current.public_id}?token=current-token").status_code, 200)

@@ -638,11 +638,11 @@
         </div>
         <div class="d-flex gap-2 flex-wrap">
             {% if active_publication %}
-                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('documentacion_publicaciones.ver_publicacion', public_id=active_publication.public_id) }}">Abrir publicación</a>
+                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('documentacion_publicaciones.ver_publicacion', public_id=active_publication.public_id, token=active_publication.token) if active_publication.modo_acceso == 'TOKEN_PUBLICO' else url_for('documentacion_publicaciones.ver_publicacion', public_id=active_publication.public_id) }}">Abrir publicación</a>
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('documentacion_publicaciones.descargar_qr', public_id=active_publication.public_id) }}">Descargar QR</a>
-                <a class="btn btn-sm btn-outline-success" href="{{ url_for('documentacion_publicaciones.descargar_pdf_publicado', public_id=active_publication.public_id) }}">Descargar PDF vigente</a>
+                <a class="btn btn-sm btn-outline-success" href="{{ url_for('documentacion_publicaciones.descargar_pdf_publicado', public_id=active_publication.public_id, token=active_publication.token) if active_publication.modo_acceso == 'TOKEN_PUBLICO' else url_for('documentacion_publicaciones.descargar_pdf_publicado', public_id=active_publication.public_id) }}">Descargar PDF vigente</a>
             {% elif publication %}
-                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('documentacion_publicaciones.ver_publicacion', public_id=publication.public_id) }}">Abrir publicación</a>
+                <a class="btn btn-sm btn-outline-primary" href="{{ url_for('documentacion_publicaciones.ver_publicacion', public_id=publication.public_id, token=publication.token) if publication.modo_acceso == 'TOKEN_PUBLICO' else url_for('documentacion_publicaciones.ver_publicacion', public_id=publication.public_id) }}">Abrir publicación</a>
                 {% if publication.qr_storage_key %}
                 <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('documentacion_publicaciones.descargar_qr', public_id=publication.public_id) }}">Descargar QR</a>
                 {% endif %}

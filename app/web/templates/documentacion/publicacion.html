@@ -23,7 +23,7 @@
 <div class="alert alert-warning">
     Esta versión es obsoleta. Consulte la versión vigente.
     {% if vigente_actual %}
-    <a href="{{ url_for('documentacion_publicaciones.ver_publicacion', public_id=vigente_actual.public_id) }}" class="alert-link">Abrir versión vigente</a>.
+    <a href="{{ url_for('documentacion_publicaciones.ver_publicacion', public_id=vigente_actual.public_id, token=vigente_actual.token) if vigente_actual.modo_acceso == 'TOKEN_PUBLICO' else url_for('documentacion_publicaciones.ver_publicacion', public_id=vigente_actual.public_id) }}" class="alert-link">Abrir versión vigente</a>.
     {% endif %}
 </div>
 {% endif %}
@@ -44,8 +44,8 @@
 
 {% if can_download %}
 <div class="d-flex gap-2 flex-wrap">
-    <a class="btn btn-primary" href="{{ url_for('documentacion_publicaciones.descargar_pdf_publicado', public_id=publicacion.public_id, inline=1) }}">Abrir PDF vigente</a>
-    <a class="btn btn-outline-secondary" href="{{ url_for('documentacion_publicaciones.descargar_pdf_publicado', public_id=publicacion.public_id) }}">Descargar PDF</a>
+    <a class="btn btn-primary" href="{{ url_for('documentacion_publicaciones.descargar_pdf_publicado', public_id=publicacion.public_id, token=publicacion.token, inline=1) if publicacion.modo_acceso == 'TOKEN_PUBLICO' else url_for('documentacion_publicaciones.descargar_pdf_publicado', public_id=publicacion.public_id, inline=1) }}">Abrir PDF vigente</a>
+    <a class="btn btn-outline-secondary" href="{{ url_for('documentacion_publicaciones.descargar_pdf_publicado', public_id=publicacion.public_id, token=publicacion.token) if publicacion.modo_acceso == 'TOKEN_PUBLICO' else url_for('documentacion_publicaciones.descargar_pdf_publicado', public_id=publicacion.public_id) }}">Descargar PDF</a>
 </div>
 {% endif %}
 {% endblock %}

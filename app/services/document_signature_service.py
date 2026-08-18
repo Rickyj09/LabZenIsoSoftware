@@ -160,6 +160,7 @@ class PyHankoPdfSignatureValidator:
             )
         try:
             trust_roots = self._load_trust_roots()
+            intermediate_certs = self._load_intermediate_certs()
             allowed_issuers = self._load_allowed_issuers()
         except DocumentSignatureError as exc:
             return self._result(
@@ -198,6 +199,7 @@ class PyHankoPdfSignatureValidator:
                 for signature in signatures:
                     vc = ValidationContext(
                         trust_roots=trust_roots,
+                        other_certs=intermediate_certs,
                         allow_fetching=False,
                         revocation_mode=self.app.config.get("DOCUMENT_SIGNATURE_REVOCATION_MODE", "soft-fail"),
                     )
@@ -301,6 +303,100 @@ class PyHankoPdfSignatureValidator:
             **cert_info,
         )
 
+    def validate_enrollment_pdf(self, *, signed_pdf_path: Path, identificacion) -> SignatureValidationResult:
+        if not self.library_available():
+            return self._result(
+                False,
+                "LIBRERIA_NO_DISPONIBLE",
+                errors=["pyHanko o pyhanko-certvalidator no estan disponibles."],
+                error_code="PDF_SIGNATURE_LIBRARY_UNAVAILABLE",
+            )
+        try:
+            trust_roots = self._load_trust_roots()
+            intermediate_certs = self._load_intermediate_certs()
+            allowed_issuers = self._load_allowed_issuers()
+        except DocumentSignatureError as exc:
+            return self._result(False, "NO_CONFIABLE", errors=[str(exc)], error_code="SIGNATURE_TRUST_STORE_INVALID")
+
+        try:
+            from pyhanko.pdf_utils.reader import PdfFileReader
+            from pyhanko.sign.validation import validate_pdf_signature
+            from pyhanko_certvalidator import ValidationContext
+        except Exception as exc:
+            return self._result(False, "LIBRERIA_NO_DISPONIBLE", errors=[self._sanitize_error(exc)], error_code="PDF_SIGNATURE_LIBRARY_UNAVAILABLE")
+
+        try:
+            with signed_pdf_path.open("rb") as handle:
+                reader = PdfFileReader(handle)
+                signatures = list(getattr(reader, "embedded_signatures", []) or [])
+                if not signatures:
+                    return self._result(False, "FIRMA_FALTANTE", errors=["El PDF no contiene firmas digitales embebidas."], total_signature_count=0, error_code="PDF_WITHOUT_SIGNATURES")
+                statuses = []
+                for signature in signatures:
+                    vc = ValidationContext(
+                        trust_roots=trust_roots,
+                        other_certs=intermediate_certs,
+                        allow_fetching=False,
+                        revocation_mode=self.app.config.get("DOCUMENT_SIGNATURE_REVOCATION_MODE", "soft-fail"),
+                    )
+                    statuses.append(validate_pdf_signature(signature, signer_validation_context=vc, skip_diff=False))
+        except Exception as exc:
+            return self._result(False, "PDF_INVALIDO", errors=[self._sanitize_error(exc)], error_code="PDF_SIGNATURE_VALIDATION_FAILED")
+
+        latest_signature = signatures[-1]
+        cert_info = self._certificate_info(getattr(latest_signature, "signer_cert", None))
+        all_ok = all(bool(getattr(status, "bottom_line", False)) for status in statuses)
+        trusted = all(bool(getattr(status, "trusted", False)) for status in statuses)
+        issuer_allowed = self._issuer_allowed(allowed_issuers, cert_info)
+        identity_match = self._identification_matches_cert(identificacion, cert_info)
+        certificate_valid = self._certificate_valid_at_signing(cert_info)
+        errors = []
+        if not all_ok:
+            errors.append("Una o mas firmas no superan la validacion criptografica.")
+        if not trusted:
+            errors.append("La cadena de confianza no llega a un trust root configurado.")
+        if not issuer_allowed:
+            errors.append("El emisor del certificado no esta permitido por politica.")
+        if not identity_match:
+            errors.append("La identificacion declarada no coincide con el certificado firmante.")
+        if not certificate_valid:
+            errors.append("El certificado no estaba vigente al momento de firma evaluado.")
+
+        revoked = any(bool(getattr(status, "revoked", False)) for status in statuses)
+        if revoked:
+            errors.append("El certificado aparece como revocado.")
+
+        if not all_ok:
+            status = "INVALIDA"
+        elif not trusted or not issuer_allowed:
+            status = "NO_CONFIABLE"
+        elif not identity_match:
+            status = "IDENTIFICACION_NO_COINCIDE"
+        elif revoked:
+            status = "CERTIFICADO_REVOCADO"
+        elif not certificate_valid:
+            status = "CERTIFICADO_NO_VIGENTE"
+        else:
+            status = "VALIDA"
+
+        return self._result(
+            status == "VALIDA",
+            status,
+            integrity_valid=all_ok,
+            trusted=trusted and issuer_allowed,
+            identity_match=identity_match,
+            certificate_valid_at_signing=certificate_valid,
+            revocation_checked=self.app.config.get("DOCUMENT_SIGNATURE_REVOCATION_MODE", "soft-fail") not in {"none"},
+            revocation_status="REVOCADO" if revoked else "VERIFICADA",
+            previous_signatures_valid=True,
+            total_signature_count=len(signatures),
+            new_signature_count=len(signatures),
+            errors=errors,
+            error_code=None if status == "VALIDA" else status,
+            metadata={"verification_type": "cryptographic_signed_pdf"},
+            **cert_info,
+        )
+
     def _load_trust_roots(self):
         from pyhanko.keys import load_cert_from_pemder
 
@@ -324,6 +420,20 @@ class PyHankoPdfSignatureValidator:
                 certs.append(load_cert_from_pemder(str(path)))
             except Exception as exc:
                 raise DocumentSignatureError(f"Trust root invalida: {path.name}") from exc
+        return certs
+
+    def _load_intermediate_certs(self):
+        from pyhanko.keys import load_cert_from_pemder
+
+        configured = self.app.config.get("DOCUMENT_SIGNATURE_INTERMEDIATES_PATH")
+        if not configured:
+            return []
+        certs = []
+        for path in self._collect_paths(configured):
+            try:
+                certs.append(load_cert_from_pemder(str(path)))
+            except Exception as exc:
+                raise DocumentSignatureError(f"Certificado intermedio invalido: {path.name}") from exc
         return certs
 
     def _load_allowed_issuers(self):
@@ -409,6 +519,18 @@ class PyHankoPdfSignatureValidator:
             return True
         expected_subject = _normalize_identity_value(metadata.get("certificate_subject"))
         return bool(expected_subject and expected_subject == cert_subject)
+
+    def _identification_matches_cert(self, identificacion, cert_info):
+        expected_id = _normalize_identity_value(identificacion)
+        if not expected_id:
+            return False
+        candidates = (
+            cert_info.get("certificate_subject"),
+            cert_info.get("certificate_common_name"),
+            cert_info.get("certificate_email"),
+            cert_info.get("signer_identifier"),
+        )
+        return any(expected_id in _normalize_identity_value(candidate) for candidate in candidates)
 
     def _issuer_allowed(self, allowed_issuers, cert_info):
         if not allowed_issuers:

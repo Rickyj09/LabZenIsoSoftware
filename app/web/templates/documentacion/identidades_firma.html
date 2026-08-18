@@ -12,8 +12,8 @@
 </div>
 
 <div class="alert alert-info">
-    La verificacion de esta pantalla es local/mock para administracion interna y pruebas. No valida certificados reales,
-    no almacena claves privadas y no reemplaza una verificacion criptografica del PDF firmado.
+    La verificacion local/mock se conserva para desarrollo. Para identidades reales, use un PDF firmado de enrolamiento
+    validado criptograficamente con los trust roots e intermedios configurados.
 </div>
 
 <div class="page-card mb-4">
@@ -25,7 +25,7 @@
                 <select name="user_id" class="form-select" required>
                     <option value="">Seleccione...</option>
                     {% for user, identity in user_identity_rows %}
-                        {% if not identity %}
+                        {% if not identity or identity.estado == 'REVOCADA' %}
                         <option value="{{ user.id }}">{{ user.nombre }} {{ user.apellido or '' }} ({{ user.username }})</option>
                         {% endif %}
                     {% endfor %}
@@ -137,6 +137,10 @@
                                 <button type="submit" form="identity-edit-{{ identity.id }}" class="btn btn-sm btn-outline-primary">Guardar</button>
                                 {% endif %}
                                 {% if identity.estado == 'PENDIENTE' %}
+                                <form method="post" action="{{ url_for('documentacion_firmas.verificar_identidad_criptografica', identity_id=identity.id) }}" enctype="multipart/form-data" class="d-flex gap-2 flex-wrap justify-content-end">
+                                    <input type="file" name="enrollment_pdf" accept="application/pdf,.pdf" class="form-control form-control-sm" required>
+                                    <button type="submit" class="btn btn-sm btn-primary">Verificar PDF</button>
+                                </form>
                                 <form method="post" action="{{ url_for('documentacion_firmas.verificar_identidad', identity_id=identity.id) }}">
                                     <button type="submit" class="btn btn-sm btn-success">Verificar local/mock</button>
                                 </form>

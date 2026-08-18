@@ -1,5 +1,7 @@
 import re
+import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app.extensions import db
 from app.models.auditoria import AuditoriaLog
@@ -11,6 +13,8 @@ from app.models.documentos import (
 )
 from app.models.seguridad import Usuario
 from app.security.permissions import user_has_permission
+from app.services.document_pdf_service import DocumentPdfService
+from app.services.document_signature_service import PyHankoPdfSignatureValidator
 
 
 SIGNATURE_IDENTITY_PERMISSION = "documentos.firmas.identidades.gestionar"
@@ -121,8 +125,17 @@ class DocumentSignatureIdentityService:
     def create_identity(self, *, actor, user_id, identificacion, nombre_certificado=None, emisor_certificado=None, certificado_fingerprint_sha256=None, ip=None, user_agent=None):
         self._assert_permission(actor)
         user = self._user_for_actor(actor=actor, user_id=user_id)
-        if UsuarioIdentidadFirma.query.filter_by(empresa_id=actor.empresa_id, usuario_id=user.id).first():
-            raise DocumentSignatureIdentityError("Ya existe una identidad para este usuario.")
+        active_identity = (
+            UsuarioIdentidadFirma.query
+            .filter(
+                UsuarioIdentidadFirma.empresa_id == actor.empresa_id,
+                UsuarioIdentidadFirma.usuario_id == user.id,
+                UsuarioIdentidadFirma.estado != FIRMA_IDENTIDAD_REVOCADA,
+            )
+            .first()
+        )
+        if active_identity:
+            raise DocumentSignatureIdentityError("Ya existe una identidad no revocada para este usuario.")
         identity = UsuarioIdentidadFirma(
             empresa_id=actor.empresa_id,
             usuario_id=user.id,
@@ -136,6 +149,53 @@ class DocumentSignatureIdentityService:
         db.session.add(identity)
         db.session.flush()
         self._audit(actor=actor, accion="CREAR", identity=identity, despues=self._snapshot(identity), ip=ip, user_agent=user_agent)
+        db.session.commit()
+        return identity
+
+    def verify_identity_cryptographic_pdf(self, *, actor, identity_id, file_storage, ip=None, user_agent=None):
+        self._assert_permission(actor)
+        identity = self._identity_for_actor(actor=actor, identity_id=identity_id)
+        self._user_for_actor(actor=actor, user_id=identity.usuario_id)
+        if identity.estado != FIRMA_IDENTIDAD_PENDIENTE:
+            raise DocumentSignatureIdentityError("La identidad no puede verificarse en su estado actual.")
+        if not file_storage or not file_storage.filename:
+            raise DocumentSignatureIdentityError("Debes cargar un PDF firmado de enrolamiento.")
+        if not file_storage.filename.lower().endswith(".pdf"):
+            raise DocumentSignatureIdentityError("Solo se admite PDF firmado.")
+
+        temp_path = self._save_enrollment_upload_temporarily(file_storage)
+        try:
+            DocumentPdfService().validate_pdf_file(temp_path, allow_signature_forms=True)
+            validation = PyHankoPdfSignatureValidator().validate_enrollment_pdf(
+                signed_pdf_path=temp_path,
+                identificacion=identity.identificacion,
+            )
+        finally:
+            temp_path.unlink(missing_ok=True)
+        if not validation.valid:
+            raise DocumentSignatureIdentityError(
+                "El PDF de enrolamiento no supero la verificacion criptografica: "
+                f"{validation.state}."
+            )
+
+        before = self._snapshot(identity)
+        identity.estado = FIRMA_IDENTIDAD_VERIFICADA
+        identity.verificado_por_id = actor.id
+        identity.verificado_en = self._now()
+        identity.certificado_fingerprint_sha256 = validation.certificate_fingerprint_sha256
+        identity.nombre_certificado = validation.certificate_common_name or validation.signer_identifier
+        identity.emisor_certificado = validation.certificate_issuer
+        identity.metadata_json = {
+            **(identity.metadata_json or {}),
+            "verification_type": "cryptographic_signed_pdf",
+            "certificate_subject": validation.certificate_subject,
+            "certificate_serial": validation.certificate_serial,
+            "certificate_issuer": validation.certificate_issuer,
+            "certificate_email": validation.certificate_email,
+            "certificate_fingerprint_sha256": validation.certificate_fingerprint_sha256,
+        }
+        db.session.flush()
+        self._audit(actor=actor, accion="VERIFICAR_CRIPTOGRAFICA", identity=identity, antes=before, despues=self._snapshot(identity), ip=ip, user_agent=user_agent)
         db.session.commit()
         return identity
 
@@ -154,6 +214,19 @@ class DocumentSignatureIdentityService:
         self._audit(actor=actor, accion="ACTUALIZAR", identity=identity, antes=before, despues=self._snapshot(identity), ip=ip, user_agent=user_agent)
         db.session.commit()
         return identity
+
+    def _save_enrollment_upload_temporarily(self, file_storage):
+        handle = tempfile.NamedTemporaryFile(prefix="labzeniso-enrolamiento-", suffix=".pdf", delete=False)
+        temp_path = Path(handle.name)
+        try:
+            with handle:
+                file_storage.save(handle)
+            if temp_path.stat().st_size <= 0:
+                raise DocumentSignatureIdentityError("El PDF firmado esta vacio.")
+            return temp_path
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
 
     def verify_identity_mock(self, *, actor, identity_id, ip=None, user_agent=None):
         self._assert_permission(actor)

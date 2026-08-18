@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
+from uuid import UUID
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session
@@ -119,9 +120,16 @@ class DocumentSignatureTest(unittest.TestCase):
 
         self.assign_ids = assign_ids
         event.listen(Session, "before_flush", self.assign_ids)
+        import app.services.document_publication_service as publication_service
+
+        self.original_publication_uuid4 = publication_service.uuid4
+        publication_service.uuid4 = lambda: UUID("11111111-1111-1111-1111-111111111111")
         self.seed_data()
 
     def tearDown(self):
+        import app.services.document_publication_service as publication_service
+
+        publication_service.uuid4 = self.original_publication_uuid4
         event.remove(Session, "before_flush", self.assign_ids)
         db.session.remove()
         db.drop_all()
@@ -484,11 +492,11 @@ class DocumentSignatureTest(unittest.TestCase):
     def update_identity_for_cert(self, user_id, cert):
         identity = UsuarioIdentidadFirma.query.filter_by(usuario_id=user_id).first()
         identity.certificado_fingerprint_sha256 = self.cert_sha256(cert)
-        identity.emisor_certificado = self._test_ca_cert.subject.rfc4514_string()
+        identity.emisor_certificado = cert.issuer.rfc4514_string()
         identity.metadata_json = {
             "certificate_fingerprint_sha256": self.cert_sha256(cert),
             "certificate_serial": str(cert.serial_number),
-            "certificate_issuer": "Common Name: LabZenISO Test Root CA",
+            "certificate_issuer": "Common Name: " + cert.issuer.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value,
             "certificate_email": cert.subject.get_attributes_for_oid(NameOID.EMAIL_ADDRESS)[0].value,
             "certificate_subject": "Email Address: "
             + cert.subject.get_attributes_for_oid(NameOID.EMAIL_ADDRESS)[0].value
@@ -499,14 +507,20 @@ class DocumentSignatureTest(unittest.TestCase):
         return identity
 
     def sign_pdf_with_test_cert(self, pdf_bytes, key, cert, field_name):
+        return self.sign_pdf_with_cert_chain(pdf_bytes, key, cert, field_name, [self._test_ca_cert])
+
+    def sign_pdf_with_cert_chain(self, pdf_bytes, key, cert, field_name, registry_certs=None):
         signing_cert = asn1_x509.Certificate.load(cert.public_bytes(serialization.Encoding.DER))
         signing_key = asn1_keys.PrivateKeyInfo.load(key.private_bytes(
             serialization.Encoding.DER,
             serialization.PrivateFormat.PKCS8,
             serialization.NoEncryption(),
         ))
-        ca_cert = asn1_x509.Certificate.load(self._test_ca_cert.public_bytes(serialization.Encoding.DER))
-        store = SimpleCertificateStore.from_certs([ca_cert])
+        registry_certs = registry_certs or []
+        store = SimpleCertificateStore.from_certs([
+            asn1_x509.Certificate.load(cert.public_bytes(serialization.Encoding.DER))
+            for cert in registry_certs
+        ])
         signer = signers.SimpleSigner(
             signing_cert=signing_cert,
             signing_key=signing_key,
@@ -521,6 +535,75 @@ class DocumentSignatureTest(unittest.TestCase):
             output=output,
         )
         return output.getvalue()
+
+    def create_intermediate_chain(self, common_name, email, serial, *, signer_valid=True):
+        root_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        root_subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "LabZenISO Chain Root CA")])
+        root_cert = (
+            x509.CertificateBuilder()
+            .subject_name(root_subject)
+            .issuer_name(root_subject)
+            .public_key(root_key.public_key())
+            .serial_number(9000 + serial)
+            .not_valid_before(datetime.now(timezone.utc) - timedelta(days=10))
+            .not_valid_after(datetime.now(timezone.utc) + timedelta(days=365))
+            .add_extension(x509.BasicConstraints(ca=True, path_length=1), critical=True)
+            .add_extension(x509.KeyUsage(digital_signature=False, content_commitment=False, key_encipherment=False, data_encipherment=False, key_agreement=False, key_cert_sign=True, crl_sign=True, encipher_only=False, decipher_only=False), critical=True)
+            .sign(root_key, hashes.SHA256())
+        )
+        intermediate_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        intermediate_subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "LabZenISO Chain Intermediate CA")])
+        intermediate_cert = (
+            x509.CertificateBuilder()
+            .subject_name(intermediate_subject)
+            .issuer_name(root_cert.subject)
+            .public_key(intermediate_key.public_key())
+            .serial_number(9100 + serial)
+            .not_valid_before(datetime.now(timezone.utc) - timedelta(days=5))
+            .not_valid_after(datetime.now(timezone.utc) + timedelta(days=120))
+            .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+            .add_extension(x509.KeyUsage(digital_signature=False, content_commitment=False, key_encipherment=False, data_encipherment=False, key_agreement=False, key_cert_sign=True, crl_sign=True, encipher_only=False, decipher_only=False), critical=True)
+            .sign(root_key, hashes.SHA256())
+        )
+        signer_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        signer_subject = x509.Name([
+            x509.NameAttribute(NameOID.COMMON_NAME, common_name),
+            x509.NameAttribute(NameOID.EMAIL_ADDRESS, email),
+        ])
+        not_before = datetime.now(timezone.utc) - timedelta(days=1 if signer_valid else 30)
+        not_after = datetime.now(timezone.utc) + timedelta(days=30 if signer_valid else -1)
+        signer_cert = (
+            x509.CertificateBuilder()
+            .subject_name(signer_subject)
+            .issuer_name(intermediate_cert.subject)
+            .public_key(signer_key.public_key())
+            .serial_number(serial)
+            .not_valid_before(not_before)
+            .not_valid_after(not_after)
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=True, key_encipherment=False, data_encipherment=False, key_agreement=False, key_cert_sign=False, crl_sign=False, encipher_only=False, decipher_only=False), critical=True)
+            .sign(intermediate_key, hashes.SHA256())
+        )
+        return root_cert, intermediate_cert, signer_key, signer_cert
+
+    def configure_chain_trust(self, root_cert, intermediate_cert=None, *, allowed_issuer=None):
+        trust_dir = Path(self.temp_directory.name) / f"chain-trust-{root_cert.serial_number}"
+        trust_dir.mkdir(parents=True, exist_ok=True)
+        root_path = trust_dir / "root.pem"
+        root_path.write_bytes(root_cert.public_bytes(serialization.Encoding.PEM))
+        self.app.config["DOCUMENT_SIGNATURE_TRUST_ROOTS_PATH"] = str(root_path)
+        if intermediate_cert:
+            intermediate_dir = Path(self.temp_directory.name) / f"chain-intermediates-{intermediate_cert.serial_number}"
+            intermediate_dir.mkdir(parents=True, exist_ok=True)
+            (intermediate_dir / "intermediate.pem").write_bytes(intermediate_cert.public_bytes(serialization.Encoding.PEM))
+            self.app.config["DOCUMENT_SIGNATURE_INTERMEDIATES_PATH"] = str(intermediate_dir)
+        else:
+            self.app.config["DOCUMENT_SIGNATURE_INTERMEDIATES_PATH"] = ""
+        self.app.config["DOCUMENT_SIGNATURE_ALLOWED_ISSUERS_PATH"] = ""
+        if allowed_issuer:
+            allowed_path = trust_dir / "allowed.pem"
+            allowed_path.write_bytes(allowed_issuer.public_bytes(serialization.Encoding.PEM))
+            self.app.config["DOCUMENT_SIGNATURE_ALLOWED_ISSUERS_PATH"] = str(allowed_path)
 
     def test_start_process_creates_sequential_steps_without_changing_document_state(self):
         document = Documento.query.get(501)
@@ -677,6 +760,18 @@ class DocumentSignatureTest(unittest.TestCase):
         with self.assertRaisesRegex(DocumentSignatureIdentityError, "Ya existe"):
             service.create_identity(actor=actor, user_id=201, identificacion="ID-201-Y")
 
+    def test_identity_service_allows_new_identity_after_revocation(self):
+        self.clear_identity(201)
+        service = DocumentSignatureIdentityService()
+        actor = Usuario.query.get(204)
+        first = service.create_identity(actor=actor, user_id=201, identificacion="ID-201-X")
+        service.revoke_identity(actor=actor, identity_id=first.id)
+
+        second = service.create_identity(actor=actor, user_id=201, identificacion="ID-201-Y")
+
+        self.assertEqual(second.estado, FIRMA_IDENTIDAD_PENDIENTE)
+        self.assertEqual(UsuarioIdentidadFirma.query.filter_by(usuario_id=201).count(), 2)
+
     def test_mock_verification_records_metadata_and_audit(self):
         self.clear_identity(201)
         service = DocumentSignatureIdentityService()
@@ -702,6 +797,79 @@ class DocumentSignatureTest(unittest.TestCase):
         self.assertIsNotNone(verified.verificado_en)
         self.assertEqual(verified.metadata_json["verification_type"], "local_mock")
         self.assertEqual(actions, ["CREAR", "VERIFICAR"])
+
+    def test_cryptographic_identity_verification_from_signed_enrollment_pdf(self):
+        self.clear_identity(201)
+        root_cert, intermediate_cert, signer_key, signer_cert = self.create_intermediate_chain("Ricardo ID-201", "ricardo@firma.test", 8801)
+        self.configure_chain_trust(root_cert, intermediate_cert, allowed_issuer=intermediate_cert)
+        service = DocumentSignatureIdentityService()
+        actor = Usuario.query.get(204)
+        identity = service.create_identity(actor=actor, user_id=201, identificacion="ID-201")
+        signed_pdf = self.sign_pdf_with_cert_chain(self.minimal_pdf("enrollment"), signer_key, signer_cert, "Enrollment", [])
+
+        verified = service.verify_identity_cryptographic_pdf(
+            actor=actor,
+            identity_id=identity.id,
+            file_storage=self.real_signed_upload(signed_pdf, "enrollment.pdf"),
+        )
+
+        self.assertEqual(verified.estado, FIRMA_IDENTIDAD_VERIFICADA)
+        self.assertEqual(verified.verificado_por_id, actor.id)
+        self.assertEqual(verified.certificado_fingerprint_sha256, self.cert_sha256(signer_cert))
+        self.assertEqual(verified.emisor_certificado, "Common Name: LabZenISO Chain Intermediate CA")
+        self.assertEqual(verified.metadata_json["verification_type"], "cryptographic_signed_pdf")
+        self.assertEqual(verified.metadata_json["certificate_serial"], str(signer_cert.serial_number))
+        self.assertEqual(verified.metadata_json["certificate_email"], "ricardo@firma.test")
+
+    def test_cryptographic_identity_verification_rejects_wrong_identification(self):
+        self.clear_identity(201)
+        root_cert, intermediate_cert, signer_key, signer_cert = self.create_intermediate_chain("Ricardo ID-999", "ricardo@firma.test", 8802)
+        self.configure_chain_trust(root_cert, intermediate_cert, allowed_issuer=intermediate_cert)
+        service = DocumentSignatureIdentityService()
+        actor = Usuario.query.get(204)
+        identity = service.create_identity(actor=actor, user_id=201, identificacion="ID-201")
+        signed_pdf = self.sign_pdf_with_cert_chain(self.minimal_pdf("enrollment"), signer_key, signer_cert, "Enrollment-Wrong-ID", [])
+
+        with self.assertRaisesRegex(DocumentSignatureIdentityError, "IDENTIFICACION_NO_COINCIDE"):
+            service.verify_identity_cryptographic_pdf(
+                actor=actor,
+                identity_id=identity.id,
+                file_storage=self.real_signed_upload(signed_pdf, "wrong-id.pdf"),
+            )
+        db.session.refresh(identity)
+        self.assertEqual(identity.estado, FIRMA_IDENTIDAD_PENDIENTE)
+
+    def test_cryptographic_identity_verification_rejects_untrusted_chain(self):
+        self.clear_identity(201)
+        root_cert, intermediate_cert, signer_key, signer_cert = self.create_intermediate_chain("Ricardo ID-201", "ricardo@firma.test", 8803)
+        self.configure_chain_trust(root_cert, None)
+        service = DocumentSignatureIdentityService()
+        actor = Usuario.query.get(204)
+        identity = service.create_identity(actor=actor, user_id=201, identificacion="ID-201")
+        signed_pdf = self.sign_pdf_with_cert_chain(self.minimal_pdf("enrollment"), signer_key, signer_cert, "Enrollment-Untrusted", [])
+
+        with self.assertRaisesRegex(DocumentSignatureIdentityError, "NO_CONFIABLE|INVALIDA"):
+            service.verify_identity_cryptographic_pdf(
+                actor=actor,
+                identity_id=identity.id,
+                file_storage=self.real_signed_upload(signed_pdf, "untrusted.pdf"),
+            )
+
+    def test_cryptographic_identity_verification_rejects_invalid_certificate(self):
+        self.clear_identity(201)
+        root_cert, intermediate_cert, signer_key, signer_cert = self.create_intermediate_chain("Ricardo ID-201", "ricardo@firma.test", 8804, signer_valid=False)
+        self.configure_chain_trust(root_cert, intermediate_cert, allowed_issuer=intermediate_cert)
+        service = DocumentSignatureIdentityService()
+        actor = Usuario.query.get(204)
+        identity = service.create_identity(actor=actor, user_id=201, identificacion="ID-201")
+        signed_pdf = self.sign_pdf_with_cert_chain(self.minimal_pdf("enrollment"), signer_key, signer_cert, "Enrollment-Expired", [])
+
+        with self.assertRaisesRegex(DocumentSignatureIdentityError, "CERTIFICADO_NO_VIGENTE|INVALIDA"):
+            service.verify_identity_cryptographic_pdf(
+                actor=actor,
+                identity_id=identity.id,
+                file_storage=self.real_signed_upload(signed_pdf, "expired.pdf"),
+            )
 
     def test_dev_mode_is_disabled_by_default_and_blocked_in_production(self):
         self.assertFalse(self.app.config.get("DOCUMENT_SIGNATURES_DEV_TEST_MODE"))
@@ -1294,6 +1462,60 @@ class DocumentSignatureTest(unittest.TestCase):
             )
         db.session.refresh(step)
         self.assertEqual(step.estado, FIRMA_PASO_HABILITADO)
+
+    def test_real_pyhanko_requires_configured_intermediate_for_signer_chain(self):
+        root_cert, intermediate_cert, signer_key, signer_cert = self.create_intermediate_chain("Elaborador Test ID-201", "ela@test.local", 8810)
+        self.configure_chain_trust(root_cert, None, allowed_issuer=intermediate_cert)
+        self.update_identity_for_cert(201, signer_cert)
+        process = DocumentSignatureService(provider=FakeSignatureProvider()).start_process(
+            documento=Documento.query.get(501),
+            version_doc=DocumentoVersion.query.get(1501),
+            usuario=Usuario.query.get(204),
+        )
+        step = DocumentoFirmaPaso.query.filter_by(proceso_id=process.id, estado=FIRMA_PASO_HABILITADO).first()
+        source_pdf = resolve_document_path(process.pdf_origen.storage_path).read_bytes()
+        signed_pdf = self.sign_pdf_with_cert_chain(source_pdf, signer_key, signer_cert, "Signature-Needs-Intermediate", [])
+
+        with self.assertRaisesRegex(DocumentSignatureError, "NO_CONFIABLE|INVALIDA"):
+            DocumentSignatureService().upload_signed_pdf(
+                paso=step,
+                usuario=Usuario.query.get(201),
+                file_storage=self.real_signed_upload(signed_pdf, "needs-intermediate.pdf"),
+            )
+
+        self.configure_chain_trust(root_cert, intermediate_cert, allowed_issuer=intermediate_cert)
+        artifact = DocumentSignatureService().upload_signed_pdf(
+            paso=step,
+            usuario=Usuario.query.get(201),
+            file_storage=self.real_signed_upload(signed_pdf, "with-intermediate.pdf"),
+        )
+        self.assertEqual(artifact.signature_count, 1)
+
+    def test_real_pyhanko_accepts_auxiliary_tsa_style_intermediate_chain(self):
+        root_cert, intermediate_cert, signer_key, signer_cert = self.create_intermediate_chain("TSA Auxiliar ID-201", "tsa@firma.test", 8811)
+        self.configure_chain_trust(root_cert, intermediate_cert, allowed_issuer=intermediate_cert)
+        self.update_identity_for_cert(201, signer_cert)
+        process = DocumentSignatureService(provider=FakeSignatureProvider()).start_process(
+            documento=Documento.query.get(501),
+            version_doc=DocumentoVersion.query.get(1501),
+            usuario=Usuario.query.get(204),
+        )
+        step = DocumentoFirmaPaso.query.filter_by(proceso_id=process.id, estado=FIRMA_PASO_HABILITADO).first()
+        signed_pdf = self.sign_pdf_with_cert_chain(
+            resolve_document_path(process.pdf_origen.storage_path).read_bytes(),
+            signer_key,
+            signer_cert,
+            "Signature-Aux-Intermediate",
+            [],
+        )
+
+        artifact = DocumentSignatureService().upload_signed_pdf(
+            paso=step,
+            usuario=Usuario.query.get(201),
+            file_storage=self.real_signed_upload(signed_pdf, "aux-intermediate.pdf"),
+        )
+
+        self.assertEqual(artifact.validation_state, "VALIDA")
 
     def test_duplicate_upload_is_rejected_after_step_signed(self):
         service = DocumentSignatureService(provider=FakeSignatureProvider())
