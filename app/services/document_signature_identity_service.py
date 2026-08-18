@@ -192,6 +192,7 @@ class DocumentSignatureIdentityService:
             "certificate_serial": validation.certificate_serial,
             "certificate_issuer": validation.certificate_issuer,
             "certificate_email": validation.certificate_email,
+            "certificate_identification": validation.certificate_identification,
             "certificate_fingerprint_sha256": validation.certificate_fingerprint_sha256,
         }
         db.session.flush()

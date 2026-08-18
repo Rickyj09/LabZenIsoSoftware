@@ -71,6 +71,7 @@ class DocumentSignatureError(ValueError):
 
 
 START_SIGNATURE_PERMISSION = "documentos.firmas.iniciar"
+FIRMASEGURA_IDENTIFICATION_OID = "1.3.6.1.4.1.61305.3.1"
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,7 @@ class SignatureValidationResult:
     certificate_issuer: str | None = None
     certificate_common_name: str | None = None
     certificate_email: str | None = None
+    certificate_identification: str | None = None
     certificate_valid_from: datetime | None = None
     certificate_valid_to: datetime | None = None
     signing_time: datetime | None = None
@@ -344,7 +346,12 @@ class PyHankoPdfSignatureValidator:
             return self._result(False, "PDF_INVALIDO", errors=[self._sanitize_error(exc)], error_code="PDF_SIGNATURE_VALIDATION_FAILED")
 
         latest_signature = signatures[-1]
-        cert_info = self._certificate_info(getattr(latest_signature, "signer_cert", None))
+        signer_cert = getattr(latest_signature, "signer_cert", None)
+        cert_info = self._certificate_info(signer_cert)
+        cert_info["certificate_identification"] = self._certificate_extension_value(
+            signer_cert,
+            FIRMASEGURA_IDENTIFICATION_OID,
+        )
         all_ok = all(bool(getattr(status, "bottom_line", False)) for status in statuses)
         trusted = all(bool(getattr(status, "trusted", False)) for status in statuses)
         issuer_allowed = self._issuer_allowed(allowed_issuers, cert_info)
@@ -520,17 +527,44 @@ class PyHankoPdfSignatureValidator:
         expected_subject = _normalize_identity_value(metadata.get("certificate_subject"))
         return bool(expected_subject and expected_subject == cert_subject)
 
+    def _certificate_extension_value(self, cert, oid):
+        if cert is None:
+            return None
+        try:
+            extensions = cert["tbs_certificate"]["extensions"]
+            for extension in extensions:
+                extension_oid = getattr(extension["extn_id"], "dotted", None)
+                if extension_oid != oid:
+                    continue
+                value = extension["extn_value"].parsed.native
+                if value is None:
+                    return None
+                return str(value).strip()
+        except Exception:
+            return None
+        return None
+
     def _identification_matches_cert(self, identificacion, cert_info):
         expected_id = _normalize_identity_value(identificacion)
         if not expected_id:
             return False
+
+        certified_id = _normalize_identity_value(
+            cert_info.get("certificate_identification")
+        )
+        if certified_id:
+            return expected_id == certified_id
+
         candidates = (
             cert_info.get("certificate_subject"),
             cert_info.get("certificate_common_name"),
             cert_info.get("certificate_email"),
             cert_info.get("signer_identifier"),
         )
-        return any(expected_id in _normalize_identity_value(candidate) for candidate in candidates)
+        return any(
+            expected_id in _normalize_identity_value(candidate)
+            for candidate in candidates
+        )
 
     def _issuer_allowed(self, allowed_issuers, cert_info):
         if not allowed_issuers:

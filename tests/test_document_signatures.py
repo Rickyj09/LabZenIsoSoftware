@@ -798,6 +798,56 @@ class DocumentSignatureTest(unittest.TestCase):
         self.assertEqual(verified.metadata_json["verification_type"], "local_mock")
         self.assertEqual(actions, ["CREAR", "VERIFICAR"])
 
+    def test_firmasegura_certified_identification_oid_is_used_exactly(self):
+        from types import SimpleNamespace
+
+        from app.services.document_signature_service import (
+            PyHankoPdfSignatureValidator,
+        )
+
+        validator = PyHankoPdfSignatureValidator(self.app)
+        oid = "1.3.6.1.4.1.61305.3.1"
+
+        extension = {
+            "extn_id": SimpleNamespace(dotted=oid),
+            "extn_value": SimpleNamespace(
+                parsed=SimpleNamespace(native="1711459816")
+            ),
+        }
+        certificate = {
+            "tbs_certificate": {
+                "extensions": [extension],
+            }
+        }
+
+        certified_id = validator._certificate_extension_value(
+            certificate,
+            oid,
+        )
+
+        self.assertEqual(certified_id, "1711459816")
+        self.assertTrue(
+            validator._identification_matches_cert(
+                "1711459816",
+                {
+                    "certificate_identification": certified_id,
+                    "certificate_subject": "Common Name: Ricardo",
+                },
+            )
+        )
+
+        # Si el certificado trae un identificador certificado, este manda:
+        # no debe aceptarse un ID distinto aunque aparezca como texto en el CN.
+        self.assertFalse(
+            validator._identification_matches_cert(
+                "1711459816",
+                {
+                    "certificate_identification": "9999999999",
+                    "certificate_subject": "Common Name: Ricardo 1711459816",
+                },
+            )
+        )
+
     def test_cryptographic_identity_verification_from_signed_enrollment_pdf(self):
         self.clear_identity(201)
         root_cert, intermediate_cert, signer_key, signer_cert = self.create_intermediate_chain("Ricardo ID-201", "ricardo@firma.test", 8801)
