@@ -17,15 +17,6 @@
         </div>
     </div>
     <div class="d-flex flex-wrap gap-2">
-        <div class="btn-group" role="group" aria-label="Selector de vista documental">
-            <a href="{{ url_for('documentacion.index') }}" class="btn btn-primary">Vista actual</a>
-            <a href="{{ url_for('documentacion.explorador') }}" class="btn btn-outline-secondary">Vista explorador</a>
-        </div>
-        {% if vista == 'documentos' and can('documentos.editar') %}
-        <a href="{{ url_for('documentacion.clasificacion_pendientes') }}" class="btn btn-outline-warning">
-            Clasificacion pendiente
-        </a>
-        {% endif %}
         {% if can('documentos.crear') %}
         <a href="{{ url_for('documentacion.nuevo') }}" class="btn btn-primary">Nuevo documento</a>
         {% endif %}
@@ -40,6 +31,28 @@
 {% endif %}
 
 {% if vista == 'documentos' %}
+<section class="page-card mb-4" aria-labelledby="documentos-accesos-title">
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+        <div>
+            <h5 id="documentos-accesos-title" class="mb-1">Accesos documentales</h5>
+            <div class="text-muted small">Vistas complementarias para consultar, clasificar y explorar documentos.</div>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <a href="{{ url_for('documentacion.explorador') }}" class="btn btn-outline-secondary">
+                Vista explorador
+            </a>
+            <a href="{{ url_for('documentacion.documentos_vigentes') }}" class="btn btn-outline-primary">
+                Documentos vigentes
+            </a>
+            {% if can('documentos.editar') %}
+            <a href="{{ url_for('documentacion.clasificacion_pendientes') }}" class="btn btn-outline-warning">
+                Clasificacion pendiente
+            </a>
+            {% endif %}
+        </div>
+    </div>
+</section>
+
 <section class="page-card mb-4" aria-labelledby="documentos-vigor-title">
     <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
         <div>

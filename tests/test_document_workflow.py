@@ -296,6 +296,46 @@ class DocumentWorkflowTest(unittest.TestCase):
         with self.assertRaises(DocumentWorkflowError):
             approve_version(documento=document, version_doc=draft, usuario=self.reviewer)
 
+    def test_same_reviewer_and_approver_can_review_then_approve(self):
+        document = self.make_document(331)
+        draft = self.assign_version_id(create_initial_version(
+            documento=document,
+            version="1",
+            cambios="Version inicial",
+            contenido="Contenido",
+            user_id=self.user.id,
+            revisado_por_id=self.reviewer.id,
+            aprobado_por_id=self.reviewer.id,
+        ))
+        self.attach_docx(document, draft, "Mismo revisor aprobador")
+        self.send(document, draft)
+
+        review_event = self.conform(document, draft, user=self.reviewer, comment="Revision conforme")
+        approval_event = self.approve(document, draft, user=self.reviewer, comment="Aprobacion conforme")
+
+        self.assertEqual(review_event.accion, "DAR_CONFORMIDAD")
+        self.assertEqual(approval_event.accion, "APROBAR")
+        self.assertEqual(draft.revisado_por_id, self.reviewer.id)
+        self.assertEqual(draft.aprobado_por_id, self.reviewer.id)
+        self.assertEqual(draft.estado, "APROBADO")
+        actions = [
+            event.accion
+            for event in DocumentoAprobacion.query.filter_by(documento_id=document.id, usuario_id=self.reviewer.id).all()
+        ]
+        self.assertIn("DAR_CONFORMIDAD", actions)
+        self.assertIn("APROBAR", actions)
+
+    def test_non_assigned_user_cannot_approve_even_after_review_conformity(self):
+        document = self.make_document(332)
+        draft = self.initial(document)
+        self.send(document, draft)
+        self.conform(document, draft)
+
+        with self.assertRaisesRegex(DocumentWorkflowError, "Solo el aprobador asignado"):
+            approve_version(documento=document, version_doc=draft, usuario=self.user)
+
+        self.assertEqual(draft.estado, "EN_APROBACION")
+
     def test_approval_substitutes_previous_and_records_both_events(self):
         document = self.make_document()
         previous = self.approved_initial(document)

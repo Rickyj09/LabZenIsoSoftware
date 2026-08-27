@@ -60,6 +60,8 @@ from app.services.document_versioning_service import (
 from app.services.document_workflow_service import (
     DocumentWorkflowError,
     approve_version as approve_workflow_version,
+    can_user_approve_version,
+    can_user_reject_version,
     get_latest_rejected_version,
     mark_review_conformity,
     obsolete_document,
@@ -736,6 +738,8 @@ def pendientes():
     return render_template(
         "documentacion/pendientes.html",
         pendientes=get_pending_documents_for_user(current_user),
+        can_user_approve_version=can_user_approve_version,
+        can_user_reject_version=can_user_reject_version,
     )
 
 
@@ -1216,6 +1220,8 @@ def detalle(item_id):
         onlyoffice_edit_enabled=bool(current_app.config.get("ONLYOFFICE_EDIT_ENABLED")),
         is_onlyoffice_supported_version=is_onlyoffice_supported_version,
         can_user_edit_onlyoffice_version=can_user_edit_onlyoffice_version,
+        can_user_approve_version=can_user_approve_version,
+        can_user_reject_version=can_user_reject_version,
         active_edit_info=active_edit_info,
         anexos_version_mostrada=anexos_version_mostrada,
         can_user_edit_attachment=can_user_edit_attachment,
@@ -1290,7 +1296,6 @@ def ver_onlyoffice(item_id, version_id):
 
 @bp.route("/<int:item_id>/versiones/<int:version_id>/onlyoffice/editar")
 @login_required
-@require_permission("documentos.editar")
 def editar_onlyoffice(item_id, version_id):
     try:
         context = OnlyOfficeDocumentEditService().build_context(
@@ -1385,12 +1390,12 @@ def liberar_edicion(public_id):
         edicion = OnlyOfficeEditSessionService().release(
             public_id=public_id,
             user=current_user,
-            reason=request.form.get("motivo") or "LiberaciÃ³n voluntaria desde editor.",
+            reason=request.form.get("motivo") or "Liberación voluntaria desde editor.",
             administrative=False,
         )
     except LookupError:
         abort(404)
-    flash("SesiÃ³n de ediciÃ³n liberada.", "success")
+    flash("Sesión de edición liberada.", "success")
     return redirect(url_for("documentacion.detalle", item_id=edicion.documento_id))
 
 
@@ -1400,7 +1405,7 @@ def liberar_edicion(public_id):
 def liberar_edicion_admin(public_id):
     motivo = (request.form.get("motivo") or "").strip()
     if not motivo:
-        flash("El motivo de liberaciÃ³n administrativa es obligatorio.", "warning")
+        flash("El motivo de liberación administrativa es obligatorio.", "warning")
         return redirect(request.referrer or url_for("documentacion.index"))
     try:
         edicion = OnlyOfficeEditSessionService().release(
@@ -1411,7 +1416,7 @@ def liberar_edicion_admin(public_id):
         )
     except LookupError:
         abort(404)
-    flash("Bloqueo de ediciÃ³n liberado administrativamente.", "success")
+    flash("Bloqueo de edición liberado administrativamente.", "success")
     return redirect(url_for("documentacion.detalle", item_id=edicion.documento_id))
 
 
@@ -1498,7 +1503,6 @@ def _load_attachment(public_id):
 
 @bp.route("/<int:item_id>/versiones/<int:version_id>/anexos", methods=["POST"])
 @login_required
-@require_permission("documentos.editar")
 def agregar_anexo(item_id, version_id):
     item, version = _load_document_version_for_attachment(item_id, version_id)
     try:
@@ -1520,7 +1524,6 @@ def agregar_anexo(item_id, version_id):
 
 @bp.route("/anexos/<public_id>/reemplazar", methods=["POST"])
 @login_required
-@require_permission("documentos.editar")
 def reemplazar_anexo(public_id):
     anexo = _load_attachment(public_id)
     try:
@@ -1542,7 +1545,6 @@ def reemplazar_anexo(public_id):
 
 @bp.route("/anexos/<public_id>/eliminar", methods=["POST"])
 @login_required
-@require_permission("documentos.editar")
 def eliminar_anexo(public_id):
     anexo = _load_attachment(public_id)
     try:
@@ -1605,7 +1607,6 @@ def ver_anexo_onlyoffice(public_id):
 
 @bp.route("/anexos/<public_id>/onlyoffice/editar")
 @login_required
-@require_permission("documentos.editar")
 def editar_anexo_onlyoffice(public_id):
     try:
         context = DocumentAttachmentService().build_edit_context(public_id=public_id, user=current_user)
@@ -1911,7 +1912,6 @@ def solicitar_correcciones_revision(item_id, version_id):
 
 @bp.route("/<int:item_id>/aprobar-version/<int:version_id>", methods=["POST"])
 @login_required
-@require_permission("documentos.aprobar")
 def aprobar_version(item_id, version_id):
     item = Documento.query.filter_by(
         id=item_id,
@@ -2338,7 +2338,6 @@ def enviar_revision(item_id):
 
 @bp.route("/<int:item_id>/rechazar-version/<int:version_id>", methods=["POST"])
 @login_required
-@require_permission("documentos.rechazar")
 def rechazar_version(item_id, version_id):
     item = Documento.query.filter_by(
         id=item_id,

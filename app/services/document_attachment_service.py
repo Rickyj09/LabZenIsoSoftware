@@ -25,10 +25,7 @@ from app.models.documentos import (
     DocumentoVersionAnexo,
     ESTADO_EDICION_ACTIVA,
     ESTADO_EDICION_EXPIRADA,
-    ESTADO_EN_ACTUALIZACION,
-    ESTADO_EN_ELABORACION,
 )
-from app.security.permissions import user_has_permission
 from app.services.document_versioning_service import get_preparation_version
 from app.services.office_document_profile import XLSX_MIME, get_onlyoffice_document_profile, get_onlyoffice_profile_by_extension
 from app.services.onlyoffice_document_edit_service import (
@@ -42,8 +39,7 @@ from app.services.onlyoffice_document_edit_service import (
     OnlyOfficeEditForbiddenError,
     OnlyOfficeEditSessionService,
     record_edit_event,
-    user_has_onlyoffice_edit_admin_permission,
-    user_is_assigned_elaborator,
+    user_is_document_cycle_participant,
 )
 from app.services.onlyoffice_document_view_service import (
     OnlyOfficeDisabledError,
@@ -143,8 +139,6 @@ def can_user_edit_attachment(documento, version, anexo, user, *, enforce_lock=Tr
         return False
     if int(documento.empresa_id) != int(user.empresa_id):
         return False
-    if not user_has_permission(user, "documentos.editar"):
-        return False
     if version.estado not in EDITABLE_VERSION_STATES:
         return False
     if anexo.estado != ANEXO_ESTADO_ACTIVO or anexo.inmutable:
@@ -152,7 +146,7 @@ def can_user_edit_attachment(documento, version, anexo, user, *, enforce_lock=Tr
     preparation = get_preparation_version(documento)
     if not preparation or int(preparation.id) != int(version.id):
         return False
-    if not (user_is_assigned_elaborator(documento, version, user) or user_has_onlyoffice_edit_admin_permission(user)):
+    if not user_is_document_cycle_participant(documento, version, user):
         return False
     if not enforce_lock:
         return True
@@ -446,15 +440,13 @@ class DocumentAttachmentService:
         _ensure_principal_docx(version_doc)
         if documento.empresa_id != usuario.empresa_id or version_doc.empresa_id != usuario.empresa_id:
             raise DocumentAttachmentForbiddenError("No puedes modificar anexos de otra empresa.")
-        if version_doc.estado not in (ESTADO_EN_ELABORACION, ESTADO_EN_ACTUALIZACION):
-            raise DocumentAttachmentError("Los anexos solo se modifican durante elaboracion o actualizacion.")
-        if not user_has_permission(usuario, "documentos.editar"):
-            raise DocumentAttachmentForbiddenError("No tienes permiso para modificar anexos.")
+        if version_doc.estado not in EDITABLE_VERSION_STATES:
+            raise DocumentAttachmentError("Los anexos solo se modifican en una version activa de trabajo.")
         preparation = get_preparation_version(documento)
         if not preparation or int(preparation.id) != int(version_doc.id):
             raise DocumentAttachmentError("Solo la version activa de trabajo puede modificar anexos.")
-        if not (user_is_assigned_elaborator(documento, version_doc, usuario) or user_has_onlyoffice_edit_admin_permission(usuario)):
-            raise DocumentAttachmentForbiddenError("Solo el elaborador o administrador autorizado puede modificar anexos.")
+        if not user_is_document_cycle_participant(documento, version_doc, usuario):
+            raise DocumentAttachmentForbiddenError("Solo un participante asignado puede modificar anexos.")
 
     def _ensure_onlyoffice_available(self, *, edit):
         if not current_app.config.get("ONLYOFFICE_ENABLED") or (edit and not current_app.config.get("ONLYOFFICE_EDIT_ENABLED")):

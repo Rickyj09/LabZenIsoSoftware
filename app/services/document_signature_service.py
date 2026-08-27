@@ -1070,9 +1070,6 @@ class DocumentSignatureService:
         missing = [role for _order, role, user in assignments if user is None]
         if missing:
             raise DocumentSignatureError("Faltan responsables para firma: " + ", ".join(missing))
-        users = [user.id for _order, _role, user in assignments]
-        if len(set(users)) != len(users):
-            raise DocumentSignatureError("Elaboracion, revision y aprobacion deben estar asignadas a usuarios distintos para firma secuencial.")
         missing_identity = [f"{role}: {user.nombre} {user.apellido}" for _order, role, user in assignments if not self._verified_identity_for_user(user)]
         if missing_identity:
             raise DocumentSignatureError("Faltan identidades de firma verificadas: " + "; ".join(missing_identity))

@@ -13,6 +13,7 @@ from unittest.mock import patch
 from urllib.error import URLError
 
 import jwt
+from flask import g
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
@@ -187,6 +188,16 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
                 password_hash="x",
                 activo=True,
             ),
+            Usuario(
+                id=206,
+                empresa_id=101,
+                nombre="Revisor",
+                apellido="Documental",
+                email="reviewer@onlyoffice",
+                username="reviewer-onlyoffice",
+                password_hash="x",
+                activo=True,
+            ),
             Empresa(id=102, nombre="Empresa dos"),
             Usuario(
                 id=203,
@@ -208,6 +219,12 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
             nombre="Enviar a revisiÃ³n",
             modulo="documentos",
         )
+        reviewer_action_permission = Permiso(
+            id=1006,
+            codigo="documentos.revisar",
+            nombre="Revisar documentos",
+            modulo="documentos",
+        )
         history_permission = Permiso(
             id=1002,
             codigo="documentos.ver_historial",
@@ -217,15 +234,18 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         quality_role = Rol(id=2001, nombre="CALIDAD", es_sistema=True)
         consultation_role = Rol(id=2002, nombre="CONSULTA", es_sistema=True)
         editor_role = Rol(id=2003, nombre="EDITOR", es_sistema=True)
+        reviewer_role = Rol(id=2004, nombre="REVISOR_DOCUMENTAL", es_sistema=True)
         db.session.add_all([
             view_permission,
             history_permission,
             edit_permission,
             download_permission,
             review_permission,
+            reviewer_action_permission,
             quality_role,
             consultation_role,
             editor_role,
+            reviewer_role,
         ])
         db.session.flush()
         db.session.add_all([
@@ -236,13 +256,19 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
             RolPermiso(id=3005, rol_id=editor_role.id, permiso_id=view_permission.id),
             RolPermiso(id=3006, rol_id=editor_role.id, permiso_id=edit_permission.id),
             RolPermiso(id=3007, rol_id=quality_role.id, permiso_id=download_permission.id),
+            RolPermiso(id=3008, rol_id=reviewer_role.id, permiso_id=view_permission.id),
+            RolPermiso(id=3009, rol_id=reviewer_role.id, permiso_id=history_permission.id),
+            RolPermiso(id=3010, rol_id=reviewer_role.id, permiso_id=download_permission.id),
+            RolPermiso(id=3011, rol_id=reviewer_role.id, permiso_id=reviewer_action_permission.id),
             UsuarioRol(id=4001, usuario_id=201, rol_id=quality_role.id),
             UsuarioRol(id=4002, usuario_id=202, rol_id=consultation_role.id),
             UsuarioRol(id=4003, usuario_id=203, rol_id=quality_role.id),
             UsuarioRol(id=4004, usuario_id=204, rol_id=editor_role.id),
+            UsuarioRol(id=4005, usuario_id=206, rol_id=reviewer_role.id),
         ])
 
     def login(self, user_id):
+        g.pop("_login_user", None)
         client = self.app.test_client()
         with client.session_transaction() as session:
             session["_user_id"] = str(user_id)
@@ -1019,31 +1045,20 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         self.assertEqual(DocumentoEdicion.query.filter_by(documento_version_anexo_id=anexo.id).count(), 1)
 
     @patch("app.services.onlyoffice_health_service.urlopen")
-    def test_reviewer_and_review_states_cannot_edit_xlsx_attachment(self, urlopen_mock):
+    def test_reviewer_can_edit_xlsx_attachment_in_review_state(self, urlopen_mock):
         urlopen_mock.return_value = FakeHttpResponse(200)
         document, version = self.add_document_with_file(content=self.minimal_docx("principal"))
         anexo = self.add_xlsx_attachment(document, version, text="revision")
-
-        reviewer_response = self.login(204).get(f"/documentacion/anexos/{anexo.public_id}/onlyoffice/editar")
-        self.assertEqual(reviewer_response.status_code, 403)
-
-        user = db.session.get(Usuario, 201)
-        workflow_send_for_review(
-            documento=document,
-            version_doc=version,
-            usuario=user,
-            comentario="Listo",
-            resumen_cambios="Cambio controlado",
-            hojas_modificadas="No aplica",
-        )
+        document.estado = "EN_REVISION"
+        version.estado = "EN_REVISION"
         db.session.commit()
-        review_response = self.login(201).get(f"/documentacion/anexos/{anexo.public_id}/onlyoffice/editar")
-        view_response = self.login(201).get(f"/documentacion/anexos/{anexo.public_id}/onlyoffice/ver")
 
-        self.assertEqual(review_response.status_code, 403)
+        edit_response = self.login(204).get(f"/documentacion/anexos/{anexo.public_id}/onlyoffice/editar")
+        view_response = self.login(204).get(f"/documentacion/anexos/{anexo.public_id}/onlyoffice/ver")
+
+        self.assertEqual(edit_response.status_code, 200)
         self.assertEqual(view_response.status_code, 200)
-        snapshot = DocumentoSnapshot.query.filter_by(documento_version_id=version.id, tipo="ENVIO_REVISION").one()
-        self.assertEqual(snapshot.metadata_json["anexos"][0]["sha256"], anexo.archivo_sha256)
+        self.assertIn('"mode": "edit"', edit_response.get_data(as_text=True))
 
     @patch("app.services.onlyoffice_health_service.urlopen")
     def test_attachment_lock_blocks_second_user(self, urlopen_mock):
@@ -1625,20 +1640,98 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         self.assertNotIn("testexcel.xlsx.docx", body)
 
     @patch("app.services.onlyoffice_health_service.urlopen")
-    def test_reviewer_cannot_edit_xlsx(self, urlopen_mock):
+    def test_reviewer_can_edit_xlsx_in_review_state(self, urlopen_mock):
         urlopen_mock.return_value = FakeHttpResponse(200)
         document, version = self.add_document_with_file(
             filename="testexcel.xlsx",
             content=self.minimal_xlsx("revisor"),
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+        document.estado = "EN_REVISION"
+        version.estado = "EN_REVISION"
+        db.session.commit()
 
         detail = self.login(204).get(f"/documentacion/{document.id}")
         response = self.login(204).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
 
         self.assertEqual(detail.status_code, 200)
-        self.assertNotIn("Editar contenido en ONLYOFFICE", detail.get_data(as_text=True))
-        self.assertEqual(response.status_code, 403)
+        self.assertIn("Editar contenido en ONLYOFFICE", detail.get_data(as_text=True))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"documentType": "cell"', response.get_data(as_text=True))
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_approver_can_edit_docx_in_approval_state(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx("aprobador"))
+        document.estado = "EN_APROBACION"
+        version.estado = "EN_APROBACION"
+        db.session.commit()
+
+        detail = self.login(201).get(f"/documentacion/{document.id}")
+        response = self.login(201).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn("Editar contenido en ONLYOFFICE", detail.get_data(as_text=True))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"mode": "edit"', response.get_data(as_text=True))
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_same_reviewer_and_approver_can_edit_in_review_and_approval_states(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx("doble"))
+        version.revisado_por_id = 204
+        version.aprobado_por_id = 204
+        document.estado = "EN_REVISION"
+        version.estado = "EN_REVISION"
+        db.session.commit()
+
+        review_response = self.login(204).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+        edicion = DocumentoEdicion.query.filter_by(documento_version_id=version.id).one()
+        edicion.estado = "LIBERADA"
+        document.estado = "EN_APROBACION"
+        version.estado = "EN_APROBACION"
+        db.session.commit()
+        approval_response = self.login(204).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+
+        self.assertEqual(review_response.status_code, 200)
+        self.assertEqual(approval_response.status_code, 200)
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_documental_reviewer_assigned_as_approver_can_edit_docx_in_approval_state(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx("revisor aprobador"))
+        version.revisado_por_id = 206
+        version.aprobado_por_id = 206
+        document.estado = "EN_APROBACION"
+        version.estado = "EN_APROBACION"
+        db.session.commit()
+
+        detail = self.login(206).get(f"/documentacion/{document.id}")
+        response = self.login(206).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn("Editar contenido en ONLYOFFICE", detail.get_data(as_text=True))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"mode": "edit"', response.get_data(as_text=True))
+
+    @patch("app.services.onlyoffice_health_service.urlopen")
+    def test_documental_reviewer_assigned_as_approver_can_edit_xlsx_attachment(self, urlopen_mock):
+        urlopen_mock.return_value = FakeHttpResponse(200)
+        document, version = self.add_document_with_file(content=self.minimal_docx("principal"))
+        anexo = self.add_xlsx_attachment(document, version, text="anexo")
+        version.revisado_por_id = 206
+        version.aprobado_por_id = 206
+        document.estado = "EN_APROBACION"
+        version.estado = "EN_APROBACION"
+        db.session.commit()
+
+        detail = self.login(206).get(f"/documentacion/{document.id}")
+        response = self.login(206).get(f"/documentacion/anexos/{anexo.public_id}/onlyoffice/editar")
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn("Editar contenido en ONLYOFFICE", detail.get_data(as_text=True))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('"documentType": "cell"', response.get_data(as_text=True))
 
     @patch("app.services.onlyoffice_health_service.urlopen")
     def test_xlsx_edit_uses_spreadsheet_profile(self, urlopen_mock):
@@ -1664,6 +1757,9 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
     def test_non_assigned_editor_does_not_see_or_open_onlyoffice_edit(self, urlopen_mock):
         urlopen_mock.return_value = FakeHttpResponse(200)
         document, version = self.add_document_with_file(content=self.minimal_docx())
+        version.revisado_por_id = 201
+        version.aprobado_por_id = 201
+        db.session.commit()
 
         detail = self.login(204).get(f"/documentacion/{document.id}")
         response = self.login(204).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
@@ -1765,9 +1861,9 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
 
     @patch("app.services.onlyoffice_health_service.urlopen")
-    def test_non_editable_states_are_rejected_for_editing(self, urlopen_mock):
+    def test_final_states_are_rejected_for_editing(self, urlopen_mock):
         urlopen_mock.return_value = FakeHttpResponse(200)
-        for offset, state in enumerate(["EN_REVISION", "APROBADO", "RECHAZADO", "SUSTITUIDO", "OBSOLETO"], start=1):
+        for offset, state in enumerate(["APROBADO", "RECHAZADO", "SUSTITUIDO", "OBSOLETO"], start=1):
             document, version = self.add_document_with_file(
                 document_id=600 + offset,
                 version_id=1600 + offset,
@@ -1777,7 +1873,7 @@ class OnlyOfficeIntegrationTest(unittest.TestCase):
             db.session.commit()
 
             response = self.login(201).get(f"/documentacion/{document.id}/versiones/{version.id}/onlyoffice/editar")
-            self.assertEqual(response.status_code, 302 if state in {"EN_REVISION", "APROBADO", "RECHAZADO", "SUSTITUIDO", "OBSOLETO"} else 409)
+            self.assertEqual(response.status_code, 302)
 
     @patch("app.services.onlyoffice_health_service.urlopen")
     def test_heartbeat_renews_owned_session_only(self, urlopen_mock):

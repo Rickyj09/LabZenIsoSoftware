@@ -622,6 +622,25 @@ class DocumentSignatureTest(unittest.TestCase):
         self.assertEqual(document.estado, ESTADO_APROBADO)
         self.assertIsNone(document.version_vigente_id)
 
+    def test_start_process_allows_same_reviewer_and_approver_with_distinct_steps(self):
+        document = Documento.query.get(501)
+        version = DocumentoVersion.query.get(1501)
+        version.aprobado_por_id = 202
+        admin = Usuario.query.get(204)
+        db.session.commit()
+
+        process = DocumentSignatureService(provider=FakeSignatureProvider()).start_process(
+            documento=document,
+            version_doc=version,
+            usuario=admin,
+        )
+        steps = DocumentoFirmaPaso.query.filter_by(proceso_id=process.id).order_by(DocumentoFirmaPaso.orden).all()
+
+        self.assertEqual([step.rol_firmante for step in steps], ["ELABORADOR", "REVISOR", "APROBADOR"])
+        self.assertEqual([step.usuario_id for step in steps], [201, 202, 202])
+        self.assertEqual([step.orden for step in steps], [1, 2, 3])
+        self.assertEqual(DocumentoFirmaPaso.query.filter_by(proceso_id=process.id, usuario_id=202).count(), 2)
+
     def test_start_process_is_idempotent_for_double_request(self):
         service = DocumentSignatureService(provider=FakeSignatureProvider())
         document = Documento.query.get(501)

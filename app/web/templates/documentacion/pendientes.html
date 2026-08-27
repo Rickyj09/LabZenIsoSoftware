@@ -60,13 +60,13 @@
                                 <button type="submit" class="btn btn-sm btn-outline-danger">Correcciones</button>
                             </form>
                             {% endif %}
-                            {% if version.estado == 'EN_APROBACION' and can('documentos.aprobar') %}
+                            {% if can_user_approve_version(version.documento, version, current_user) %}
                             <form method="post"
                                   action="{{ url_for('documentacion.aprobar_version', item_id=version.documento_id, version_id=version.id) }}">
                                 <button type="submit" class="btn btn-sm btn-success">Aprobar</button>
                             </form>
                             {% endif %}
-                            {% if version.estado == 'EN_APROBACION' and can('documentos.rechazar') %}
+                            {% if can_user_reject_version(version.documento, version, current_user) %}
                             <form method="post"
                                   action="{{ url_for('documentacion.rechazar_version', item_id=version.documento_id, version_id=version.id) }}"
                                   class="d-flex gap-1">

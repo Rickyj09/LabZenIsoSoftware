@@ -330,10 +330,23 @@ class DocumentCurrentCatalogViewTest(unittest.TestCase):
         body = self.body()
         sidebar = self.sidebar(body)
 
-        self.assertIn("Gesti", sidebar)
-        self.assertIn("Documentos vigentes", sidebar)
-        self.assertIn("/documentacion/documentos-vigentes", sidebar)
+        self.assertIn("2. Documentación", sidebar)
+        self.assertIn("Documentos", sidebar)
+        self.assertIn("/documentacion/", sidebar)
+        self.assertNotIn("Documentos vigentes", sidebar)
+        self.assertNotIn("/documentacion/documentos-vigentes", sidebar)
         self.assertIn('class="sidebar-link active"', sidebar)
+
+    def test_document_index_shows_moved_links_without_edit_only_action_for_viewer(self):
+        body = self.body("/documentacion/", user_id=204)
+
+        self.assertIn("Accesos documentales", body)
+        self.assertIn("Vista explorador", body)
+        self.assertIn("/documentacion/explorador", body)
+        self.assertIn("Documentos vigentes", body)
+        self.assertIn("/documentacion/documentos-vigentes", body)
+        self.assertNotIn("Clasificacion pendiente", body)
+        self.assertNotIn("/documentacion/clasificacion/pendientes", body)
 
     def test_actions_for_user_with_full_permissions(self):
         full = self.body()

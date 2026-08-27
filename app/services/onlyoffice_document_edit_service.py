@@ -23,9 +23,10 @@ from app.models.documentos import (
     ESTADO_EDICION_EXPIRADA,
     ESTADO_EDICION_LIBERADA,
     ESTADO_EN_ACTUALIZACION,
+    ESTADO_EN_APROBACION,
     ESTADO_EN_ELABORACION,
+    ESTADO_EN_REVISION,
 )
-from app.security.permissions import user_has_permission
 from app.services.document_versioning_service import get_preparation_version
 from app.services.onlyoffice_document_view_service import (
     OnlyOfficeDisabledError,
@@ -67,9 +68,7 @@ SUPPORTED_CALLBACK_STATUSES = {
     CALLBACK_STATUS_FORCE_SAVE,
     CALLBACK_STATUS_FORCE_SAVE_ERROR,
 }
-EDITABLE_VERSION_STATES = {ESTADO_EN_ELABORACION, ESTADO_EN_ACTUALIZACION}
-ONLYOFFICE_EDIT_ADMIN_PERMISSION = "documentos.ver_historial"
-
+EDITABLE_VERSION_STATES = {ESTADO_EN_ELABORACION, ESTADO_EN_ACTUALIZACION, ESTADO_EN_REVISION, ESTADO_EN_APROBACION}
 
 class OnlyOfficeEditError(OnlyOfficeDocumentViewError):
     status_code = 409
@@ -206,8 +205,15 @@ def user_is_assigned_elaborator(documento, version, user):
     return bool(assigned_id and user and int(assigned_id) == int(user.id))
 
 
-def user_has_onlyoffice_edit_admin_permission(user):
-    return user_has_permission(user, ONLYOFFICE_EDIT_ADMIN_PERMISSION)
+def user_is_document_cycle_participant(documento, version, user):
+    if not user:
+        return False
+    participant_ids = {
+        version.elaborado_por_id or documento.elaborado_por_id,
+        version.revisado_por_id,
+        version.aprobado_por_id,
+    }
+    return int(user.id) in {int(user_id) for user_id in participant_ids if user_id}
 
 
 def can_user_edit_onlyoffice_version(documento, version, user, *, active_edit_info=None, enforce_lock=True):
@@ -217,8 +223,6 @@ def can_user_edit_onlyoffice_version(documento, version, user, *, active_edit_in
         return False
     if int(documento.empresa_id) != int(user.empresa_id):
         return False
-    if not user_has_permission(user, "documentos.editar"):
-        return False
     if version.estado not in EDITABLE_VERSION_STATES:
         return False
     if not is_onlyoffice_supported_version(version):
@@ -226,7 +230,7 @@ def can_user_edit_onlyoffice_version(documento, version, user, *, active_edit_in
     preparation = get_preparation_version(documento)
     if not preparation or int(preparation.id) != int(version.id):
         return False
-    if not (user_is_assigned_elaborator(documento, version, user) or user_has_onlyoffice_edit_admin_permission(user)):
+    if not user_is_document_cycle_participant(documento, version, user):
         return False
     if active_edit_info and active_edit_info.blocked_by_other_user:
         return False
@@ -285,15 +289,15 @@ class OnlyOfficeDocumentEditService:
         if version.empresa_id != documento.empresa_id or version.documento_id != documento.id:
             raise OnlyOfficeInvalidDocumentError("La versiÃ³n no pertenece al documento indicado.")
         if version.estado not in EDITABLE_VERSION_STATES:
-            raise OnlyOfficeEditConflictError("Solo una versiÃ³n EN_ELABORACION puede editarse en ONLYOFFICE.")
+            raise OnlyOfficeEditConflictError("Solo una version activa de trabajo puede editarse en ONLYOFFICE.")
         preparation = get_preparation_version(documento)
         if not preparation or preparation.id != version.id:
             raise OnlyOfficeEditConflictError("La versiÃ³n seleccionada no es la versiÃ³n activa de trabajo.")
         resolve_onlyoffice_source_path(version)
 
     def validate_user_can_edit(self, *, documento, version, user):
-        if not (user_is_assigned_elaborator(documento, version, user) or user_has_onlyoffice_edit_admin_permission(user)):
-            raise OnlyOfficeEditForbiddenError("Solo el elaborador asignado o un usuario administrativo puede editar el contenido.")
+        if not user_is_document_cycle_participant(documento, version, user):
+            raise OnlyOfficeEditForbiddenError("Solo un participante asignado puede editar el contenido.")
 
     def acquire_lock(self, *, documento, version, user):
         now = _now()

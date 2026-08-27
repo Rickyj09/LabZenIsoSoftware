@@ -70,8 +70,7 @@
             {% endif %}
 
         {% elif version_preparacion and version_preparacion.estado == 'EN_APROBACION' %}
-            {% if version_preparacion.aprobado_por_id == current_user.id or can('documentos.ver_historial') %}
-                {% if can('documentos.aprobar') %}
+            {% if can_user_approve_version(item, version_preparacion, current_user) %}
                 <form method="post"
                       action="{{ url_for('documentacion.aprobar_version', item_id=item.id, version_id=version_preparacion.id) }}"
                       class="d-flex gap-2">
@@ -81,9 +80,9 @@
                         Aprobar
                     </button>
                 </form>
-                {% endif %}
+            {% endif %}
 
-                {% if can('documentos.rechazar') %}
+            {% if can_user_reject_version(item, version_preparacion, current_user) %}
                 <form method="post"
                       action="{{ url_for('documentacion.rechazar_version', item_id=item.id, version_id=version_preparacion.id) }}"
                       class="d-flex gap-2">
@@ -93,7 +92,6 @@
                         Rechazar
                     </button>
                 </form>
-                {% endif %}
             {% endif %}
 
         {% elif version_rechazada %}
@@ -794,7 +792,7 @@
 <div class="page-card mb-4">
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
         <h5 class="mb-0">Anexos de la versión</h5>
-        {% if version_preparacion and version_trazabilidad.id == version_preparacion.id and can('documentos.editar') %}
+        {% if version_preparacion and version_trazabilidad.id == version_preparacion.id and can_user_edit_onlyoffice_version(item, version_trazabilidad, current_user, enforce_lock=false) %}
         <form method="post"
               action="{{ url_for('documentacion.agregar_anexo', item_id=item.id, version_id=version_trazabilidad.id) }}"
               enctype="multipart/form-data"

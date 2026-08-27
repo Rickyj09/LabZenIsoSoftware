@@ -283,6 +283,19 @@ class DocumentVersioningTest(unittest.TestCase):
         self.assertEqual(version_doc.revisado_por_id, 203)
         self.assertEqual(version_doc.aprobado_por_id, 204)
 
+    def test_post_new_document_allows_same_reviewer_and_approver(self):
+        response = self.post_new_document(
+            codigo="TEST-GT.PR.SOD.PEECE-CIERRE-DOBLE",
+            revisado_por_id="203",
+            aprobado_por_id="203",
+        )
+
+        self.assertEqual(response.status_code, 302)
+        document = Documento.query.filter_by(codigo="TEST-GT.PR.SOD.PEECE-CIERRE-DOBLE").one()
+        version_doc = DocumentoVersion.query.filter_by(documento_id=document.id, version="1").one()
+        self.assertEqual(version_doc.revisado_por_id, 203)
+        self.assertEqual(version_doc.aprobado_por_id, 203)
+
     def test_post_new_document_without_reviewer_is_rejected(self):
         response = self.post_new_document(revisado_por_id="")
 
@@ -362,11 +375,13 @@ class DocumentVersioningTest(unittest.TestCase):
         with self.assertRaisesRegex(DocumentVersioningError, "El elaborador y el revisor deben ser diferentes."):
             self.initial(document, revisado_por_id=201)
 
-    def test_initial_version_rejects_same_reviewer_and_approver(self):
+    def test_initial_version_allows_same_reviewer_and_approver(self):
         document = self.make_document(318)
 
-        with self.assertRaisesRegex(DocumentVersioningError, "El revisor y el aprobador deben ser diferentes."):
-            self.initial(document, revisado_por_id=203, aprobado_por_id=203)
+        version_doc = self.initial(document, revisado_por_id=203, aprobado_por_id=203)
+
+        self.assertEqual(version_doc.revisado_por_id, 203)
+        self.assertEqual(version_doc.aprobado_por_id, 203)
 
     def test_new_draft_does_not_replace_current_approved_version(self):
         document = self.make_document(302)

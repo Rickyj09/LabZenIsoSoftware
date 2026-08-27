@@ -2,16 +2,26 @@ import tempfile
 import unittest
 import zipfile
 from io import BytesIO
+from flask import g
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from app import create_app
 from app.extensions import db
-from app.models.documentos import Documento, DocumentoAprobacion, DocumentoSnapshot, DocumentoVersion
+from app.models.documentos import (
+    Documento,
+    DocumentoAprobacion,
+    DocumentoArtefacto,
+    DocumentoConversion,
+    DocumentoSnapshot,
+    DocumentoVersion,
+)
 from app.models.empresa import Empresa
 from app.models.seguridad import Permiso, Rol, RolPermiso, Usuario, UsuarioRol
 from app.security.permissions import user_has_permission
+from app.services.storage_service import apply_stored_file_metadata, store_document_file
+from werkzeug.datastructures import FileStorage
 
 
 DOCUMENT_PERMISSIONS = {
@@ -57,6 +67,8 @@ class DocumentPermissionTest(unittest.TestCase):
         self.next_document_id = 7001
         self.next_version_id = 8001
         self.next_snapshot_id = 10001
+        self.next_artifact_id = 11001
+        self.next_conversion_id = 12001
 
         def assign_event_ids(session, _flush_context, _instances):
             for item in session.new:
@@ -72,7 +84,12 @@ class DocumentPermissionTest(unittest.TestCase):
                 elif isinstance(item, DocumentoSnapshot) and item.id is None:
                     item.id = self.next_snapshot_id
                     self.next_snapshot_id += 1
-
+                elif isinstance(item, DocumentoArtefacto) and item.id is None:
+                    item.id = self.next_artifact_id
+                    self.next_artifact_id += 1
+                elif isinstance(item, DocumentoConversion) and item.id is None:
+                    item.id = self.next_conversion_id
+                    self.next_conversion_id += 1
         self.assign_event_ids = assign_event_ids
         event.listen(Session, "before_flush", self.assign_event_ids)
         db.session.add_all([
@@ -132,6 +149,7 @@ class DocumentPermissionTest(unittest.TestCase):
                 db.session.add(UsuarioRol(id=link_id, usuario_id=user_id, rol_id=role.id))
 
     def login(self, user_id):
+        g.pop("_login_user", None)
         client = self.app.test_client()
         with client.session_transaction() as session:
             session["_user_id"] = str(user_id)
@@ -190,6 +208,16 @@ class DocumentPermissionTest(unittest.TestCase):
             aprobado_por_id=approver_id,
         )
         db.session.add_all([document, version])
+        stored = store_document_file(
+            FileStorage(
+                stream=self.minimal_docx(f"Documento {document_id}"),
+                filename=f"DOC-{document_id}.docx",
+                content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            documento=document,
+            version=version.version,
+        )
+        apply_stored_file_metadata(version, stored)
         db.session.commit()
         return document, version
 
@@ -341,19 +369,32 @@ class DocumentPermissionTest(unittest.TestCase):
         self.assertEqual(client.get("/documentacion/nuevo").status_code, 403)
         self.assertEqual(client.get(f"/documentacion/{document.id}/editar").status_code, 403)
 
-    def test_technician_direct_posts_to_restricted_actions_return_403(self):
+    def test_technician_direct_posts_to_restricted_actions_do_not_mutate_when_unassigned(self):
         review_document, review = self.add_document(303, "EN_REVISION", "EN_REVISION")
         approved_document, approved = self.add_document(304, "APROBADO", "APROBADO")
         approved_document.version_vigente_id = approved.id
         db.session.commit()
         client = self.login(202)
 
-        self.assertEqual(client.post(f"/documentacion/{review_document.id}/aprobar-version/{review.id}").status_code, 403)
-        self.assertEqual(client.post(f"/documentacion/{review_document.id}/rechazar-version/{review.id}", data={"comentario": "No"}).status_code, 403)
+        approval = client.post(f"/documentacion/{review_document.id}/aprobar-version/{review.id}")
+        rejection = client.post(f"/documentacion/{review_document.id}/rechazar-version/{review.id}", data={"comentario": "No"})
+        db.session.refresh(review_document)
+        db.session.refresh(review)
+
+        self.assertEqual(approval.status_code, 302)
+        self.assertEqual(rejection.status_code, 302)
+        self.assertEqual(review_document.estado, "EN_REVISION")
+        self.assertEqual(review.estado, "EN_REVISION")
+        self.assertEqual(DocumentoAprobacion.query.filter_by(documento_id=review_document.id).count(), 0)
         self.assertEqual(client.post(f"/documentacion/{approved_document.id}/obsoletar", data={"motivo": "No"}).status_code, 403)
 
     def test_quality_can_reach_approval_rejection_and_obsolescence_actions(self):
-        review_document, review = self.add_document(305, "EN_REVISION", "EN_REVISION")
+        review_document, review = self.add_document(
+            305,
+            "EN_APROBACION",
+            "EN_APROBACION",
+            approver_id=201,
+        )
         client = self.login(201)
         approval = client.post(
             f"/documentacion/{review_document.id}/aprobar-version/{review.id}",
@@ -361,7 +402,12 @@ class DocumentPermissionTest(unittest.TestCase):
         )
         self.assertEqual(approval.status_code, 302)
 
-        reject_document, reject_version = self.add_document(306, "EN_REVISION", "EN_REVISION")
+        reject_document, reject_version = self.add_document(
+            306,
+            "EN_APROBACION",
+            "EN_APROBACION",
+            approver_id=201,
+        )
         rejection = client.post(
             f"/documentacion/{reject_document.id}/rechazar-version/{reject_version.id}",
             data={"comentario": "Corregir"},
@@ -376,6 +422,152 @@ class DocumentPermissionTest(unittest.TestCase):
             data={"motivo": "Reemplazado"},
         )
         self.assertEqual(obsolescence.status_code, 302)
+
+    def test_quality_not_assigned_cannot_approve_or_see_approval_buttons(self):
+        document, version = self.add_document(
+            313,
+            "EN_APROBACION",
+            "EN_APROBACION",
+            reviewer_id=206,
+            approver_id=205,
+        )
+        client = self.login(201)
+
+        detail = client.get(f"/documentacion/{document.id}")
+        body = detail.get_data(as_text=True)
+        response = client.post(
+            f"/documentacion/{document.id}/aprobar-version/{version.id}",
+            data={"comentario": "No asignado"},
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertNotIn("Aprobar", body)
+        self.assertNotIn("Rechazar", body)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(document.estado, "EN_APROBACION")
+        self.assertEqual(version.estado, "EN_APROBACION")
+        self.assertEqual(DocumentoAprobacion.query.filter_by(documento_id=document.id, accion="APROBAR").count(), 0)
+
+    def test_documental_reviewer_assigned_as_reviewer_and_approver_can_complete_route_flow(self):
+        document, version = self.add_document(
+            314,
+            reviewer_id=206,
+            approver_id=206,
+        )
+
+        # Primero actúa el elaborador.
+        author_client = self.login(202)
+
+        sent = author_client.post(
+            f"/documentacion/{document.id}/enviar-revision",
+            data={
+                "comentario": "Listo",
+                "resumen_cambios": "Cambio controlado",
+                "hojas_modificadas": "No aplica",
+            },
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        # El test mantiene un app_context compartido.
+        # Limpiamos el usuario cacheado por Flask-Login antes
+        # de simular al segundo usuario.
+        g.pop("_login_user", None)
+
+        # El mismo usuario REVISOR_DOCUMENTAL actuará como revisor y aprobador.
+        client = self.login(206)
+
+        conformity = client.post(
+            f"/documentacion/{document.id}/versiones/{version.id}/dar-conformidad",
+            data={"comentario": "Conforme"},
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        detail = client.get(f"/documentacion/{document.id}")
+        detail_body = detail.get_data(as_text=True)
+
+        approval = client.post(
+            f"/documentacion/{document.id}/aprobar-version/{version.id}",
+            data={"comentario": "Aprobado"},
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        self.assertEqual(sent.status_code, 302)
+        self.assertEqual(conformity.status_code, 302)
+        self.assertIn("Aprobar", detail_body)
+        self.assertIn("Rechazar", detail_body)
+        self.assertEqual(approval.status_code, 302)
+        self.assertEqual(document.estado, "APROBADO")
+        self.assertEqual(version.estado, "APROBADO")
+
+        self.assertEqual(
+            DocumentoAprobacion.query.filter_by(
+                documento_id=document.id,
+                accion="DAR_CONFORMIDAD",
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            DocumentoAprobacion.query.filter_by(
+                documento_id=document.id,
+                accion="APROBAR",
+            ).count(),
+            1,
+        )
+
+    def test_documental_reviewer_assigned_as_approver_can_reject_from_approval_state(self):
+        document, version = self.add_document(
+            317,
+            reviewer_id=206,
+            approver_id=206,
+        )
+
+        author_client = self.login(202)
+        sent = author_client.post(
+            f"/documentacion/{document.id}/enviar-revision",
+            data={
+                "comentario": "Listo",
+                "resumen_cambios": "Cambio controlado",
+                "hojas_modificadas": "No aplica",
+            },
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        client = self.login(206)
+        conformity = client.post(
+            f"/documentacion/{document.id}/versiones/{version.id}/dar-conformidad",
+            data={"comentario": "Conforme"},
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        detail = client.get(f"/documentacion/{document.id}")
+        rejection = client.post(
+            f"/documentacion/{document.id}/rechazar-version/{version.id}",
+            data={"comentario": "Corregir evidencia"},
+        )
+        db.session.refresh(document)
+        db.session.refresh(version)
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn("Rechazar", detail.get_data(as_text=True))
+        self.assertEqual(sent.status_code, 302)
+        self.assertEqual(conformity.status_code, 302)
+        self.assertEqual(rejection.status_code, 302)
+        self.assertEqual(version.estado, "RECHAZADO")
+        self.assertEqual(
+            DocumentoAprobacion.query.filter_by(
+                documento_id=document.id,
+                accion="RECHAZAR_APROBACION",
+                usuario_id=206,
+            ).count(),
+            1,
+        )
 
     def test_buttons_are_hidden_for_consultation_user(self):
         document, _ = self.add_document(308)

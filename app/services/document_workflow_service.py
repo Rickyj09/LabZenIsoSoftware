@@ -2,7 +2,6 @@ from datetime import datetime, timezone
 
 from app.extensions import db
 from app.models.documentos import DocumentoAprobacion, DocumentoVersion
-from app.security.permissions import user_has_permission
 from app.services.document_versioning_service import (
     DocumentVersioningError,
     approve_version as apply_approval,
@@ -17,9 +16,6 @@ from app.services.document_attachment_service import DocumentAttachmentService
 
 class DocumentWorkflowError(DocumentVersioningError):
     pass
-
-
-ADMIN_PERMISSION = "documentos.ver_historial"
 
 
 def _now():
@@ -42,10 +38,6 @@ def _validate_context(documento, version_doc, usuario):
         raise DocumentWorkflowError("La version no pertenece al documento o empresa indicados.")
 
 
-def _is_admin(usuario):
-    return user_has_permission(usuario, ADMIN_PERMISSION)
-
-
 def _validate_assigned_reviewer(documento, version_doc, usuario):
     if not version_doc.revisado_por_id:
         raise DocumentWorkflowError("La version no tiene revisor asignado.")
@@ -58,13 +50,25 @@ def _validate_assigned_reviewer(documento, version_doc, usuario):
 
 
 def _validate_assigned_approver(version_doc, usuario):
-    if version_doc.revisado_por_id and int(version_doc.revisado_por_id) == int(usuario.id):
-        raise DocumentWorkflowError("El revisor tecnico no puede aprobar finalmente el mismo documento.")
     if version_doc.aprobado_por_id and int(version_doc.aprobado_por_id) == int(usuario.id):
         return
-    if _is_admin(usuario):
-        return
-    raise DocumentWorkflowError("Solo el aprobador asignado o un usuario administrativo puede ejecutar esta accion.")
+    raise DocumentWorkflowError("Solo el aprobador asignado puede ejecutar esta accion.")
+
+
+def can_user_approve_version(documento, version_doc, usuario):
+    if not documento or not version_doc or not usuario:
+        return False
+    if getattr(usuario, "empresa_id", None) != documento.empresa_id:
+        return False
+    if version_doc.documento_id != documento.id or version_doc.empresa_id != documento.empresa_id:
+        return False
+    if version_doc.estado != "EN_APROBACION":
+        return False
+    return bool(version_doc.aprobado_por_id and int(version_doc.aprobado_por_id) == int(usuario.id))
+
+
+def can_user_reject_version(documento, version_doc, usuario):
+    return can_user_approve_version(documento, version_doc, usuario)
 
 
 def record_document_event(

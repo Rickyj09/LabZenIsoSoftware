@@ -1,3 +1,12 @@
+{% set endpoint = request.endpoint or '' %}
+{% set arquitectura_sgc_active = endpoint.startswith('organigrama.') or endpoint.startswith('politica_calidad.') or endpoint.startswith('objetivos_calidad.') or endpoint.startswith('mapa_procesos.') %}
+{% set documentacion_active = endpoint.startswith('documentacion.') or endpoint.startswith('documentacion_firmas.') %}
+{% set documentacion_documentos_active = documentacion_active and endpoint not in ['documentacion.dashboard', 'documentacion.pendientes'] %}
+{% set administrativo_active = endpoint.startswith('clientes.') or endpoint.startswith('solicitudes.') or endpoint.startswith('ofertas.') or endpoint.startswith('contratos.') %}
+{% set item_metodo_active = endpoint.startswith('muestras.') or endpoint.startswith('muestra_ensayos.') or endpoint.startswith('ensayos_catalogo.') or endpoint.startswith('metodos.') or endpoint.startswith('resultados.') %}
+{% set accion_mejora_active = endpoint.startswith('riesgos_oportunidades.') or endpoint.startswith('no_conformidades.') or endpoint.startswith('acciones_correctivas.') %}
+{% set auditoria_active = endpoint.startswith('auditorias.') %}
+
 <aside class="sidebar">
     <div class="sidebar-brand">
         <div class="sidebar-logo-wrap">
@@ -24,267 +33,66 @@
     </div>
 
     <nav class="sidebar-nav">
-
-        <!-- GENERAL -->
         <button class="sidebar-group-btn"
                 type="button"
                 data-bs-toggle="collapse"
                 data-bs-target="#menuGeneral"
-                aria-expanded="{% if request.endpoint == 'dashboard.index' or (request.endpoint and request.endpoint.startswith('empresas.')) or (request.endpoint and request.endpoint.startswith('usuarios.')) %}true{% else %}false{% endif %}">
-            <span>General</span>
+                aria-expanded="{% if endpoint.startswith('empresas.') or endpoint.startswith('usuarios.') %}true{% else %}false{% endif %}">
+            <span>0. General</span>
             <span>▾</span>
         </button>
-
-        <div class="collapse {% if request.endpoint == 'dashboard.index' or (request.endpoint and request.endpoint.startswith('empresas.')) or (request.endpoint and request.endpoint.startswith('usuarios.')) %}show{% endif %}"
+        <div class="collapse {% if endpoint.startswith('empresas.') or endpoint.startswith('usuarios.') %}show{% endif %}"
              id="menuGeneral">
-            <a class="sidebar-link {% if request.endpoint == 'dashboard.index' %}active{% endif %}"
-               href="{{ url_for('dashboard.index') }}">
-                Dashboard
-            </a>
-
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('empresas.') %}active{% endif %}"
-               href="#">
-                Empresas
-            </a>
-
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('usuarios.') %}active{% endif %}"
-               href="#">
-                Usuarios
-            </a>
+            <span class="sidebar-link disabled">Empresas</span>
+            <span class="sidebar-link disabled">Usuarios</span>
         </div>
 
-
-        <!--ADMINISTRATIVO-->
-
-
-        <div class="sidebar-group">
-
-    <button class="sidebar-group-btn"
-            type="button"
-            data-bs-toggle="collapse"
-            data-bs-target="#menuAdministrativo"
-            aria-expanded="{% if request.endpoint and (request.endpoint.startswith('clientes.') or request.endpoint.startswith('solicitudes.') or request.endpoint.startswith('ofertas.')) %}true{% else %}false{% endif %}">
-        <span>Administrativo</span>
-        <span>▾</span>
-    </button>
-
-    <div class="collapse {% if request.endpoint and (request.endpoint.startswith('clientes.') or request.endpoint.startswith('solicitudes.') or request.endpoint.startswith('ofertas.')) %}show{% endif %}"
-         id="menuAdministrativo">
-
-        <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('clientes.') %}active{% endif %}"
-           href="{{ url_for('clientes.index') }}">
-            Clientes
-        </a>
-
-        <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('solicitudes.') %}active{% endif %}"
-           href="{{ url_for('solicitudes.index') }}">
-            Solicitudes
-        </a>
-
-        <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('ofertas.') %}active{% endif %}"
-           href="{{ url_for('ofertas.index') }}">
-            Ofertas / Cotizaciones
-        </a>
-
-
-        <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('contratos.') %}active{% endif %}"
-   href="{{ url_for('contratos.index') }}">
-    Contratos
-</a>
-
-
-    </div>
-
-</div>
-
-        <!-- OPERACIÓN DEL LABORATORIO -->
-        <button class="sidebar-group-btn"
-        type="button"
-        data-bs-toggle="collapse"
-        data-bs-target="#menuOperacion"
-        aria-expanded="{% if request.endpoint and (request.endpoint.startswith('muestras.') or request.endpoint.startswith('muestra_ensayos.') or request.endpoint.startswith('ensayos_catalogo.') or request.endpoint.startswith('metodos.') or request.endpoint.startswith('resultados.')) %}true{% else %}false{% endif %}">
-    <span>Operación del laboratorio</span>
-    <span>▾</span>
-</button>
-
-        <div class="collapse {% if request.endpoint and (request.endpoint.startswith('muestras.') or request.endpoint.startswith('muestra_ensayos.') or request.endpoint.startswith('ensayos_catalogo.') or request.endpoint.startswith('metodos.') or request.endpoint.startswith('resultados.')) %}show{% endif %}"
-     id="menuOperacion">
-          
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('muestras.') %}active{% endif %}"
-               href="{{ url_for('muestras.index') }}">
-                Muestras
-            </a>
-
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('muestra_ensayos.') %}active{% endif %}"
-               href="{{ url_for('muestra_ensayos.index') }}">
-                Ensayos por muestra
-            </a>
-
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('ensayos_catalogo.') %}active{% endif %}"
-               href="{{ url_for('ensayos_catalogo.index') }}">
-                Catálogo de ensayos
-            </a>
-
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('metodos.') %}active{% endif %}"
-               href="{{ url_for('metodos.index') }}">
-                Métodos
-            </a>
-
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('resultados.') %}active{% endif %}"
-               href="#">
-                Resultados
-            </a>
-        </div>
-
-        <!-- INSTALACIONES Y EQUIPAMIENTO -->
-        {% if can('equipamiento.dashboard.ver') or can('instalaciones.ver') or can('areas.ver') or can('equipos.ver') or can('equipos.mantenimientos.ver') %}
         <button class="sidebar-group-btn"
                 type="button"
                 data-bs-toggle="collapse"
-                data-bs-target="#menuEquipamiento"
-                aria-expanded="{% if request.endpoint and request.endpoint.startswith('equipamiento.') %}true{% else %}false{% endif %}">
-            <span>Instalaciones y equipamiento</span>
+                data-bs-target="#menuArquitecturaSGC"
+                aria-expanded="{% if arquitectura_sgc_active %}true{% else %}false{% endif %}">
+            <span>1. Arquitectura SGC</span>
             <span>▾</span>
         </button>
-
-        <div class="collapse {% if request.endpoint and request.endpoint.startswith('equipamiento.') %}show{% endif %}"
-             id="menuEquipamiento">
-            {% if can('equipamiento.dashboard.ver') %}
-            <a class="sidebar-link {% if request.endpoint == 'equipamiento.dashboard' %}active{% endif %}"
-               href="{{ url_for('equipamiento.dashboard') }}">
-                Dashboard
-            </a>
-            {% endif %}
-
-            {% if can('instalaciones.ver') %}
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('equipamiento.instalacion') %}active{% endif %}"
-               href="{{ url_for('equipamiento.instalaciones') }}">
-                Instalaciones
-            </a>
-            {% endif %}
-
-            {% if can('areas.ver') %}
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('equipamiento.area') %}active{% endif %}"
-               href="{{ url_for('equipamiento.areas') }}">
-                Areas y ambientes
-            </a>
-            {% endif %}
-
-            {% if can('equipos.ver') %}
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('equipamiento.equipo') %}active{% endif %}"
-               href="{{ url_for('equipamiento.equipos') }}">
-                Equipos
-            </a>
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('equipamiento.calibracion') or request.endpoint == 'equipamiento.nueva_calibracion' or request.endpoint == 'equipamiento.detalle_calibracion' %}active{% endif %}"
-               href="{{ url_for('equipamiento.calibraciones') }}">
-                Calibraciones y verificaciones
-            </a>
-            <a class="sidebar-link {% if request.endpoint in ['equipamiento.condiciones_ambientales', 'equipamiento.nueva_condicion_ambiental', 'equipamiento.detalle_condicion_ambiental', 'equipamiento.editar_condicion_ambiental', 'equipamiento.nueva_medicion_ambiental', 'equipamiento.mediciones_ambientales_fuera_limite'] %}active{% endif %}"
-               href="{{ url_for('equipamiento.condiciones_ambientales') }}">
-                Condiciones ambientales
-            </a>
-            <a class="sidebar-link {% if request.endpoint in ['equipamiento.materiales_referencia', 'equipamiento.nuevo_material_referencia', 'equipamiento.detalle_material_referencia'] %}active{% endif %}"
-               href="{{ url_for('equipamiento.materiales_referencia') }}">
-                Materiales y patrones de referencia
-            </a>
-            {% endif %}
-
-            {% if can('equipos.mantenimientos.ver') %}
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('equipamiento.planes_mantenimiento') or request.endpoint == 'equipamiento.detalle_plan_mantenimiento' or request.endpoint == 'equipamiento.nuevo_plan_mantenimiento' or request.endpoint == 'equipamiento.editar_plan_mantenimiento' %}active{% endif %}"
-               href="{{ url_for('equipamiento.planes_mantenimiento') }}">
-                Planes de mantenimiento
-            </a>
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('equipamiento.mantenimiento') or request.endpoint == 'equipamiento.detalle_mantenimiento' or request.endpoint == 'equipamiento.nuevo_mantenimiento_correctivo' %}active{% endif %}"
-               href="{{ url_for('equipamiento.mantenimientos') }}">
-                Mantenimientos
-            </a>
-            {% endif %}
-        </div>
-        {% endif %}
-
-        <!-- SISTEMA DE GESTIÓN -->
-        <button class="sidebar-group-btn"
-                type="button"
-                data-bs-toggle="collapse"
-                data-bs-target="#menuSGC"
-                aria-expanded="{% if request.endpoint and (request.endpoint.startswith('organigrama.') or request.endpoint.startswith('politica_calidad.') or request.endpoint.startswith('objetivos_calidad.') or request.endpoint.startswith('mapa_procesos.') or request.endpoint.startswith('riesgos_oportunidades.') or request.endpoint.startswith('documentacion.') or request.endpoint.startswith('documentacion_firmas.')) %}true{% else %}false{% endif %}">
-            <span>Sistema de Gestión (SGC)</span>
-            <span>▾</span>
-        </button>
-
-        <div class="collapse {% if request.endpoint and (request.endpoint.startswith('organigrama.') or request.endpoint.startswith('politica_calidad.') or request.endpoint.startswith('objetivos_calidad.') or request.endpoint.startswith('mapa_procesos.') or request.endpoint.startswith('riesgos_oportunidades.') or request.endpoint.startswith('documentacion.') or request.endpoint.startswith('documentacion_firmas.')) %}show{% endif %}"
-             id="menuSGC">
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('organigrama.') %}active{% endif %}"
+        <div class="collapse {% if arquitectura_sgc_active %}show{% endif %}"
+             id="menuArquitecturaSGC">
+            <a class="sidebar-link {% if endpoint.startswith('organigrama.') %}active{% endif %}"
                href="{{ url_for('organigrama.index') }}">
                 Organigrama
             </a>
 
             {% if can('documentos.ver') %}
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('politica_calidad.') %}active{% endif %}"
+            <a class="sidebar-link {% if endpoint.startswith('politica_calidad.') %}active{% endif %}"
                href="{{ url_for('politica_calidad.index') }}">
                 Política de Calidad
             </a>
             {% endif %}
 
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('objetivos_calidad.') %}active{% endif %}"
+            <a class="sidebar-link {% if endpoint.startswith('objetivos_calidad.') %}active{% endif %}"
                href="{{ url_for('objetivos_calidad.index') }}">
                 Objetivos de Calidad
             </a>
 
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('mapa_procesos.') %}active{% endif %}"
+            <a class="sidebar-link {% if endpoint.startswith('mapa_procesos.') %}active{% endif %}"
                href="{{ url_for('mapa_procesos.index') }}">
                 Mapa de Procesos
             </a>
+        </div>
 
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('riesgos_oportunidades.') %}active{% endif %}"
-               href="#">
-                Riesgos y Oportunidades
-            </a>
-
-            {% if can('documentos.ver') %}
-            {% set gestion_documental_endpoints = [
-                'documentacion.dashboard',
-                'documentacion.pendientes',
-                'documentacion.index',
-                'documentacion.explorador',
-                'documentacion.explorador_sin_clasificar',
-                'documentacion.explorador_carpeta',
-                'documentacion.clasificacion_pendientes',
-                'documentacion.documentos_vigentes',
-                'documentacion.vigor_internos',
-                'documentacion.vigor_externos',
-                'documentacion.vigor_formatos'
-            ] %}
-            {% set documentos_endpoints = [
-                'documentacion.index',
-                'documentacion.explorador',
-                'documentacion.explorador_sin_clasificar',
-                'documentacion.explorador_carpeta',
-                'documentacion.clasificacion_pendientes',
-                'documentacion.documentos_vigentes',
-                'documentacion.vigor_internos',
-                'documentacion.vigor_externos',
-                'documentacion.vigor_formatos'
-            ] %}
-            {% set vista_actual_endpoints = [
-                'documentacion.index',
-                'documentacion.vigor_internos',
-                'documentacion.vigor_externos',
-                'documentacion.vigor_formatos'
-            ] %}
-            <button class="sidebar-group-btn"
-                    type="button"
-                    data-bs-toggle="collapse"
-                    data-bs-target="#menuGestionDocumental"
-                    aria-controls="menuGestionDocumental"
-                    aria-expanded="{% if request.endpoint in gestion_documental_endpoints %}true{% else %}false{% endif %}">
-                <span>Gestión documental</span>
-                <span>▾</span>
-            </button>
-
-            <div class="collapse {% if request.endpoint in gestion_documental_endpoints %}show{% endif %}"
-                 id="menuGestionDocumental">
-            <a class="sidebar-link {% if request.endpoint == 'documentacion.dashboard' %}active{% endif %}"
+        {% if can('documentos.ver') %}
+        <button class="sidebar-group-btn"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#menuDocumentacion"
+                aria-controls="menuDocumentacion"
+                aria-expanded="{% if documentacion_active %}true{% else %}false{% endif %}">
+            <span>2. Documentación</span>
+            <span>▾</span>
+        </button>
+        <div class="collapse {% if documentacion_active %}show{% endif %}"
+             id="menuDocumentacion">
+            <a class="sidebar-link {% if endpoint == 'documentacion.dashboard' %}active{% endif %}"
                href="{{ url_for('documentacion.dashboard') }}">
                 Dashboard documental
                 {% if documental_pending_count %}
@@ -293,7 +101,7 @@
             </a>
 
             {% if can('documentos.ver_pendientes') %}
-            <a class="sidebar-link {% if request.endpoint == 'documentacion.pendientes' %}active{% endif %}"
+            <a class="sidebar-link {% if endpoint == 'documentacion.pendientes' %}active{% endif %}"
                href="{{ url_for('documentacion.pendientes') }}">
                 Mis pendientes
                 {% if documental_pending_count %}
@@ -302,69 +110,193 @@
             </a>
             {% endif %}
 
-            <button class="sidebar-group-btn"
-                    type="button"
-                    data-bs-toggle="collapse"
-                    data-bs-target="#menuGestionDocumentos"
-                    aria-controls="menuGestionDocumentos"
-                    aria-expanded="{% if request.endpoint in documentos_endpoints %}true{% else %}false{% endif %}">
-                <span>Documentos</span>
-                <span>▾</span>
-            </button>
+            <a class="sidebar-link {% if documentacion_documentos_active %}active{% endif %}"
+               href="{{ url_for('documentacion.index') }}">
+                Documentos
+            </a>
+        </div>
+        {% endif %}
 
-            <div class="collapse {% if request.endpoint in documentos_endpoints %}show{% endif %}"
-                 id="menuGestionDocumentos">
-                <a class="sidebar-link {% if request.endpoint in vista_actual_endpoints %}active{% endif %}"
-                   href="{{ url_for('documentacion.index') }}">
-                    Vista actual
-                </a>
-                <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('documentacion.explorador') %}active{% endif %}"
-                   href="{{ url_for('documentacion.explorador') }}">
-                    Vista explorador
-                </a>
-                <a class="sidebar-link {% if request.endpoint == 'documentacion.documentos_vigentes' %}active{% endif %}"
-                   href="{{ url_for('documentacion.documentos_vigentes') }}">
-                    Documentos vigentes
-                </a>
-                {% if can('documentos.editar') %}
-                <a class="sidebar-link {% if request.endpoint == 'documentacion.clasificacion_pendientes' %}active{% endif %}"
-                   href="{{ url_for('documentacion.clasificacion_pendientes') }}">
-                    Clasificacion pendiente
-                </a>
-                {% endif %}
-            </div>
-            </div>
+        <button class="sidebar-group-btn"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#menuAdministrativo"
+                aria-expanded="{% if administrativo_active %}true{% else %}false{% endif %}">
+            <span>3. Administrativo</span>
+            <span>▾</span>
+        </button>
+        <div class="collapse {% if administrativo_active %}show{% endif %}"
+             id="menuAdministrativo">
+            <a class="sidebar-link {% if endpoint.startswith('clientes.') %}active{% endif %}"
+               href="{{ url_for('clientes.index') }}">
+                Clientes
+            </a>
 
-            {% endif %}
+            <a class="sidebar-link {% if endpoint.startswith('solicitudes.') %}active{% endif %}"
+               href="{{ url_for('solicitudes.index') }}">
+                Solicitudes
+            </a>
+
+            <a class="sidebar-link {% if endpoint.startswith('ofertas.') %}active{% endif %}"
+               href="{{ url_for('ofertas.index') }}">
+                Ofertas / Cotizaciones
+            </a>
+
+            <a class="sidebar-link {% if endpoint.startswith('contratos.') %}active{% endif %}"
+               href="{{ url_for('contratos.index') }}">
+                Contratos
+            </a>
         </div>
 
-        <!-- AUDITORÍA Y MEJORA -->
+        <button class="sidebar-group-btn"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#menuPersonal"
+                aria-expanded="false">
+            <span>4. Personal</span>
+            <span>▾</span>
+        </button>
+        <div class="collapse" id="menuPersonal"></div>
+
+        {% if can('equipamiento.dashboard.ver') or can('instalaciones.ver') or can('areas.ver') or can('equipos.ver') or can('equipos.mantenimientos.ver') %}
+        <button class="sidebar-group-btn"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#menuEquipamiento"
+                aria-expanded="{% if endpoint.startswith('equipamiento.') %}true{% else %}false{% endif %}">
+            <span>5. Instalaciones y Equipamiento</span>
+            <span>▾</span>
+        </button>
+        <div class="collapse {% if endpoint.startswith('equipamiento.') %}show{% endif %}"
+             id="menuEquipamiento">
+            {% if can('equipamiento.dashboard.ver') %}
+            <a class="sidebar-link {% if endpoint == 'equipamiento.dashboard' %}active{% endif %}"
+               href="{{ url_for('equipamiento.dashboard') }}">
+                Dashboard
+            </a>
+            {% endif %}
+
+            {% if can('instalaciones.ver') %}
+            <a class="sidebar-link {% if endpoint.startswith('equipamiento.instalacion') %}active{% endif %}"
+               href="{{ url_for('equipamiento.instalaciones') }}">
+                Instalaciones
+            </a>
+            {% endif %}
+
+            {% if can('areas.ver') %}
+            <a class="sidebar-link {% if endpoint.startswith('equipamiento.area') %}active{% endif %}"
+               href="{{ url_for('equipamiento.areas') }}">
+                Areas y ambientes
+            </a>
+            {% endif %}
+
+            {% if can('equipos.ver') %}
+            <a class="sidebar-link {% if endpoint.startswith('equipamiento.equipo') %}active{% endif %}"
+               href="{{ url_for('equipamiento.equipos') }}">
+                Equipos
+            </a>
+            <a class="sidebar-link {% if endpoint.startswith('equipamiento.calibracion') or endpoint == 'equipamiento.nueva_calibracion' or endpoint == 'equipamiento.detalle_calibracion' %}active{% endif %}"
+               href="{{ url_for('equipamiento.calibraciones') }}">
+                Calibraciones y verificaciones
+            </a>
+            <a class="sidebar-link {% if endpoint in ['equipamiento.condiciones_ambientales', 'equipamiento.nueva_condicion_ambiental', 'equipamiento.detalle_condicion_ambiental', 'equipamiento.editar_condicion_ambiental', 'equipamiento.nueva_medicion_ambiental', 'equipamiento.mediciones_ambientales_fuera_limite'] %}active{% endif %}"
+               href="{{ url_for('equipamiento.condiciones_ambientales') }}">
+                Condiciones ambientales
+            </a>
+            <a class="sidebar-link {% if endpoint in ['equipamiento.materiales_referencia', 'equipamiento.nuevo_material_referencia', 'equipamiento.detalle_material_referencia'] %}active{% endif %}"
+               href="{{ url_for('equipamiento.materiales_referencia') }}">
+                Materiales y patrones de referencia
+            </a>
+            {% endif %}
+
+            {% if can('equipos.mantenimientos.ver') %}
+            <a class="sidebar-link {% if endpoint.startswith('equipamiento.planes_mantenimiento') or endpoint == 'equipamiento.detalle_plan_mantenimiento' or endpoint == 'equipamiento.nuevo_plan_mantenimiento' or endpoint == 'equipamiento.editar_plan_mantenimiento' %}active{% endif %}"
+               href="{{ url_for('equipamiento.planes_mantenimiento') }}">
+                Planes de mantenimiento
+            </a>
+            <a class="sidebar-link {% if endpoint.startswith('equipamiento.mantenimiento') or endpoint == 'equipamiento.detalle_mantenimiento' or endpoint == 'equipamiento.nuevo_mantenimiento_correctivo' %}active{% endif %}"
+               href="{{ url_for('equipamiento.mantenimientos') }}">
+                Mantenimientos
+            </a>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <button class="sidebar-group-btn"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#menuItemMetodo"
+                aria-expanded="{% if item_metodo_active %}true{% else %}false{% endif %}">
+            <span>6. Ítem y Método de Ensayo</span>
+            <span>▾</span>
+        </button>
+        <div class="collapse {% if item_metodo_active %}show{% endif %}"
+             id="menuItemMetodo">
+            <a class="sidebar-link {% if endpoint.startswith('muestras.') %}active{% endif %}"
+               href="{{ url_for('muestras.index') }}">
+                Muestras
+            </a>
+
+            <a class="sidebar-link {% if endpoint.startswith('muestra_ensayos.') %}active{% endif %}"
+               href="{{ url_for('muestra_ensayos.index') }}">
+                Ensayos por muestra
+            </a>
+
+            <a class="sidebar-link {% if endpoint.startswith('ensayos_catalogo.') %}active{% endif %}"
+               href="{{ url_for('ensayos_catalogo.index') }}">
+                Catálogo de ensayos
+            </a>
+
+            <a class="sidebar-link {% if endpoint.startswith('metodos.') %}active{% endif %}"
+               href="{{ url_for('metodos.index') }}">
+                Métodos
+            </a>
+
+            <span class="sidebar-link disabled">Resultados</span>
+        </div>
+
+        <button class="sidebar-group-btn"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#menuAccionMejora"
+                aria-expanded="{% if accion_mejora_active %}true{% else %}false{% endif %}">
+            <span>7. Acción y Mejora</span>
+            <span>▾</span>
+        </button>
+        <div class="collapse {% if accion_mejora_active %}show{% endif %}"
+             id="menuAccionMejora">
+            <span class="sidebar-link disabled">Riesgos y Oportunidades</span>
+            <span class="sidebar-link disabled">No Conformidades</span>
+            <span class="sidebar-link disabled">Acciones Correctivas</span>
+        </div>
+
         <button class="sidebar-group-btn"
                 type="button"
                 data-bs-toggle="collapse"
                 data-bs-target="#menuAuditoria"
-                aria-expanded="{% if request.endpoint and (request.endpoint.startswith('auditorias.') or request.endpoint.startswith('no_conformidades.') or request.endpoint.startswith('acciones_correctivas.')) %}true{% else %}false{% endif %}">
-            <span>Auditoría y Mejora</span>
+                aria-expanded="{% if auditoria_active %}true{% else %}false{% endif %}">
+            <span>8. Auditoría</span>
             <span>▾</span>
         </button>
-
-        <div class="collapse {% if request.endpoint and (request.endpoint.startswith('auditorias.') or request.endpoint.startswith('no_conformidades.') or request.endpoint.startswith('acciones_correctivas.')) %}show{% endif %}"
+        <div class="collapse {% if auditoria_active %}show{% endif %}"
              id="menuAuditoria">
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('auditorias.') %}active{% endif %}"
-               href="#">
-                Auditorías Internas
-            </a>
-
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('no_conformidades.') %}active{% endif %}"
-               href="#">
-                No Conformidades
-            </a>
-
-            <a class="sidebar-link {% if request.endpoint and request.endpoint.startswith('acciones_correctivas.') %}active{% endif %}"
-               href="#">
-                Acciones Correctivas
-            </a>
+            <span class="sidebar-link disabled">Auditorías Internas</span>
         </div>
 
+        <button class="sidebar-group-btn"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#menuSalaControl"
+                aria-expanded="{% if endpoint == 'dashboard.index' %}true{% else %}false{% endif %}">
+            <span>9. Sala de Control (Dashboard)</span>
+            <span>▾</span>
+        </button>
+        <div class="collapse {% if endpoint == 'dashboard.index' %}show{% endif %}"
+             id="menuSalaControl">
+            <a class="sidebar-link {% if endpoint == 'dashboard.index' %}active{% endif %}"
+               href="{{ url_for('dashboard.index') }}">
+                Dashboard
+            </a>
+        </div>
     </nav>
 </aside>

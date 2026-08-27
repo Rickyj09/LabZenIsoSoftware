@@ -60,14 +60,16 @@ class DocumentVigorViewsTest(unittest.TestCase):
         permission = Permiso(id=1001, codigo="documentos.ver", nombre="Ver documentos", modulo="documentos")
         pending_permission = Permiso(id=1002, codigo="documentos.ver_pendientes", nombre="Ver pendientes", modulo="documentos")
         equipment_permission = Permiso(id=1003, codigo="equipamiento.dashboard.ver", nombre="Ver equipamiento", modulo="equipamiento")
+        edit_permission = Permiso(id=1004, codigo="documentos.editar", nombre="Editar documentos", modulo="documentos")
         viewer = Rol(id=2001, nombre="CALIDAD", es_sistema=True)
         no_access = Rol(id=2002, nombre="SIN_ACCESO", es_sistema=True)
-        db.session.add_all([permission, pending_permission, equipment_permission, viewer, no_access])
+        db.session.add_all([permission, pending_permission, equipment_permission, edit_permission, viewer, no_access])
         db.session.flush()
         db.session.add_all([
             RolPermiso(id=3001, rol_id=viewer.id, permiso_id=permission.id),
             RolPermiso(id=3002, rol_id=viewer.id, permiso_id=pending_permission.id),
             RolPermiso(id=3003, rol_id=viewer.id, permiso_id=equipment_permission.id),
+            RolPermiso(id=3004, rol_id=viewer.id, permiso_id=edit_permission.id),
             UsuarioRol(id=4001, usuario_id=201, rol_id=viewer.id),
             UsuarioRol(id=4002, usuario_id=203, rol_id=viewer.id),
             UsuarioRol(id=4003, usuario_id=202, rol_id=no_access.id),
@@ -181,6 +183,31 @@ class DocumentVigorViewsTest(unittest.TestCase):
         self.assertIsNotNone(match, target)
         return match.group(1)
 
+    def collapse_markup(self, sidebar, target):
+        match = re.search(
+            rf'<div class="[^"]*"[^>]*id="{target}"[^>]*>(.*?)</div>',
+            sidebar,
+            flags=re.S,
+        )
+        self.assertIsNotNone(match, target)
+        return match.group(1)
+
+    def assert_official_sidebar_order(self, sidebar):
+        labels = [
+            "0. General",
+            "1. Arquitectura SGC",
+            "2. Documentación",
+            "3. Administrativo",
+            "4. Personal",
+            "5. Instalaciones y Equipamiento",
+            "6. Ítem y Método de Ensayo",
+            "7. Acción y Mejora",
+            "8. Auditoría",
+            "9. Sala de Control (Dashboard)",
+        ]
+        positions = [sidebar.index(label) for label in labels]
+        self.assertEqual(positions, sorted(positions))
+
     def test_unauthenticated_user_is_redirected(self):
         response = self.app.test_client().get("/documentacion/vigor/internos")
         self.assertEqual(response.status_code, 302)
@@ -231,7 +258,7 @@ class DocumentVigorViewsTest(unittest.TestCase):
     def test_existing_document_index_uses_same_constrained_admin_layout(self):
         body = self.body("/documentacion/")
 
-        self.assertIn("Gestión documental", body)
+        self.assertIn("2. Documentación", body)
         self.assertIn(".layout-main", body)
         self.assertIn("max-width: calc(100% - 280px);", body)
         self.assertIn(".topbar > .d-flex:last-child", body)
@@ -245,21 +272,24 @@ class DocumentVigorViewsTest(unittest.TestCase):
     def test_sidebar_shows_document_management_submenu_for_authorized_user(self):
         body = self.body("/documentacion/vigor/internos")
         sidebar = self.sidebar(body)
+        documentacion = self.collapse_markup(sidebar, "menuDocumentacion")
 
         self.assert_sidebar_has_no_mojibake(sidebar)
-        self.assertIn("Gestión documental", sidebar)
-        self.assertIn("Operación del laboratorio", sidebar)
-        self.assertIn("Instalaciones y equipamiento", sidebar)
-        self.assertIn("Sistema de Gestión (SGC)", sidebar)
-        self.assertEqual(sidebar.count('id="menuGestionDocumental"'), 1)
-        self.assertEqual(sidebar.count('id="menuGestionDocumentos"'), 1)
-        self.assertIn("menuGestionDocumental", sidebar)
-        self.assertIn("Dashboard documental", sidebar)
-        self.assertIn("Mis pendientes", sidebar)
-        self.assertIn("Documentos", sidebar)
-        self.assertIn("menuGestionDocumentos", sidebar)
-        self.assertIn("Vista actual", sidebar)
-        self.assertIn("Vista explorador", sidebar)
+        self.assert_official_sidebar_order(sidebar)
+        self.assertIn("2. Documentación", sidebar)
+        self.assertIn("5. Instalaciones y Equipamiento", sidebar)
+        self.assertIn("6. Ítem y Método de Ensayo", sidebar)
+        self.assertEqual(sidebar.count('id="menuDocumentacion"'), 1)
+        self.assertNotIn("menuGestionDocumental", sidebar)
+        self.assertNotIn("menuGestionDocumentos", sidebar)
+        self.assertIn("Dashboard documental", documentacion)
+        self.assertIn("Mis pendientes", documentacion)
+        self.assertIn("Documentos", documentacion)
+        self.assertNotIn('href="#"', sidebar)
+        self.assertNotIn("Vista actual", documentacion)
+        self.assertNotIn("Vista explorador", documentacion)
+        self.assertNotIn("Documentos vigentes", documentacion)
+        self.assertNotIn("Clasificacion pendiente", documentacion)
         self.assertIn("▾", sidebar)
         self.assertNotIn("/documentacion/vigor/internos", sidebar)
         self.assertNotIn("/documentacion/vigor/externos", sidebar)
@@ -273,54 +303,55 @@ class DocumentVigorViewsTest(unittest.TestCase):
         body = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotIn("menuGestionDocumental", body)
+        self.assertNotIn("menuDocumentacion", body)
         self.assertNotIn("/documentacion/vigor/internos", body)
 
     def test_sidebar_document_management_submenu_stays_open_and_marks_active_links(self):
         client = self.login(201)
-        for path, active_text, documents_expanded in (
-            ("/documentacion/dashboard", "Dashboard documental", False),
-            ("/documentacion/pendientes", "Mis pendientes", False),
-            ("/documentacion/", "Vista actual", True),
-            ("/documentacion/explorador", "Vista explorador", True),
-            ("/documentacion/vigor/internos", "Vista actual", True),
-            ("/documentacion/vigor/externos", "Vista actual", True),
-            ("/documentacion/vigor/formatos", "Vista actual", True),
+        for path, active_text in (
+            ("/documentacion/dashboard", "Dashboard documental"),
+            ("/documentacion/pendientes", "Mis pendientes"),
+            ("/documentacion/", "Documentos"),
+            ("/documentacion/explorador", "Documentos"),
+            ("/documentacion/documentos-vigentes", "Documentos"),
+            ("/documentacion/clasificacion/pendientes", "Documentos"),
+            ("/documentacion/vigor/internos", "Documentos"),
+            ("/documentacion/vigor/externos", "Documentos"),
+            ("/documentacion/vigor/formatos", "Documentos"),
         ):
             with self.subTest(path=path):
                 body = client.get(path).get_data(as_text=True)
                 sidebar = self.sidebar(body)
+                documentacion = self.collapse_markup(sidebar, "menuDocumentacion")
                 self.assert_sidebar_has_no_mojibake(sidebar)
-                self.assertIn('data-bs-target="#menuGestionDocumental"', sidebar)
-                self.assertIn('aria-controls="menuGestionDocumental"', sidebar)
-                self.assertIn('id="menuGestionDocumental"', sidebar)
-                self.assertIn('id="menuGestionDocumentos"', sidebar)
-                self.assertIn('aria-expanded="true"', self.collapse_button(sidebar, "menuGestionDocumental"))
-                self.assertIn("show", self.collapse_container(sidebar, "menuGestionDocumental"))
-                expected_documents_state = "true" if documents_expanded else "false"
-                self.assertIn(
-                    f'aria-expanded="{expected_documents_state}"',
-                    self.collapse_button(sidebar, "menuGestionDocumentos"),
-                )
-                documents_classes = self.collapse_container(sidebar, "menuGestionDocumentos")
-                if documents_expanded:
-                    self.assertIn("show", documents_classes)
-                else:
-                    self.assertNotIn("show", documents_classes)
-                self.assertIn(active_text, sidebar)
+                self.assertIn('data-bs-target="#menuDocumentacion"', sidebar)
+                self.assertIn('aria-controls="menuDocumentacion"', sidebar)
+                self.assertIn('id="menuDocumentacion"', sidebar)
+                self.assertIn('aria-expanded="true"', self.collapse_button(sidebar, "menuDocumentacion"))
+                self.assertIn("show", self.collapse_container(sidebar, "menuDocumentacion"))
+                self.assertIn(active_text, documentacion)
+                self.assertIn('class="sidebar-link active"', documentacion)
 
     def test_existing_document_index_is_not_marked_as_vigor_submenu(self):
         body = self.body("/documentacion/")
         sidebar = self.sidebar(body)
+        documentacion = self.collapse_markup(sidebar, "menuDocumentacion")
 
         self.assert_sidebar_has_no_mojibake(sidebar)
-        self.assertIn("Documentos", sidebar)
-        self.assertIn("Vista actual", sidebar)
-        self.assertIn("Vista explorador", sidebar)
-        self.assertIn("menuGestionDocumental", sidebar)
-        self.assertIn('id="menuGestionDocumental"', sidebar)
-        self.assertIn('aria-controls="menuGestionDocumental"', sidebar)
+        self.assertIn("Documentos", documentacion)
+        self.assertNotIn("Vista actual", documentacion)
+        self.assertNotIn("Vista explorador", documentacion)
+        self.assertIn("menuDocumentacion", sidebar)
+        self.assertIn('id="menuDocumentacion"', sidebar)
+        self.assertIn('aria-controls="menuDocumentacion"', sidebar)
         self.assertNotIn("Documentos internos en vigor", sidebar)
+        self.assertIn("Accesos documentales", body)
+        self.assertIn("Vista explorador", body)
+        self.assertIn("/documentacion/explorador", body)
+        self.assertIn("Documentos vigentes", body)
+        self.assertIn("/documentacion/documentos-vigentes", body)
+        self.assertIn("Clasificacion pendiente", body)
+        self.assertIn("/documentacion/clasificacion/pendientes", body)
         self.assertIn("Documentos en vigor", body)
         self.assertIn("/documentacion/vigor/internos", body)
         self.assertIn("/documentacion/vigor/externos", body)

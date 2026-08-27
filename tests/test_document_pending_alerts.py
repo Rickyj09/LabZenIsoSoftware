@@ -3,6 +3,7 @@ import unittest
 import zipfile
 from io import BytesIO
 
+from flask import g
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
@@ -177,6 +178,7 @@ class DocumentPendingAlertTest(unittest.TestCase):
         return document, version
 
     def login(self, user_id):
+        g.pop("_login_user", None)
         client = self.app.test_client()
         with client.session_transaction() as session:
             session["_user_id"] = str(user_id)
@@ -240,6 +242,22 @@ class DocumentPendingAlertTest(unittest.TestCase):
         self.assertIn("DOC-312", body)
         self.assertNotIn("DOC-313", body)
         self.assertIn("1 pendiente(s)", body)
+
+    def test_documental_reviewer_can_see_assigned_approval_actions(self):
+        _, expected = self.add_version(319, "EN_APROBACION", approver_id=206)
+        self.add_version(320, "EN_APROBACION", approver_id=201)
+        reviewer = db.session.get(Usuario, 206)
+
+        pending = get_pending_documents_for_user(reviewer)
+        response = self.login(206).get("/documentacion/pendientes")
+        body = response.get_data(as_text=True)
+
+        self.assertEqual([item.id for item in pending], [expected.id])
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("DOC-319", body)
+        self.assertIn("Aprobar", body)
+        self.assertIn("Rechazar", body)
+        self.assertNotIn("DOC-320", body)
 
     def test_documental_reviewer_sidebar_badge_reflects_assigned_pending(self):
         self.add_version(314, "EN_REVISION", assigned_to=206)

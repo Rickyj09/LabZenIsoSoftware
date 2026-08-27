@@ -33,9 +33,6 @@ def validate_document_responsibles(*, empresa_id, elaborado_por_id, revisado_por
 
     if elaborado_por_id == revisado_por_id:
         raise DocumentVersioningError("El elaborador y el revisor deben ser diferentes.")
-    if revisado_por_id == aprobado_por_id:
-        raise DocumentVersioningError("El revisor y el aprobador deben ser diferentes.")
-
     users = {
         user.id: user
         for user in Usuario.query.filter(
