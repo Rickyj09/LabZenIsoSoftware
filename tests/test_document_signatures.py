@@ -867,6 +867,40 @@ class DocumentSignatureTest(unittest.TestCase):
             )
         )
 
+    def test_signature_validation_readers_allow_hybrid_reference_pdfs(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        validator = PyHankoPdfSignatureValidator(self.app)
+        pdf_path = Path(self.temp_directory.name) / "hybrid-reference-policy.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+        with (
+            patch.object(validator, "library_available", return_value=True),
+            patch.object(validator, "_load_trust_roots", return_value=[]),
+            patch.object(validator, "_load_intermediate_certs", return_value=[]),
+            patch.object(validator, "_load_allowed_issuers", return_value=[]),
+            patch("pyhanko.pdf_utils.reader.PdfFileReader") as reader_class,
+        ):
+            reader_class.return_value.embedded_signatures = []
+
+            normal_result = validator.validate_pdf(
+                signed_pdf_path=pdf_path,
+                input_artifact=SimpleNamespace(signature_count=0),
+                expected_step=SimpleNamespace(orden=1),
+                identidad=SimpleNamespace(),
+            )
+            enrollment_result = validator.validate_enrollment_pdf(
+                signed_pdf_path=pdf_path,
+                identificacion="ID-201",
+            )
+
+        self.assertEqual(normal_result.error_code, "PDF_WITHOUT_SIGNATURES")
+        self.assertEqual(enrollment_result.error_code, "PDF_WITHOUT_SIGNATURES")
+        self.assertEqual(reader_class.call_count, 2)
+        for call in reader_class.call_args_list:
+            self.assertIs(call.kwargs["strict"], False)
+
     def test_cryptographic_identity_verification_from_signed_enrollment_pdf(self):
         self.clear_identity(201)
         root_cert, intermediate_cert, signer_key, signer_cert = self.create_intermediate_chain("Ricardo ID-201", "ricardo@firma.test", 8801)

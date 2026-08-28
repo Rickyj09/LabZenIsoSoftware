@@ -186,7 +186,7 @@ class PyHankoPdfSignatureValidator:
 
         try:
             with signed_pdf_path.open("rb") as handle:
-                reader = PdfFileReader(handle)
+                reader = PdfFileReader(handle, strict=False)
                 signatures = list(getattr(reader, "embedded_signatures", []) or [])
                 if not signatures:
                     return self._result(
@@ -329,7 +329,7 @@ class PyHankoPdfSignatureValidator:
 
         try:
             with signed_pdf_path.open("rb") as handle:
-                reader = PdfFileReader(handle)
+                reader = PdfFileReader(handle, strict=False)
                 signatures = list(getattr(reader, "embedded_signatures", []) or [])
                 if not signatures:
                     return self._result(False, "FIRMA_FALTANTE", errors=["El PDF no contiene firmas digitales embebidas."], total_signature_count=0, error_code="PDF_WITHOUT_SIGNATURES")
