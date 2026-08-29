@@ -1,0 +1,43 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Detalle de cargo{% endblock %}
+
+{% block content %}
+{% set perfil = item.perfil %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h3 class="mb-1">{{ item.codigo }} - {{ item.nombre }}</h3>
+            <span class="badge {{ 'text-bg-success' if item.activo else 'text-bg-secondary' }}">{{ 'ACTIVO' if item.activo else 'INACTIVO' }}</span>
+        </div>
+        <div class="d-flex gap-2">
+            <a class="btn btn-outline-secondary" href="{{ url_for('personal.cargos') }}">Volver</a>
+            {% if can('personal.gestionar') %}
+            <a class="btn btn-primary" href="{{ url_for('personal.editar_cargo', cargo_id=item.id) }}">Editar</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-lg-4">
+            <h5>Cargo</h5>
+            <table class="table table-bordered">
+                <tr><th>Codigo</th><td>{{ item.codigo }}</td></tr>
+                <tr><th>Nombre</th><td>{{ item.nombre }}</td></tr>
+                <tr><th>Descripcion</th><td>{{ item.descripcion or '-' }}</td></tr>
+                <tr><th>Personal asociado</th><td>{{ item.personal|length }}</td></tr>
+            </table>
+        </div>
+        <div class="col-lg-8">
+            <h5>Perfil de puesto</h5>
+            <table class="table table-bordered">
+                <tr><th>Proposito</th><td>{{ perfil.proposito if perfil and perfil.proposito else '-' }}</td></tr>
+                <tr><th>Funciones</th><td>{{ perfil.funciones if perfil and perfil.funciones else '-' }}</td></tr>
+                <tr><th>Responsabilidades</th><td>{{ perfil.responsabilidades if perfil and perfil.responsabilidades else '-' }}</td></tr>
+                <tr><th>Autoridad</th><td>{{ perfil.autoridad if perfil and perfil.autoridad else '-' }}</td></tr>
+                <tr><th>Observaciones</th><td>{{ perfil.observaciones if perfil and perfil.observaciones else '-' }}</td></tr>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

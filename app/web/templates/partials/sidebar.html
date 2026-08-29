@@ -3,6 +3,7 @@
 {% set documentacion_active = endpoint.startswith('documentacion.') or endpoint.startswith('documentacion_firmas.') %}
 {% set documentacion_documentos_active = documentacion_active and endpoint not in ['documentacion.dashboard', 'documentacion.pendientes'] %}
 {% set administrativo_active = endpoint.startswith('clientes.') or endpoint.startswith('solicitudes.') or endpoint.startswith('ofertas.') or endpoint.startswith('contratos.') %}
+{% set personal_active = endpoint.startswith('personal.') %}
 {% set item_metodo_active = endpoint.startswith('muestras.') or endpoint.startswith('muestra_ensayos.') or endpoint.startswith('ensayos_catalogo.') or endpoint.startswith('metodos.') or endpoint.startswith('resultados.') %}
 {% set accion_mejora_active = endpoint.startswith('riesgos_oportunidades.') or endpoint.startswith('no_conformidades.') or endpoint.startswith('acciones_correctivas.') %}
 {% set auditoria_active = endpoint.startswith('auditorias.') %}
@@ -148,15 +149,26 @@
             </a>
         </div>
 
+        {% if can('personal.ver') %}
         <button class="sidebar-group-btn"
                 type="button"
                 data-bs-toggle="collapse"
                 data-bs-target="#menuPersonal"
-                aria-expanded="false">
+                aria-expanded="{% if personal_active %}true{% else %}false{% endif %}">
             <span>4. Personal</span>
             <span>▾</span>
         </button>
-        <div class="collapse" id="menuPersonal"></div>
+        <div class="collapse {% if personal_active %}show{% endif %}" id="menuPersonal">
+            <a class="sidebar-link {% if endpoint.startswith('personal.') and not endpoint.startswith('personal.cargo') and endpoint not in ['personal.cargos', 'personal.nuevo_cargo', 'personal.detalle_cargo', 'personal.editar_cargo', 'personal.cambiar_estado_cargo'] %}active{% endif %}"
+               href="{{ url_for('personal.index') }}">
+                Personal
+            </a>
+            <a class="sidebar-link {% if endpoint in ['personal.cargos', 'personal.nuevo_cargo', 'personal.detalle_cargo', 'personal.editar_cargo', 'personal.cambiar_estado_cargo'] %}active{% endif %}"
+               href="{{ url_for('personal.cargos') }}">
+                Cargos y perfiles
+            </a>
+        </div>
+        {% endif %}
 
         {% if can('equipamiento.dashboard.ver') or can('instalaciones.ver') or can('areas.ver') or can('equipos.ver') or can('equipos.mantenimientos.ver') %}
         <button class="sidebar-group-btn"

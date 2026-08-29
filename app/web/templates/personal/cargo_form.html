@@ -1,0 +1,65 @@
+{% extends "base_admin.html" %}
+
+{% block title %}{{ 'Editar cargo' if item else 'Nuevo cargo' }}{% endblock %}
+
+{% block content %}
+{% set data = form_data %}
+{% set perfil = item.perfil if item and item.perfil else none %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3 class="mb-0">{{ 'Editar cargo' if item else 'Nuevo cargo' }}</h3>
+        <a class="btn btn-outline-secondary" href="{{ url_for('personal.cargos') }}">Volver</a>
+    </div>
+
+    <form method="post" class="row g-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="col-md-3">
+            <label class="form-label" for="codigo">Codigo</label>
+            <input class="form-control" id="codigo" name="codigo" required value="{{ data.get('codigo', item.codigo if item else '') }}">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="nombre">Cargo</label>
+            <input class="form-control" id="nombre" name="nombre" required value="{{ data.get('nombre', item.nombre if item else '') }}">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="activo">Estado</label>
+            <select class="form-select" id="activo" name="activo">
+                {% set selected_active = data.get('activo', '1' if not item or item.activo else '0') %}
+                <option value="1" {% if selected_active in ['1', 'true', 'on'] %}selected{% endif %}>ACTIVO</option>
+                <option value="0" {% if selected_active == '0' %}selected{% endif %}>INACTIVO</option>
+            </select>
+        </div>
+        <div class="col-12">
+            <label class="form-label" for="descripcion">Descripcion</label>
+            <textarea class="form-control" id="descripcion" name="descripcion" rows="2">{{ data.get('descripcion', item.descripcion if item else '') }}</textarea>
+        </div>
+
+        <div class="col-12"><h5 class="mt-2">Perfil de puesto</h5></div>
+        <div class="col-12">
+            <label class="form-label" for="proposito">Proposito del puesto</label>
+            <textarea class="form-control" id="proposito" name="proposito" rows="2">{{ data.get('proposito', perfil.proposito if perfil else '') }}</textarea>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="funciones">Funciones</label>
+            <textarea class="form-control" id="funciones" name="funciones" rows="5">{{ data.get('funciones', perfil.funciones if perfil else '') }}</textarea>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="responsabilidades">Responsabilidades</label>
+            <textarea class="form-control" id="responsabilidades" name="responsabilidades" rows="5">{{ data.get('responsabilidades', perfil.responsabilidades if perfil else '') }}</textarea>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="autoridad">Autoridad o alcance de decision</label>
+            <textarea class="form-control" id="autoridad" name="autoridad" rows="4">{{ data.get('autoridad', perfil.autoridad if perfil else '') }}</textarea>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="perfil_observaciones">Observaciones del perfil</label>
+            <textarea class="form-control" id="perfil_observaciones" name="perfil_observaciones" rows="4">{{ data.get('perfil_observaciones', perfil.observaciones if perfil else '') }}</textarea>
+        </div>
+        <input type="hidden" name="perfil_activo" value="1">
+        <div class="col-12 d-flex gap-2">
+            <button class="btn btn-primary" type="submit">Guardar</button>
+            <a class="btn btn-outline-secondary" href="{{ url_for('personal.cargos') }}">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

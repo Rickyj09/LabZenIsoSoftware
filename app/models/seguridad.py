@@ -97,6 +97,7 @@ class Usuario(UserMixin, TenantMixin, BaseModel):
     )
 
     logs = db.relationship("AuditoriaLog", back_populates="usuario", lazy=True)
+    personal = db.relationship("Personal", back_populates="usuario", uselist=False, lazy=True)
 
     def set_password(self, password: str) -> None:
         self.password_hash = generate_password_hash(password)

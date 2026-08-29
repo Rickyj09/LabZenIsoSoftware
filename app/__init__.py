@@ -139,6 +139,9 @@ def register_blueprints(app: Flask) -> None:
     from app.web.routes.equipamiento import bp as equipamiento_bp
     app.register_blueprint(equipamiento_bp)
 
+    from app.web.routes.personal import bp as personal_bp
+    app.register_blueprint(personal_bp)
+
     from app.web.routes.organigrama import bp as organigrama_bp
     app.register_blueprint(organigrama_bp)
 
