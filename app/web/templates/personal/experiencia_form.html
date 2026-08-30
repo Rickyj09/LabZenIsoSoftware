@@ -1,0 +1,65 @@
+{% extends "base_admin.html" %}
+
+{% block title %}{{ 'Editar experiencia' if experiencia else 'Nueva experiencia' }}{% endblock %}
+
+{% block content %}
+{% set data = form_data %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3 class="mb-0">{{ 'Editar experiencia' if experiencia else 'Nueva experiencia' }}</h3>
+        <a class="btn btn-outline-secondary" href="{{ url_for('personal.detalle', item_id=item.id) }}">Volver</a>
+    </div>
+
+    <form method="post" class="row g-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="personal_id" value="{{ item.id }}">
+        <div class="col-md-6">
+            <label class="form-label" for="organizacion">Organizacion / institucion</label>
+            <input class="form-control" id="organizacion" name="organizacion" required value="{{ data.get('organizacion', experiencia.organizacion if experiencia else '') }}">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="cargo_funcion">Cargo o funcion</label>
+            <input class="form-control" id="cargo_funcion" name="cargo_funcion" required value="{{ data.get('cargo_funcion', experiencia.cargo_funcion if experiencia else '') }}">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="area_especialidad">Area o especialidad</label>
+            <input class="form-control" id="area_especialidad" name="area_especialidad" value="{{ data.get('area_especialidad', experiencia.area_especialidad if experiencia else '') }}">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="fecha_inicio">Fecha inicio</label>
+            <input class="form-control" id="fecha_inicio" name="fecha_inicio" type="date" required value="{{ data.get('fecha_inicio', experiencia.fecha_inicio.isoformat() if experiencia and experiencia.fecha_inicio else '') }}">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="fecha_fin">Fecha fin</label>
+            <input class="form-control" id="fecha_fin" name="fecha_fin" type="date" value="{{ data.get('fecha_fin', experiencia.fecha_fin.isoformat() if experiencia and experiencia.fecha_fin else '') }}">
+        </div>
+        <div class="col-md-3">
+            {% set current_selected = data.get('experiencia_actual', '1' if experiencia and experiencia.experiencia_actual else '') %}
+            <div class="form-check mt-4">
+                <input class="form-check-input" id="experiencia_actual" name="experiencia_actual" type="checkbox" value="1" {% if current_selected in ['1', 'true', 'on'] %}checked{% endif %}>
+                <label class="form-check-label" for="experiencia_actual">Experiencia actual</label>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="activo">Estado</label>
+            {% set selected_active = data.get('activo', '1' if not experiencia or experiencia.activo else '0') %}
+            <select class="form-select" id="activo" name="activo">
+                <option value="1" {% if selected_active in ['1', 'true', 'on'] %}selected{% endif %}>ACTIVO</option>
+                <option value="0" {% if selected_active == '0' %}selected{% endif %}>INACTIVO</option>
+            </select>
+        </div>
+        <div class="col-12">
+            <label class="form-label" for="descripcion_actividades">Descripcion de actividades</label>
+            <textarea class="form-control" id="descripcion_actividades" name="descripcion_actividades" rows="4">{{ data.get('descripcion_actividades', experiencia.descripcion_actividades if experiencia else '') }}</textarea>
+        </div>
+        <div class="col-12">
+            <label class="form-label" for="observaciones">Observaciones</label>
+            <textarea class="form-control" id="observaciones" name="observaciones" rows="3">{{ data.get('observaciones', experiencia.observaciones if experiencia else '') }}</textarea>
+        </div>
+        <div class="col-12 d-flex gap-2">
+            <button class="btn btn-primary" type="submit">Guardar</button>
+            <a class="btn btn-outline-secondary" href="{{ url_for('personal.detalle', item_id=item.id) }}">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

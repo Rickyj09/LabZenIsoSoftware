@@ -1,0 +1,77 @@
+{% extends "base_admin.html" %}
+
+{% block title %}{{ 'Editar calificacion' if calificacion else 'Nueva calificacion' }}{% endblock %}
+
+{% block content %}
+{% set data = form_data %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3 class="mb-0">{{ 'Editar calificacion' if calificacion else 'Nueva calificacion' }}</h3>
+        <a class="btn btn-outline-secondary" href="{{ url_for('personal.detalle', item_id=item.id) }}">Volver</a>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" class="row g-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="personal_id" value="{{ item.id }}">
+        <div class="col-md-4">
+            <label class="form-label" for="tipo">Tipo</label>
+            <select class="form-select" id="tipo" name="tipo" required>
+                {% for tipo in tipos_calificacion %}
+                {% set selected_tipo = data.get('tipo', calificacion.tipo if calificacion else 'EDUCACION_FORMAL') %}
+                <option value="{{ tipo }}" {% if selected_tipo == tipo %}selected{% endif %}>{{ tipo }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-8">
+            <label class="form-label" for="titulo">Titulo / denominacion</label>
+            <input class="form-control" id="titulo" name="titulo" required value="{{ data.get('titulo', calificacion.titulo if calificacion else '') }}">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="institucion">Institucion</label>
+            <input class="form-control" id="institucion" name="institucion" required value="{{ data.get('institucion', calificacion.institucion if calificacion else '') }}">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="area_especialidad">Area o especialidad</label>
+            <input class="form-control" id="area_especialidad" name="area_especialidad" value="{{ data.get('area_especialidad', calificacion.area_especialidad if calificacion else '') }}">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="fecha_inicio">Fecha inicio</label>
+            <input class="form-control" id="fecha_inicio" name="fecha_inicio" type="date" value="{{ data.get('fecha_inicio', calificacion.fecha_inicio.isoformat() if calificacion and calificacion.fecha_inicio else '') }}">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label" for="fecha_fin">Fecha fin / obtencion</label>
+            <input class="form-control" id="fecha_fin" name="fecha_fin" type="date" value="{{ data.get('fecha_fin', calificacion.fecha_fin.isoformat() if calificacion and calificacion.fecha_fin else '') }}">
+        </div>
+        <div class="col-md-4">
+            <label class="form-label" for="numero_registro">Registro o referencia</label>
+            <input class="form-control" id="numero_registro" name="numero_registro" value="{{ data.get('numero_registro', calificacion.numero_registro if calificacion else '') }}">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label" for="activo">Estado</label>
+            {% set selected_active = data.get('activo', '1' if not calificacion or calificacion.activo else '0') %}
+            <select class="form-select" id="activo" name="activo">
+                <option value="1" {% if selected_active in ['1', 'true', 'on'] %}selected{% endif %}>ACTIVO</option>
+                <option value="0" {% if selected_active == '0' %}selected{% endif %}>INACTIVO</option>
+            </select>
+        </div>
+        {% if not calificacion %}
+        <div class="col-md-6">
+            <label class="form-label" for="evidencia">Evidencia documental</label>
+            <input class="form-control" id="evidencia" name="evidencia" type="file">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="evidencia_observaciones">Observaciones de evidencia</label>
+            <input class="form-control" id="evidencia_observaciones" name="evidencia_observaciones">
+        </div>
+        {% endif %}
+        <div class="col-12">
+            <label class="form-label" for="observaciones">Observaciones</label>
+            <textarea class="form-control" id="observaciones" name="observaciones" rows="3">{{ data.get('observaciones', calificacion.observaciones if calificacion else '') }}</textarea>
+        </div>
+        <div class="col-12 d-flex gap-2">
+            <button class="btn btn-primary" type="submit">Guardar</button>
+            <a class="btn btn-outline-secondary" href="{{ url_for('personal.detalle', item_id=item.id) }}">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

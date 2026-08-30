@@ -1,9 +1,19 @@
 from datetime import date
 
 from app.extensions import db
-from app.models.organigrama import Cargo, ESTADOS_PERSONAL, PerfilPuesto, Personal
+from app.models.organigrama import (
+    Cargo,
+    ESTADOS_PERSONAL,
+    PerfilPuesto,
+    Personal,
+    PersonalCalificacion,
+    PersonalCalificacionEvidencia,
+    PersonalExperiencia,
+    TIPOS_CALIFICACION_PERSONAL,
+)
 from app.models.seguridad import Usuario
 from app.security.permissions import user_has_permission
+from app.services.storage_service import DocumentStorageError, store_personal_evidence_file
 
 
 PERM_VER = "personal.ver"
@@ -52,6 +62,18 @@ def get_personal(user, personal_id):
 
 def get_perfil(user, perfil_id):
     return PerfilPuesto.query.filter_by(id=perfil_id, empresa_id=user.empresa_id).first()
+
+
+def get_calificacion(user, calificacion_id):
+    return PersonalCalificacion.query.filter_by(id=calificacion_id, empresa_id=user.empresa_id).first()
+
+
+def get_experiencia(user, experiencia_id):
+    return PersonalExperiencia.query.filter_by(id=experiencia_id, empresa_id=user.empresa_id).first()
+
+
+def get_evidencia(user, evidencia_id):
+    return PersonalCalificacionEvidencia.query.filter_by(id=evidencia_id, empresa_id=user.empresa_id).first()
 
 
 def active_cargos(user):
@@ -228,4 +250,169 @@ def set_personal_status(user, item, estado):
     if estado not in ESTADOS_PERSONAL:
         raise PersonalError("Estado de personal invalido.")
     item.estado = estado
+    return item
+
+
+def _validate_personal_record(user, personal_id):
+    personal = get_personal(user, personal_id)
+    if not personal:
+        raise PersonalError("El personal seleccionado no pertenece a esta empresa.")
+    return personal
+
+
+def _apply_calificacion_data(user, item, data):
+    personal = _validate_personal_record(user, data.get("personal_id") or item.personal_id)
+    item.empresa_id = user.empresa_id
+    item.personal_id = personal.id
+    item.tipo = _clean(data.get("tipo"), upper=True) or "OTRO"
+    item.institucion = _clean(data.get("institucion"))
+    item.titulo = _clean(data.get("titulo"))
+    item.area_especialidad = _clean(data.get("area_especialidad"))
+    item.fecha_inicio = _date_from_form(data.get("fecha_inicio"))
+    item.fecha_fin = _date_from_form(data.get("fecha_fin"))
+    item.numero_registro = _clean(data.get("numero_registro"))
+    item.observaciones = _clean(data.get("observaciones"))
+    item.activo = _bool_from_form(data.get("activo", "1"))
+    if item.tipo not in TIPOS_CALIFICACION_PERSONAL:
+        raise PersonalError("Tipo de calificacion invalido.")
+    if not item.institucion:
+        raise PersonalError("La institucion es obligatoria.")
+    if not item.titulo:
+        raise PersonalError("El titulo o denominacion es obligatorio.")
+    if item.fecha_inicio and item.fecha_fin and item.fecha_fin < item.fecha_inicio:
+        raise PersonalError("La fecha de fin no puede ser anterior a la fecha de inicio.")
+
+
+def create_calificacion(user, personal_id, data):
+    ensure_permission(user, PERM_GESTIONAR)
+    item = PersonalCalificacion()
+    payload = dict(data)
+    payload["personal_id"] = personal_id
+    _apply_calificacion_data(user, item, payload)
+    db.session.add(item)
+    return item
+
+
+def update_calificacion(user, item, data):
+    ensure_permission(user, PERM_GESTIONAR)
+    if item.empresa_id != user.empresa_id:
+        raise PersonalError("La calificacion no pertenece a esta empresa.")
+    _apply_calificacion_data(user, item, data)
+    return item
+
+
+def set_calificacion_active(user, item, active):
+    ensure_permission(user, PERM_GESTIONAR)
+    if item.empresa_id != user.empresa_id:
+        raise PersonalError("La calificacion no pertenece a esta empresa.")
+    item.activo = bool(active)
+    return item
+
+
+def add_calificacion_evidencia(user, calificacion, file_storage, observaciones=None):
+    ensure_permission(user, PERM_GESTIONAR)
+    if not calificacion or calificacion.empresa_id != user.empresa_id:
+        raise PersonalError("La calificacion no pertenece a esta empresa.")
+    if not calificacion.personal or calificacion.personal.empresa_id != user.empresa_id:
+        raise PersonalError("El personal de la calificacion no pertenece a esta empresa.")
+    if not file_storage or not file_storage.filename:
+        raise PersonalError("Selecciona un archivo de evidencia.")
+    try:
+        stored = store_personal_evidence_file(
+            file_storage,
+            personal=calificacion.personal,
+            calificacion=calificacion,
+        )
+    except DocumentStorageError as exc:
+        raise PersonalError(str(exc)) from exc
+    evidencia = PersonalCalificacionEvidencia(
+        empresa_id=user.empresa_id,
+        personal_id=calificacion.personal_id,
+        calificacion_id=calificacion.id,
+        archivo_nombre_original=stored.original_name,
+        archivo_nombre_guardado=stored.stored_name,
+        archivo_storage_path=stored.storage_path,
+        archivo_mime=stored.mime_type,
+        archivo_size=stored.size,
+        archivo_sha256=stored.sha256,
+        cargado_por_id=user.id,
+        observaciones=_clean(observaciones),
+        activo=True,
+    )
+    db.session.add(evidencia)
+    return evidencia
+
+
+def set_evidencia_active(user, evidencia, active):
+    ensure_permission(user, PERM_GESTIONAR)
+    if not evidencia or evidencia.empresa_id != user.empresa_id:
+        raise PersonalError("La evidencia no pertenece a esta empresa.")
+    if evidencia.calificacion.empresa_id != user.empresa_id or evidencia.personal.empresa_id != user.empresa_id:
+        raise PersonalError("La evidencia no pertenece a esta empresa.")
+    evidencia.activo = bool(active)
+    return evidencia
+
+
+def _apply_experiencia_data(user, item, data):
+    personal = _validate_personal_record(user, data.get("personal_id") or item.personal_id)
+    item.empresa_id = user.empresa_id
+    item.personal_id = personal.id
+    item.organizacion = _clean(data.get("organizacion"))
+    item.cargo_funcion = _clean(data.get("cargo_funcion"))
+    item.area_especialidad = _clean(data.get("area_especialidad"))
+    item.descripcion_actividades = _clean(data.get("descripcion_actividades"))
+    item.fecha_inicio = _date_from_form(data.get("fecha_inicio"))
+    item.fecha_fin = _date_from_form(data.get("fecha_fin"))
+    item.experiencia_actual = _bool_from_form(data.get("experiencia_actual"))
+    item.observaciones = _clean(data.get("observaciones"))
+    item.activo = _bool_from_form(data.get("activo", "1"))
+    if not item.organizacion:
+        raise PersonalError("La organizacion es obligatoria.")
+    if not item.cargo_funcion:
+        raise PersonalError("El cargo o funcion es obligatorio.")
+    if not item.fecha_inicio:
+        raise PersonalError("La fecha de inicio es obligatoria.")
+    if item.experiencia_actual:
+        item.fecha_fin = None
+    if item.fecha_fin and item.fecha_fin < item.fecha_inicio:
+        raise PersonalError("La fecha de fin no puede ser anterior a la fecha de inicio.")
+
+
+def create_experiencia(user, personal_id, data):
+    ensure_permission(user, PERM_GESTIONAR)
+    item = PersonalExperiencia()
+    payload = dict(data)
+    payload["personal_id"] = personal_id
+    _apply_experiencia_data(user, item, payload)
+    db.session.add(item)
+    return item
+
+
+def update_experiencia(user, item, data):
+    ensure_permission(user, PERM_GESTIONAR)
+    if item.empresa_id != user.empresa_id:
+        raise PersonalError("La experiencia no pertenece a esta empresa.")
+    _apply_experiencia_data(user, item, data)
+    return item
+
+
+def cerrar_experiencia_actual(user, item, fecha_fin):
+    ensure_permission(user, PERM_GESTIONAR)
+    if item.empresa_id != user.empresa_id:
+        raise PersonalError("La experiencia no pertenece a esta empresa.")
+    fecha_fin = _date_from_form(fecha_fin)
+    if not fecha_fin:
+        raise PersonalError("La fecha de cierre es obligatoria.")
+    if fecha_fin < item.fecha_inicio:
+        raise PersonalError("La fecha de fin no puede ser anterior a la fecha de inicio.")
+    item.experiencia_actual = False
+    item.fecha_fin = fecha_fin
+    return item
+
+
+def set_experiencia_active(user, item, active):
+    ensure_permission(user, PERM_GESTIONAR)
+    if item.empresa_id != user.empresa_id:
+        raise PersonalError("La experiencia no pertenece a esta empresa.")
+    item.activo = bool(active)
     return item
