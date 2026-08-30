@@ -147,9 +147,42 @@
         </table>
     </div>
 
+    <div class="d-flex justify-content-between align-items-center mt-4 mb-2">
+        <h5 class="mb-0">Capacitaciones</h5>
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('personal.capacitaciones') }}">Ver capacitaciones</a>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Capacitacion</th>
+                    <th>Tipo</th>
+                    <th>Proveedor</th>
+                    <th>Periodo</th>
+                    <th>Estado capacitacion</th>
+                    <th>Estado participacion</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for participante in item.capacitaciones_participacion %}
+                <tr class="{% if not participante.activo %}table-secondary{% endif %}">
+                    <td><a href="{{ url_for('personal.detalle_capacitacion', capacitacion_id=participante.capacitacion_id) }}">{{ participante.capacitacion.nombre }}</a></td>
+                    <td>{{ participante.capacitacion.tipo }}</td>
+                    <td>{{ participante.capacitacion.proveedor or '-' }}</td>
+                    <td>{{ participante.capacitacion.fecha_inicio }} - {{ participante.capacitacion.fecha_fin or '-' }}</td>
+                    <td>{{ participante.capacitacion.estado }}</td>
+                    <td>{{ participante.estado_participacion }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="text-center">No hay capacitaciones asociadas.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
     <h5 class="mt-4">Trazabilidad ISO 17025 futura</h5>
     <div class="row g-2">
-        {% for titulo in ['Capacitacion', 'Competencias', 'Autorizaciones'] %}
+        {% for titulo in ['Competencias', 'Autorizaciones'] %}
         <div class="col-md-3">
             <div class="border rounded p-3 h-100 text-muted">{{ titulo }}</div>
         </div>

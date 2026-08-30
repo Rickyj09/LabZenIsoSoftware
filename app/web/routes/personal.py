@@ -5,7 +5,17 @@ from flask_login import current_user, login_required
 from sqlalchemy import or_
 
 from app.extensions import db
-from app.models.organigrama import Cargo, ESTADOS_PERSONAL, Personal, TIPOS_CALIFICACION_PERSONAL
+from app.models.organigrama import (
+    Cargo,
+    ESTADOS_CAPACITACION_PERSONAL,
+    ESTADOS_PARTICIPACION_CAPACITACION,
+    ESTADOS_PERSONAL,
+    MODALIDADES_CAPACITACION_PERSONAL,
+    Personal,
+    TIPOS_CALIFICACION_PERSONAL,
+    TIPOS_CAPACITACION_PERSONAL,
+    TIPOS_EVIDENCIA_CAPACITACION,
+)
 from app.security.permissions import require_permission
 from app.services import personal_service
 from app.services.personal_service import PersonalError
@@ -37,6 +47,11 @@ def _personal_context(**extra):
         "csrf_token": _csrf_token(),
         "estados_personal": ESTADOS_PERSONAL,
         "tipos_calificacion": TIPOS_CALIFICACION_PERSONAL,
+        "tipos_capacitacion": TIPOS_CAPACITACION_PERSONAL,
+        "modalidades_capacitacion": MODALIDADES_CAPACITACION_PERSONAL,
+        "estados_capacitacion": ESTADOS_CAPACITACION_PERSONAL,
+        "estados_participacion": ESTADOS_PARTICIPACION_CAPACITACION,
+        "tipos_evidencia_capacitacion": TIPOS_EVIDENCIA_CAPACITACION,
         "cargos": Cargo.query.filter_by(empresa_id=current_user.empresa_id).order_by(Cargo.codigo.asc()).all(),
         "usuarios": personal_service.company_users(current_user),
         "estado_badge_class": _estado_badge_class,
@@ -140,6 +155,205 @@ def cambiar_estado(item_id):
 
 def _redirect_personal_detail(personal_id):
     return redirect(url_for("personal.detalle", item_id=personal_id))
+
+
+def _redirect_capacitacion_detail(capacitacion_id):
+    return redirect(url_for("personal.detalle_capacitacion", capacitacion_id=capacitacion_id))
+
+
+@bp.route("/capacitaciones")
+@login_required
+@require_permission(personal_service.PERM_VER)
+def capacitaciones():
+    filters = {key: request.args.get(key, "").strip() for key in ("q", "estado", "tipo")}
+    items = personal_service.capacitaciones_query(current_user, filters).all()
+    return render_template("personal/capacitaciones_index.html", **_personal_context(items=items, filters=filters))
+
+
+@bp.route("/capacitaciones/nueva", methods=["GET", "POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def nueva_capacitacion():
+    if request.method == "POST":
+        _validate_csrf()
+        try:
+            item = personal_service.create_capacitacion(current_user, request.form)
+            db.session.commit()
+            flash("Capacitacion registrada correctamente.", "success")
+            return _redirect_capacitacion_detail(item.id)
+        except PersonalError as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template("personal/capacitacion_form.html", **_personal_context(item=None, form_data=request.form))
+    return render_template("personal/capacitacion_form.html", **_personal_context(item=None, form_data={}))
+
+
+@bp.route("/capacitaciones/<int:capacitacion_id>")
+@login_required
+@require_permission(personal_service.PERM_VER)
+def detalle_capacitacion(capacitacion_id):
+    item = personal_service.get_capacitacion(current_user, capacitacion_id)
+    if not item:
+        abort(404)
+    personal_disponible = (
+        Personal.query
+        .filter_by(empresa_id=current_user.empresa_id, estado="ACTIVO")
+        .order_by(Personal.apellidos.asc(), Personal.nombres.asc())
+        .all()
+    )
+    return render_template(
+        "personal/capacitacion_detalle.html",
+        **_personal_context(item=item, personal_disponible=personal_disponible),
+    )
+
+
+@bp.route("/capacitaciones/<int:capacitacion_id>/editar", methods=["GET", "POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def editar_capacitacion(capacitacion_id):
+    item = personal_service.get_capacitacion(current_user, capacitacion_id)
+    if not item:
+        abort(404)
+    if request.method == "POST":
+        _validate_csrf()
+        try:
+            personal_service.update_capacitacion(current_user, item, request.form)
+            db.session.commit()
+            flash("Capacitacion actualizada correctamente.", "success")
+            return _redirect_capacitacion_detail(item.id)
+        except PersonalError as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template("personal/capacitacion_form.html", **_personal_context(item=item, form_data=request.form))
+    return render_template("personal/capacitacion_form.html", **_personal_context(item=item, form_data={}))
+
+
+@bp.route("/capacitaciones/<int:capacitacion_id>/estado", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def cambiar_estado_capacitacion(capacitacion_id):
+    _validate_csrf()
+    item = personal_service.get_capacitacion(current_user, capacitacion_id)
+    if not item:
+        abort(404)
+    try:
+        personal_service.set_capacitacion_estado(current_user, item, request.form.get("estado"))
+        db.session.commit()
+        flash("Estado de la capacitacion actualizado correctamente.", "success")
+    except PersonalError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_capacitacion_detail(item.id)
+
+
+@bp.route("/capacitaciones/<int:capacitacion_id>/participantes", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def agregar_participante_capacitacion(capacitacion_id):
+    _validate_csrf()
+    item = personal_service.get_capacitacion(current_user, capacitacion_id)
+    if not item:
+        abort(404)
+    try:
+        personal_service.add_capacitacion_participante(current_user, item, request.form.get("personal_id"), request.form)
+        db.session.commit()
+        flash("Participante agregado correctamente.", "success")
+    except PersonalError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_capacitacion_detail(item.id)
+
+
+@bp.route("/capacitaciones/participantes/<int:participante_id>/estado", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def cambiar_estado_participante_capacitacion(participante_id):
+    _validate_csrf()
+    participante = personal_service.get_capacitacion_participante(current_user, participante_id)
+    if not participante:
+        abort(404)
+    try:
+        personal_service.update_capacitacion_participante(current_user, participante, request.form)
+        db.session.commit()
+        flash("Participacion actualizada correctamente.", "success")
+    except PersonalError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_capacitacion_detail(participante.capacitacion_id)
+
+
+@bp.route("/capacitaciones/participantes/<int:participante_id>/estado-registro", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def cambiar_activo_participante_capacitacion(participante_id):
+    _validate_csrf()
+    participante = personal_service.get_capacitacion_participante(current_user, participante_id)
+    if not participante:
+        abort(404)
+    personal_service.set_capacitacion_participante_active(current_user, participante, not participante.activo)
+    db.session.commit()
+    flash("Estado del participante actualizado correctamente.", "success")
+    return _redirect_capacitacion_detail(participante.capacitacion_id)
+
+
+@bp.route("/capacitaciones/<int:capacitacion_id>/evidencias", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def agregar_evidencia_capacitacion(capacitacion_id):
+    _validate_csrf()
+    item = personal_service.get_capacitacion(current_user, capacitacion_id)
+    if not item:
+        abort(404)
+    try:
+        personal_service.add_capacitacion_evidencia(current_user, item, request.files.get("evidencia"), request.form)
+        db.session.commit()
+        flash("Evidencia de capacitacion cargada correctamente.", "success")
+    except PersonalError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_capacitacion_detail(item.id)
+
+
+@bp.route("/capacitaciones/evidencias/<int:evidencia_id>/descargar")
+@login_required
+@require_permission(personal_service.PERM_VER)
+def descargar_evidencia_capacitacion(evidencia_id):
+    evidencia = personal_service.get_capacitacion_evidencia(current_user, evidencia_id)
+    if not evidencia or not evidencia.activo:
+        abort(404)
+    if evidencia.capacitacion.empresa_id != current_user.empresa_id:
+        abort(404)
+    if evidencia.participante and (
+        evidencia.participante.empresa_id != current_user.empresa_id
+        or evidencia.participante.capacitacion_id != evidencia.capacitacion_id
+    ):
+        abort(404)
+    try:
+        path = resolve_document_path(evidencia.archivo_storage_path)
+    except DocumentStorageError:
+        abort(404)
+    if not path.is_file():
+        abort(404)
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name=evidencia.archivo_nombre_original,
+        mimetype=evidencia.archivo_mime,
+    )
+
+
+@bp.route("/capacitaciones/evidencias/<int:evidencia_id>/estado", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def cambiar_estado_evidencia_capacitacion(evidencia_id):
+    _validate_csrf()
+    evidencia = personal_service.get_capacitacion_evidencia(current_user, evidencia_id)
+    if not evidencia:
+        abort(404)
+    personal_service.set_capacitacion_evidencia_active(current_user, evidencia, not evidencia.activo)
+    db.session.commit()
+    flash("Estado de la evidencia actualizado correctamente.", "success")
+    return _redirect_capacitacion_detail(evidencia.capacitacion_id)
 
 
 @bp.route("/<int:item_id>/calificaciones/nueva", methods=["GET", "POST"])

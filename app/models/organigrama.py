@@ -4,6 +4,11 @@ from app.models.base import BaseModel, TenantMixin
 
 ESTADOS_PERSONAL = ("ACTIVO", "INACTIVO")
 TIPOS_CALIFICACION_PERSONAL = ("EDUCACION_FORMAL", "CERTIFICACION", "LICENCIA", "OTRO")
+TIPOS_CAPACITACION_PERSONAL = ("INTERNA", "EXTERNA", "INDUCCION", "ACTUALIZACION", "ENTRENAMIENTO", "OTRO")
+MODALIDADES_CAPACITACION_PERSONAL = ("PRESENCIAL", "VIRTUAL", "HIBRIDA")
+ESTADOS_CAPACITACION_PERSONAL = ("PLANIFICADA", "EN_CURSO", "COMPLETADA", "CANCELADA")
+ESTADOS_PARTICIPACION_CAPACITACION = ("INSCRITO", "ASISTIO", "COMPLETO", "NO_ASISTIO", "RETIRADO")
+TIPOS_EVIDENCIA_CAPACITACION = ("CERTIFICADO", "LISTA_ASISTENCIA", "DIPLOMA", "CONSTANCIA", "MATERIAL", "OTRO")
 
 
 class Cargo(TenantMixin, BaseModel):
@@ -95,6 +100,13 @@ class Personal(TenantMixin, BaseModel):
         back_populates="personal",
         lazy=True,
         order_by="PersonalExperiencia.fecha_inicio.desc(), PersonalExperiencia.id.desc()",
+        cascade="all, delete-orphan",
+    )
+    capacitaciones_participacion = db.relationship(
+        "PersonalCapacitacionParticipante",
+        back_populates="personal",
+        lazy=True,
+        order_by="PersonalCapacitacionParticipante.created_at.desc(), PersonalCapacitacionParticipante.id.desc()",
         cascade="all, delete-orphan",
     )
 
@@ -202,4 +214,126 @@ class PersonalCalificacionEvidencia(TenantMixin, BaseModel):
     empresa = db.relationship("Empresa")
     personal = db.relationship("Personal")
     calificacion = db.relationship("PersonalCalificacion", back_populates="evidencias")
+    cargado_por = db.relationship("Usuario", foreign_keys=[cargado_por_id])
+
+
+class PersonalCapacitacion(TenantMixin, BaseModel):
+    __tablename__ = "personal_capacitaciones"
+    __table_args__ = (
+        db.UniqueConstraint("empresa_id", "codigo", name="uq_personal_capacitaciones_empresa_codigo"),
+        db.CheckConstraint(
+            "tipo IN ('INTERNA', 'EXTERNA', 'INDUCCION', 'ACTUALIZACION', 'ENTRENAMIENTO', 'OTRO')",
+            name="ck_personal_capacitaciones_tipo_valido",
+        ),
+        db.CheckConstraint(
+            "modalidad IN ('PRESENCIAL', 'VIRTUAL', 'HIBRIDA')",
+            name="ck_personal_capacitaciones_modalidad_valida",
+        ),
+        db.CheckConstraint(
+            "estado IN ('PLANIFICADA', 'EN_CURSO', 'COMPLETADA', 'CANCELADA')",
+            name="ck_personal_capacitaciones_estado_valido",
+        ),
+        db.CheckConstraint(
+            "fecha_fin IS NULL OR fecha_fin >= fecha_inicio",
+            name="ck_personal_capacitaciones_fechas_ordenadas",
+        ),
+        db.CheckConstraint(
+            "duracion_horas IS NULL OR duracion_horas >= 0",
+            name="ck_personal_capacitaciones_duracion_no_negativa",
+        ),
+        db.Index("ix_personal_capacitaciones_empresa_estado", "empresa_id", "estado"),
+        db.Index("ix_personal_capacitaciones_empresa_tipo", "empresa_id", "tipo"),
+        db.Index("ix_personal_capacitaciones_empresa_fechas", "empresa_id", "fecha_inicio", "fecha_fin"),
+    )
+
+    codigo = db.Column(db.String(50))
+    nombre = db.Column(db.String(180), nullable=False)
+    tipo = db.Column(db.String(30), nullable=False)
+    objetivo = db.Column(db.Text)
+    proveedor = db.Column(db.String(180))
+    instructor = db.Column(db.String(180))
+    modalidad = db.Column(db.String(20), nullable=False)
+    fecha_inicio = db.Column(db.Date, nullable=False)
+    fecha_fin = db.Column(db.Date)
+    duracion_horas = db.Column(db.Numeric(8, 2))
+    lugar = db.Column(db.String(180))
+    estado = db.Column(db.String(20), nullable=False, default="PLANIFICADA")
+    observaciones = db.Column(db.Text)
+
+    empresa = db.relationship("Empresa")
+    participantes = db.relationship(
+        "PersonalCapacitacionParticipante",
+        back_populates="capacitacion",
+        lazy=True,
+        order_by="PersonalCapacitacionParticipante.created_at.asc(), PersonalCapacitacionParticipante.id.asc()",
+        cascade="all, delete-orphan",
+    )
+    evidencias = db.relationship(
+        "PersonalCapacitacionEvidencia",
+        back_populates="capacitacion",
+        lazy=True,
+        order_by="PersonalCapacitacionEvidencia.created_at.desc(), PersonalCapacitacionEvidencia.id.desc()",
+        cascade="all, delete-orphan",
+    )
+
+
+class PersonalCapacitacionParticipante(TenantMixin, BaseModel):
+    __tablename__ = "personal_capacitacion_participantes"
+    __table_args__ = (
+        db.UniqueConstraint("empresa_id", "capacitacion_id", "personal_id", name="uq_personal_cap_participante_unico"),
+        db.CheckConstraint(
+            "estado_participacion IN ('INSCRITO', 'ASISTIO', 'COMPLETO', 'NO_ASISTIO', 'RETIRADO')",
+            name="ck_personal_cap_participantes_estado_valido",
+        ),
+        db.Index("ix_personal_cap_participantes_empresa_capacitacion", "empresa_id", "capacitacion_id"),
+        db.Index("ix_personal_cap_participantes_empresa_personal", "empresa_id", "personal_id"),
+        db.Index("ix_personal_cap_participantes_empresa_estado", "empresa_id", "estado_participacion"),
+    )
+
+    capacitacion_id = db.Column(db.BigInteger, db.ForeignKey("personal_capacitaciones.id"), nullable=False)
+    personal_id = db.Column(db.BigInteger, db.ForeignKey("personal.id"), nullable=False)
+    estado_participacion = db.Column(db.String(20), nullable=False, default="INSCRITO")
+    fecha_registro = db.Column(db.Date, nullable=False)
+    observaciones = db.Column(db.Text)
+    activo = db.Column(db.Boolean, default=True, nullable=False)
+
+    empresa = db.relationship("Empresa")
+    capacitacion = db.relationship("PersonalCapacitacion", back_populates="participantes")
+    personal = db.relationship("Personal", back_populates="capacitaciones_participacion")
+    evidencias = db.relationship(
+        "PersonalCapacitacionEvidencia",
+        back_populates="participante",
+        lazy=True,
+        order_by="PersonalCapacitacionEvidencia.created_at.desc(), PersonalCapacitacionEvidencia.id.desc()",
+    )
+
+
+class PersonalCapacitacionEvidencia(TenantMixin, BaseModel):
+    __tablename__ = "personal_capacitacion_evidencias"
+    __table_args__ = (
+        db.CheckConstraint(
+            "tipo_evidencia IN ('CERTIFICADO', 'LISTA_ASISTENCIA', 'DIPLOMA', 'CONSTANCIA', 'MATERIAL', 'OTRO')",
+            name="ck_personal_cap_evidencias_tipo_valido",
+        ),
+        db.Index("ix_personal_cap_evidencias_empresa_capacitacion", "empresa_id", "capacitacion_id"),
+        db.Index("ix_personal_cap_evidencias_empresa_participante", "empresa_id", "participante_id"),
+        db.Index("ix_personal_cap_evidencias_empresa_activo", "empresa_id", "activo"),
+    )
+
+    capacitacion_id = db.Column(db.BigInteger, db.ForeignKey("personal_capacitaciones.id"), nullable=False)
+    participante_id = db.Column(db.BigInteger, db.ForeignKey("personal_capacitacion_participantes.id"))
+    archivo_nombre_original = db.Column(db.String(255), nullable=False)
+    archivo_nombre_guardado = db.Column(db.String(255), nullable=False)
+    archivo_storage_path = db.Column(db.String(500), nullable=False)
+    archivo_mime = db.Column(db.String(150), nullable=False)
+    archivo_size = db.Column(db.BigInteger, nullable=False)
+    archivo_sha256 = db.Column(db.String(64), nullable=False)
+    tipo_evidencia = db.Column(db.String(30), nullable=False)
+    cargado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    activo = db.Column(db.Boolean, default=True, nullable=False)
+    observaciones = db.Column(db.Text)
+
+    empresa = db.relationship("Empresa")
+    capacitacion = db.relationship("PersonalCapacitacion", back_populates="evidencias")
+    participante = db.relationship("PersonalCapacitacionParticipante", back_populates="evidencias")
     cargado_por = db.relationship("Usuario", foreign_keys=[cargado_por_id])

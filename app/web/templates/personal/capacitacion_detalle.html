@@ -1,0 +1,191 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Detalle de capacitacion{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h3 class="mb-1">{{ item.nombre }}</h3>
+            <span class="badge text-bg-secondary">{{ item.estado }}</span>
+        </div>
+        <div class="d-flex gap-2">
+            <a class="btn btn-outline-secondary" href="{{ url_for('personal.capacitaciones') }}">Volver</a>
+            {% if can('personal.gestionar') %}
+            <a class="btn btn-primary" href="{{ url_for('personal.editar_capacitacion', capacitacion_id=item.id) }}">Editar</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <h5>Datos generales</h5>
+    <div class="table-responsive">
+        <table class="table table-bordered">
+            <tr><th>Codigo</th><td>{{ item.codigo or '-' }}</td><th>Tipo</th><td>{{ item.tipo }}</td></tr>
+            <tr><th>Modalidad</th><td>{{ item.modalidad }}</td><th>Estado</th><td>{{ item.estado }}</td></tr>
+            <tr><th>Proveedor</th><td>{{ item.proveedor or '-' }}</td><th>Instructor</th><td>{{ item.instructor or '-' }}</td></tr>
+            <tr><th>Fecha inicio</th><td>{{ item.fecha_inicio }}</td><th>Fecha fin</th><td>{{ item.fecha_fin or '-' }}</td></tr>
+            <tr><th>Duracion</th><td>{{ item.duracion_horas or '-' }}</td><th>Lugar</th><td>{{ item.lugar or '-' }}</td></tr>
+            <tr><th>Objetivo</th><td colspan="3">{{ item.objetivo or '-' }}</td></tr>
+            <tr><th>Observaciones</th><td colspan="3">{{ item.observaciones or '-' }}</td></tr>
+        </table>
+    </div>
+
+    {% if can('personal.gestionar') %}
+    <form class="row g-2 align-items-end mb-4" method="post" action="{{ url_for('personal.cambiar_estado_capacitacion', capacitacion_id=item.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="col-md-4">
+            <label class="form-label">Cambiar estado</label>
+            <select class="form-select" name="estado">
+                {% for estado in estados_capacitacion %}
+                <option value="{{ estado }}" {% if item.estado == estado %}selected{% endif %}>{{ estado }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2 d-grid">
+            <button class="btn btn-outline-primary" type="submit">Actualizar</button>
+        </div>
+    </form>
+    {% endif %}
+
+    <div class="d-flex justify-content-between align-items-center mt-4 mb-2">
+        <h5 class="mb-0">Participantes</h5>
+    </div>
+    {% if can('personal.gestionar') %}
+    <form class="row g-2 align-items-end mb-3" method="post" action="{{ url_for('personal.agregar_participante_capacitacion', capacitacion_id=item.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="col-md-5">
+            <label class="form-label">Personal</label>
+            <select class="form-select" name="personal_id" required>
+                <option value="">Seleccionar</option>
+                {% for person in personal_disponible %}
+                <option value="{{ person.id }}">{{ person.codigo }} - {{ person.nombre_completo }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Estado</label>
+            <select class="form-select" name="estado_participacion">
+                {% for estado in estados_participacion %}
+                <option value="{{ estado }}">{{ estado }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label">Fecha registro</label>
+            <input class="form-control" type="date" name="fecha_registro">
+        </div>
+        <div class="col-md-2 d-grid">
+            <button class="btn btn-outline-primary" type="submit">Agregar</button>
+        </div>
+    </form>
+    {% endif %}
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Persona</th>
+                    <th>Cargo</th>
+                    <th>Estado participacion</th>
+                    <th>Registro</th>
+                    <th class="text-end">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for participante in item.participantes %}
+                <tr class="{% if not participante.activo %}table-secondary{% endif %}">
+                    <td><a href="{{ url_for('personal.detalle', item_id=participante.personal_id) }}">{{ participante.personal.nombre_completo }}</a></td>
+                    <td>{{ participante.personal.cargo.nombre if participante.personal.cargo else '-' }}</td>
+                    <td>{{ participante.estado_participacion }}</td>
+                    <td>{{ participante.fecha_registro }}</td>
+                    <td class="text-end">
+                        {% if can('personal.gestionar') %}
+                        <form class="d-inline" method="post" action="{{ url_for('personal.cambiar_estado_participante_capacitacion', participante_id=participante.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <select class="form-select form-select-sm d-inline-block w-auto" name="estado_participacion">
+                                {% for estado in estados_participacion %}
+                                <option value="{{ estado }}" {% if participante.estado_participacion == estado %}selected{% endif %}>{{ estado }}</option>
+                                {% endfor %}
+                            </select>
+                            <button class="btn btn-sm btn-outline-primary" type="submit">Guardar</button>
+                        </form>
+                        <form class="d-inline" method="post" action="{{ url_for('personal.cambiar_activo_participante_capacitacion', participante_id=participante.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button class="btn btn-sm btn-outline-warning" type="submit">{{ 'Retirar' if participante.activo else 'Reactivar' }}</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center">No hay participantes registrados.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mt-4 mb-2">
+        <h5 class="mb-0">Evidencias</h5>
+    </div>
+    {% if can('personal.gestionar') %}
+    <form class="row g-2 align-items-end mb-3" method="post" enctype="multipart/form-data" action="{{ url_for('personal.agregar_evidencia_capacitacion', capacitacion_id=item.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="col-md-3">
+            <label class="form-label">Tipo</label>
+            <select class="form-select" name="tipo_evidencia">
+                {% for tipo in tipos_evidencia_capacitacion %}
+                <option value="{{ tipo }}">{{ tipo }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Participante</label>
+            <select class="form-select" name="participante_id">
+                <option value="">General</option>
+                {% for participante in item.participantes %}
+                <option value="{{ participante.id }}">{{ participante.personal.nombre_completo }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-4">
+            <label class="form-label">Archivo</label>
+            <input class="form-control" type="file" name="evidencia" required>
+        </div>
+        <div class="col-md-2 d-grid">
+            <button class="btn btn-outline-primary" type="submit">Cargar</button>
+        </div>
+    </form>
+    {% endif %}
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Tipo</th>
+                    <th>Archivo</th>
+                    <th>Fecha</th>
+                    <th>Participante</th>
+                    <th class="text-end">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for evidencia in item.evidencias %}
+                <tr class="{% if not evidencia.activo %}table-secondary{% endif %}">
+                    <td>{{ evidencia.tipo_evidencia }}</td>
+                    <td><a href="{{ url_for('personal.descargar_evidencia_capacitacion', evidencia_id=evidencia.id) }}">{{ evidencia.archivo_nombre_original }}</a></td>
+                    <td>{{ evidencia.created_at.date() if evidencia.created_at else '-' }}</td>
+                    <td>{{ evidencia.participante.personal.nombre_completo if evidencia.participante else 'General' }}</td>
+                    <td class="text-end">
+                        {% if can('personal.gestionar') %}
+                        <form class="d-inline" method="post" action="{{ url_for('personal.cambiar_estado_evidencia_capacitacion', evidencia_id=evidencia.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button class="btn btn-sm btn-outline-warning" type="submit">{{ 'Desactivar' if evidencia.activo else 'Activar' }}</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center">No hay evidencias registradas.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

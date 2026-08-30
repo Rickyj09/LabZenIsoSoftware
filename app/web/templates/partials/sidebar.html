@@ -159,13 +159,17 @@
             <span>▾</span>
         </button>
         <div class="collapse {% if personal_active %}show{% endif %}" id="menuPersonal">
-            <a class="sidebar-link {% if endpoint.startswith('personal.') and not endpoint.startswith('personal.cargo') and endpoint not in ['personal.cargos', 'personal.nuevo_cargo', 'personal.detalle_cargo', 'personal.editar_cargo', 'personal.cambiar_estado_cargo'] %}active{% endif %}"
+            <a class="sidebar-link {% if endpoint.startswith('personal.') and not endpoint.startswith('personal.cargo') and endpoint not in ['personal.cargos', 'personal.nuevo_cargo', 'personal.detalle_cargo', 'personal.editar_cargo', 'personal.cambiar_estado_cargo', 'personal.capacitaciones', 'personal.nueva_capacitacion', 'personal.detalle_capacitacion', 'personal.editar_capacitacion', 'personal.cambiar_estado_capacitacion', 'personal.agregar_participante_capacitacion', 'personal.cambiar_estado_participante_capacitacion', 'personal.cambiar_activo_participante_capacitacion', 'personal.agregar_evidencia_capacitacion', 'personal.descargar_evidencia_capacitacion', 'personal.cambiar_estado_evidencia_capacitacion'] %}active{% endif %}"
                href="{{ url_for('personal.index') }}">
                 Personal
             </a>
             <a class="sidebar-link {% if endpoint in ['personal.cargos', 'personal.nuevo_cargo', 'personal.detalle_cargo', 'personal.editar_cargo', 'personal.cambiar_estado_cargo'] %}active{% endif %}"
                href="{{ url_for('personal.cargos') }}">
                 Cargos y perfiles
+            </a>
+            <a class="sidebar-link {% if endpoint in ['personal.capacitaciones', 'personal.nueva_capacitacion', 'personal.detalle_capacitacion', 'personal.editar_capacitacion', 'personal.cambiar_estado_capacitacion', 'personal.agregar_participante_capacitacion', 'personal.cambiar_estado_participante_capacitacion', 'personal.cambiar_activo_participante_capacitacion', 'personal.agregar_evidencia_capacitacion', 'personal.descargar_evidencia_capacitacion', 'personal.cambiar_estado_evidencia_capacitacion'] %}active{% endif %}"
+               href="{{ url_for('personal.capacitaciones') }}">
+                Capacitacion
             </a>
         </div>
         {% endif %}

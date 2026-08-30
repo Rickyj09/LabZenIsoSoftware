@@ -1,19 +1,34 @@
 from datetime import date
+from decimal import Decimal, InvalidOperation
+
+from sqlalchemy import or_
 
 from app.extensions import db
 from app.models.organigrama import (
     Cargo,
+    ESTADOS_CAPACITACION_PERSONAL,
+    ESTADOS_PARTICIPACION_CAPACITACION,
     ESTADOS_PERSONAL,
+    MODALIDADES_CAPACITACION_PERSONAL,
     PerfilPuesto,
     Personal,
+    PersonalCapacitacion,
+    PersonalCapacitacionEvidencia,
+    PersonalCapacitacionParticipante,
     PersonalCalificacion,
     PersonalCalificacionEvidencia,
     PersonalExperiencia,
     TIPOS_CALIFICACION_PERSONAL,
+    TIPOS_CAPACITACION_PERSONAL,
+    TIPOS_EVIDENCIA_CAPACITACION,
 )
 from app.models.seguridad import Usuario
 from app.security.permissions import user_has_permission
-from app.services.storage_service import DocumentStorageError, store_personal_evidence_file
+from app.services.storage_service import (
+    DocumentStorageError,
+    store_personal_evidence_file,
+    store_personal_training_evidence_file,
+)
 
 
 PERM_VER = "personal.ver"
@@ -47,6 +62,16 @@ def _date_from_form(value):
         raise PersonalError("Formato de fecha invalido. Usa AAAA-MM-DD.") from exc
 
 
+def _decimal_from_form(value):
+    value = _clean(value)
+    if not value:
+        return None
+    try:
+        return Decimal(value)
+    except (InvalidOperation, ValueError) as exc:
+        raise PersonalError("La duracion debe ser un numero valido.") from exc
+
+
 def ensure_permission(user, permission_code):
     if not user_has_permission(user, permission_code):
         raise PersonalError("No tienes permisos para realizar esta accion.")
@@ -74,6 +99,18 @@ def get_experiencia(user, experiencia_id):
 
 def get_evidencia(user, evidencia_id):
     return PersonalCalificacionEvidencia.query.filter_by(id=evidencia_id, empresa_id=user.empresa_id).first()
+
+
+def get_capacitacion(user, capacitacion_id):
+    return PersonalCapacitacion.query.filter_by(id=capacitacion_id, empresa_id=user.empresa_id).first()
+
+
+def get_capacitacion_participante(user, participante_id):
+    return PersonalCapacitacionParticipante.query.filter_by(id=participante_id, empresa_id=user.empresa_id).first()
+
+
+def get_capacitacion_evidencia(user, evidencia_id):
+    return PersonalCapacitacionEvidencia.query.filter_by(id=evidencia_id, empresa_id=user.empresa_id).first()
 
 
 def active_cargos(user):
@@ -416,3 +453,219 @@ def set_experiencia_active(user, item, active):
         raise PersonalError("La experiencia no pertenece a esta empresa.")
     item.activo = bool(active)
     return item
+
+
+def _validate_capacitacion_record(user, capacitacion):
+    if not capacitacion or capacitacion.empresa_id != user.empresa_id:
+        raise PersonalError("La capacitacion no pertenece a esta empresa.")
+    return capacitacion
+
+
+def _validate_participante_record(user, participante):
+    if not participante or participante.empresa_id != user.empresa_id:
+        raise PersonalError("El participante no pertenece a esta empresa.")
+    if not participante.capacitacion or participante.capacitacion.empresa_id != user.empresa_id:
+        raise PersonalError("La capacitacion del participante no pertenece a esta empresa.")
+    if not participante.personal or participante.personal.empresa_id != user.empresa_id:
+        raise PersonalError("El personal participante no pertenece a esta empresa.")
+    return participante
+
+
+def validate_capacitacion_code(user, codigo, current_id=None):
+    if not codigo:
+        return
+    query = PersonalCapacitacion.query.filter_by(empresa_id=user.empresa_id, codigo=codigo)
+    if current_id:
+        query = query.filter(PersonalCapacitacion.id != current_id)
+    if query.first():
+        raise PersonalError("Ya existe una capacitacion con ese codigo en esta empresa.")
+
+
+def _apply_capacitacion_data(user, item, data, current_id=None):
+    item.empresa_id = user.empresa_id
+    item.codigo = _clean(data.get("codigo"), upper=True)
+    item.nombre = _clean(data.get("nombre") or data.get("tema"))
+    item.tipo = _clean(data.get("tipo"), upper=True) or "OTRO"
+    item.objetivo = _clean(data.get("objetivo"))
+    item.proveedor = _clean(data.get("proveedor") or data.get("institucion"))
+    item.instructor = _clean(data.get("instructor"))
+    item.modalidad = _clean(data.get("modalidad"), upper=True) or "PRESENCIAL"
+    item.fecha_inicio = _date_from_form(data.get("fecha_inicio"))
+    item.fecha_fin = _date_from_form(data.get("fecha_fin"))
+    item.duracion_horas = _decimal_from_form(data.get("duracion_horas"))
+    item.lugar = _clean(data.get("lugar"))
+    item.estado = _clean(data.get("estado"), upper=True) or "PLANIFICADA"
+    item.observaciones = _clean(data.get("observaciones"))
+
+    if not item.nombre:
+        raise PersonalError("El nombre de la capacitacion es obligatorio.")
+    if item.tipo not in TIPOS_CAPACITACION_PERSONAL:
+        raise PersonalError("Tipo de capacitacion invalido.")
+    if item.modalidad not in MODALIDADES_CAPACITACION_PERSONAL:
+        raise PersonalError("Modalidad de capacitacion invalida.")
+    if item.estado not in ESTADOS_CAPACITACION_PERSONAL:
+        raise PersonalError("Estado de capacitacion invalido.")
+    if not item.fecha_inicio:
+        raise PersonalError("La fecha de inicio es obligatoria.")
+    if item.fecha_fin and item.fecha_fin < item.fecha_inicio:
+        raise PersonalError("La fecha de fin no puede ser anterior a la fecha de inicio.")
+    if item.duracion_horas is not None and item.duracion_horas < 0:
+        raise PersonalError("La duracion no puede ser negativa.")
+    validate_capacitacion_code(user, item.codigo, current_id)
+
+
+def create_capacitacion(user, data):
+    ensure_permission(user, PERM_GESTIONAR)
+    item = PersonalCapacitacion()
+    _apply_capacitacion_data(user, item, data)
+    db.session.add(item)
+    return item
+
+
+def update_capacitacion(user, item, data):
+    ensure_permission(user, PERM_GESTIONAR)
+    _validate_capacitacion_record(user, item)
+    if item.estado == "CANCELADA" and _clean(data.get("estado"), upper=True) == "COMPLETADA":
+        raise PersonalError("Una capacitacion cancelada no puede completarse directamente.")
+    _apply_capacitacion_data(user, item, data, current_id=item.id)
+    return item
+
+
+def set_capacitacion_estado(user, item, estado):
+    ensure_permission(user, PERM_GESTIONAR)
+    _validate_capacitacion_record(user, item)
+    estado = _clean(estado, upper=True)
+    if estado not in ESTADOS_CAPACITACION_PERSONAL:
+        raise PersonalError("Estado de capacitacion invalido.")
+    if item.estado == "CANCELADA" and estado == "COMPLETADA":
+        raise PersonalError("Una capacitacion cancelada no puede completarse directamente.")
+    item.estado = estado
+    return item
+
+
+def capacitaciones_query(user, filters=None):
+    filters = filters or {}
+    query = PersonalCapacitacion.query.filter_by(empresa_id=user.empresa_id)
+    if filters.get("q"):
+        like = f"%{filters['q']}%"
+        query = query.filter(
+            or_(
+                PersonalCapacitacion.codigo.ilike(like),
+                PersonalCapacitacion.nombre.ilike(like),
+                PersonalCapacitacion.proveedor.ilike(like),
+            )
+        )
+    if filters.get("estado"):
+        query = query.filter(PersonalCapacitacion.estado == filters["estado"])
+    if filters.get("tipo"):
+        query = query.filter(PersonalCapacitacion.tipo == filters["tipo"])
+    return query.order_by(PersonalCapacitacion.fecha_inicio.desc(), PersonalCapacitacion.id.desc())
+
+
+def add_capacitacion_participante(user, capacitacion, personal_id, data=None):
+    ensure_permission(user, PERM_GESTIONAR)
+    data = data or {}
+    _validate_capacitacion_record(user, capacitacion)
+    personal = _validate_personal_record(user, personal_id)
+    if personal.estado != "ACTIVO":
+        raise PersonalError("No se puede agregar personal inactivo a una capacitacion nueva.")
+    existing = PersonalCapacitacionParticipante.query.filter_by(
+        empresa_id=user.empresa_id,
+        capacitacion_id=capacitacion.id,
+        personal_id=personal.id,
+    ).first()
+    if existing:
+        raise PersonalError("La persona ya esta registrada en esta capacitacion.")
+    estado = _clean(data.get("estado_participacion"), upper=True) or "INSCRITO"
+    if estado not in ESTADOS_PARTICIPACION_CAPACITACION:
+        raise PersonalError("Estado de participacion invalido.")
+    participante = PersonalCapacitacionParticipante(
+        empresa_id=user.empresa_id,
+        capacitacion_id=capacitacion.id,
+        personal_id=personal.id,
+        estado_participacion=estado,
+        fecha_registro=_date_from_form(data.get("fecha_registro")) or date.today(),
+        observaciones=_clean(data.get("observaciones")),
+        activo=True,
+    )
+    db.session.add(participante)
+    return participante
+
+
+def update_capacitacion_participante(user, participante, data):
+    ensure_permission(user, PERM_GESTIONAR)
+    _validate_participante_record(user, participante)
+    estado = _clean(data.get("estado_participacion"), upper=True) or participante.estado_participacion
+    if estado not in ESTADOS_PARTICIPACION_CAPACITACION:
+        raise PersonalError("Estado de participacion invalido.")
+    participante.estado_participacion = estado
+    participante.fecha_registro = _date_from_form(data.get("fecha_registro")) or participante.fecha_registro
+    participante.observaciones = _clean(data.get("observaciones"))
+    participante.activo = _bool_from_form(data.get("activo", "1"))
+    return participante
+
+
+def set_capacitacion_participante_active(user, participante, active):
+    ensure_permission(user, PERM_GESTIONAR)
+    _validate_participante_record(user, participante)
+    participante.activo = bool(active)
+    if not active and participante.estado_participacion not in {"COMPLETO", "NO_ASISTIO"}:
+        participante.estado_participacion = "RETIRADO"
+    return participante
+
+
+def add_capacitacion_evidencia(user, capacitacion, file_storage, data=None):
+    ensure_permission(user, PERM_GESTIONAR)
+    data = data or {}
+    _validate_capacitacion_record(user, capacitacion)
+    participante = None
+    participante_id = data.get("participante_id")
+    if participante_id:
+        participante = get_capacitacion_participante(user, participante_id)
+        _validate_participante_record(user, participante)
+        if participante.capacitacion_id != capacitacion.id:
+            raise PersonalError("El participante no pertenece a esta capacitacion.")
+    tipo_evidencia = _clean(data.get("tipo_evidencia"), upper=True) or "OTRO"
+    if tipo_evidencia not in TIPOS_EVIDENCIA_CAPACITACION:
+        raise PersonalError("Tipo de evidencia de capacitacion invalido.")
+    if not file_storage or not file_storage.filename:
+        raise PersonalError("Selecciona un archivo de evidencia.")
+    try:
+        stored = store_personal_training_evidence_file(
+            file_storage,
+            capacitacion=capacitacion,
+            participante=participante,
+        )
+    except DocumentStorageError as exc:
+        raise PersonalError(str(exc)) from exc
+    evidencia = PersonalCapacitacionEvidencia(
+        empresa_id=user.empresa_id,
+        capacitacion_id=capacitacion.id,
+        participante_id=participante.id if participante else None,
+        archivo_nombre_original=stored.original_name,
+        archivo_nombre_guardado=stored.stored_name,
+        archivo_storage_path=stored.storage_path,
+        archivo_mime=stored.mime_type,
+        archivo_size=stored.size,
+        archivo_sha256=stored.sha256,
+        tipo_evidencia=tipo_evidencia,
+        cargado_por_id=user.id,
+        observaciones=_clean(data.get("observaciones")),
+        activo=True,
+    )
+    db.session.add(evidencia)
+    return evidencia
+
+
+def set_capacitacion_evidencia_active(user, evidencia, active):
+    ensure_permission(user, PERM_GESTIONAR)
+    if not evidencia or evidencia.empresa_id != user.empresa_id:
+        raise PersonalError("La evidencia no pertenece a esta empresa.")
+    if evidencia.capacitacion.empresa_id != user.empresa_id:
+        raise PersonalError("La evidencia no pertenece a esta empresa.")
+    if evidencia.participante:
+        _validate_participante_record(user, evidencia.participante)
+        if evidencia.participante.capacitacion_id != evidencia.capacitacion_id:
+            raise PersonalError("La evidencia no corresponde a esta capacitacion.")
+    evidencia.activo = bool(active)
+    return evidencia
