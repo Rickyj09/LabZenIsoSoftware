@@ -1,0 +1,153 @@
+{% extends "base_admin.html" %}
+
+{% set fd = form_data if form_data else {} %}
+{% set editing = evaluacion is not none %}
+
+{% block title %}{{ 'Editar evaluacion de competencia' if editing else 'Nueva evaluacion de competencia' }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3 class="mb-0">{{ 'Editar evaluacion de competencia' if editing else 'Nueva evaluacion de competencia' }}</h3>
+        <a class="btn btn-outline-secondary" href="{{ url_for('personal.detalle', item_id=item.id) }}">Volver</a>
+    </div>
+
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">Codigo</label>
+                <input class="form-control" name="codigo" value="{{ fd.get('codigo', evaluacion.codigo if evaluacion else '') or '' }}">
+            </div>
+            <div class="col-md-5">
+                <label class="form-label">Personal evaluado</label>
+                <select class="form-select" name="personal_id" required>
+                    {% set selected_personal = fd.get('personal_id', evaluacion.personal_id if evaluacion else item.id)|string %}
+                    {% for person in personal_disponible %}
+                    <option value="{{ person.id }}" {% if selected_personal == person.id|string %}selected{% endif %}>{{ person.codigo }} - {{ person.nombre_completo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Fecha evaluacion</label>
+                <input class="form-control" type="date" name="fecha_evaluacion" required value="{{ fd.get('fecha_evaluacion', evaluacion.fecha_evaluacion if evaluacion else '') or '' }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Actividad evaluada</label>
+                <input class="form-control" name="actividad" required value="{{ fd.get('actividad', evaluacion.actividad if evaluacion else '') or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Tipo competencia</label>
+                <select class="form-select" name="tipo_competencia" required>
+                    {% set selected_tipo = fd.get('tipo_competencia', evaluacion.tipo_competencia if evaluacion else 'TECNICA') %}
+                    {% for tipo in tipos_competencia %}
+                    <option value="{{ tipo }}" {% if selected_tipo == tipo %}selected{% endif %}>{{ tipo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Resultado</label>
+                <select class="form-select" name="resultado" required>
+                    {% set selected_resultado = fd.get('resultado', evaluacion.resultado if evaluacion else 'COMPETENTE') %}
+                    {% for resultado in resultados_evaluacion %}
+                    <option value="{{ resultado }}" {% if selected_resultado == resultado %}selected{% endif %}>{{ resultado }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Descripcion actividad</label>
+                <textarea class="form-control" name="descripcion" rows="2">{{ fd.get('descripcion', evaluacion.descripcion if evaluacion else '') or '' }}</textarea>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Metodo de evaluacion</label>
+                <select class="form-select" name="metodo_evaluacion" required>
+                    {% set selected_metodo = fd.get('metodo_evaluacion', evaluacion.metodo_evaluacion if evaluacion else 'OBSERVACION_DIRECTA') %}
+                    {% for metodo in metodos_evaluacion %}
+                    <option value="{{ metodo }}" {% if selected_metodo == metodo %}selected{% endif %}>{{ metodo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Evaluador interno</label>
+                <select class="form-select" name="evaluador_personal_id">
+                    {% set selected_evaluador = fd.get('evaluador_personal_id', evaluacion.evaluador_personal_id if evaluacion else '')|string %}
+                    <option value="">Evaluador externo</option>
+                    {% for person in personal_disponible %}
+                    <option value="{{ person.id }}" {% if selected_evaluador == person.id|string %}selected{% endif %}>{{ person.codigo }} - {{ person.nombre_completo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Evaluador usuario</label>
+                <select class="form-select" name="evaluador_usuario_id">
+                    {% set selected_usuario = fd.get('evaluador_usuario_id', evaluacion.evaluador_usuario_id if evaluacion else '')|string %}
+                    <option value="">Sin usuario asociado</option>
+                    {% for usuario in usuarios %}
+                    <option value="{{ usuario.id }}" {% if selected_usuario == usuario.id|string %}selected{% endif %}>{{ usuario.nombre }} {{ usuario.apellido }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Evaluador externo</label>
+                <input class="form-control" name="evaluador_externo_nombre" value="{{ fd.get('evaluador_externo_nombre', evaluacion.evaluador_externo_nombre if evaluacion else '') or '' }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Entidad externa</label>
+                <input class="form-control" name="evaluador_externo_entidad" value="{{ fd.get('evaluador_externo_entidad', evaluacion.evaluador_externo_entidad if evaluacion else '') or '' }}">
+            </div>
+            <div class="col-12">
+                <label class="form-label">Criterio de evaluacion</label>
+                <textarea class="form-control" name="criterio_evaluacion" rows="2" required>{{ fd.get('criterio_evaluacion', evaluacion.criterio_evaluacion if evaluacion else '') or '' }}</textarea>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Criterios verificados</label>
+                <textarea class="form-control" name="criterios" rows="3">{{ fd.get('criterios', evaluacion.criterios if evaluacion else '') or '' }}</textarea>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Descripcion metodo</label>
+                <textarea class="form-control" name="descripcion_metodo" rows="2">{{ fd.get('descripcion_metodo', evaluacion.descripcion_metodo if evaluacion else '') or '' }}</textarea>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Capacitacion asociada</label>
+                <select class="form-select" name="capacitacion_id">
+                    {% set selected_capacitacion = fd.get('capacitacion_id', evaluacion.capacitacion_id if evaluacion else '')|string %}
+                    <option value="">Sin capacitacion asociada</option>
+                    {% for capacitacion in capacitaciones %}
+                    <option value="{{ capacitacion.id }}" {% if selected_capacitacion == capacitacion.id|string %}selected{% endif %}>{{ capacitacion.codigo or '-' }} - {{ capacitacion.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Participacion asociada</label>
+                <select class="form-select" name="capacitacion_participante_id">
+                    {% set selected_participante = fd.get('capacitacion_participante_id', evaluacion.capacitacion_participante_id if evaluacion else '')|string %}
+                    <option value="">Sin participacion asociada</option>
+                    {% for participante in participaciones %}
+                    <option value="{{ participante.id }}" {% if selected_participante == participante.id|string %}selected{% endif %}>{{ participante.personal.nombre_completo }} - {{ participante.capacitacion.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Conclusion</label>
+                <textarea class="form-control" name="conclusion" rows="2">{{ fd.get('conclusion', evaluacion.conclusion if evaluacion else '') or '' }}</textarea>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Observaciones</label>
+                <textarea class="form-control" name="observaciones" rows="3">{{ fd.get('observaciones', evaluacion.observaciones if evaluacion else '') or '' }}</textarea>
+            </div>
+            {% if editing %}
+            <div class="col-md-3">
+                <div class="form-check mt-4">
+                    <input class="form-check-input" type="checkbox" name="activo" value="1" id="activo" {% if fd.get('activo', '1' if evaluacion.activo else '') %}checked{% endif %}>
+                    <label class="form-check-label" for="activo">Activo</label>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        <div class="mt-3 d-flex gap-2">
+            <button class="btn btn-primary" type="submit">Guardar</button>
+            <a class="btn btn-outline-secondary" href="{{ url_for('personal.detalle', item_id=item.id) }}">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

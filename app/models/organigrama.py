@@ -9,6 +9,35 @@ MODALIDADES_CAPACITACION_PERSONAL = ("PRESENCIAL", "VIRTUAL", "HIBRIDA")
 ESTADOS_CAPACITACION_PERSONAL = ("PLANIFICADA", "EN_CURSO", "COMPLETADA", "CANCELADA")
 ESTADOS_PARTICIPACION_CAPACITACION = ("INSCRITO", "ASISTIO", "COMPLETO", "NO_ASISTIO", "RETIRADO")
 TIPOS_EVIDENCIA_CAPACITACION = ("CERTIFICADO", "LISTA_ASISTENCIA", "DIPLOMA", "CONSTANCIA", "MATERIAL", "OTRO")
+TIPOS_COMPETENCIA_PERSONAL = ("TECNICA", "EQUIPO", "METODO", "MUESTREO", "RESULTADOS", "SISTEMA_GESTION", "OTRA")
+METODOS_EVALUACION_COMPETENCIA = (
+    "OBSERVACION_DIRECTA",
+    "DEMOSTRACION_PRACTICA",
+    "EXAMEN_TEORICO",
+    "EXAMEN_PRACTICO",
+    "REVISION_DE_RESULTADOS",
+    "MUESTRA_DESCONOCIDA",
+    "COMPARACION_INTERLABORATORIO",
+    "SUPERVISION",
+    "OTRO",
+)
+RESULTADOS_EVALUACION_COMPETENCIA = (
+    "COMPETENTE",
+    "COMPETENTE_CON_OBSERVACIONES",
+    "REQUIERE_ENTRENAMIENTO",
+    "NO_COMPETENTE",
+)
+TIPOS_EVIDENCIA_EVALUACION_COMPETENCIA = (
+    "CHECKLIST",
+    "FORMATO_EVALUACION",
+    "FOTOGRAFIA",
+    "ACTA",
+    "INFORME",
+    "RESULTADO_PRACTICO",
+    "PDF_FIRMADO",
+    "HOJA_CALCULO",
+    "OTRO",
+)
 
 
 class Cargo(TenantMixin, BaseModel):
@@ -108,6 +137,20 @@ class Personal(TenantMixin, BaseModel):
         lazy=True,
         order_by="PersonalCapacitacionParticipante.created_at.desc(), PersonalCapacitacionParticipante.id.desc()",
         cascade="all, delete-orphan",
+    )
+    evaluaciones_competencia = db.relationship(
+        "PersonalEvaluacionCompetencia",
+        foreign_keys="PersonalEvaluacionCompetencia.personal_id",
+        back_populates="personal",
+        lazy=True,
+        order_by="PersonalEvaluacionCompetencia.fecha_evaluacion.desc(), PersonalEvaluacionCompetencia.id.desc()",
+        cascade="all, delete-orphan",
+    )
+    evaluaciones_competencia_realizadas = db.relationship(
+        "PersonalEvaluacionCompetencia",
+        foreign_keys="PersonalEvaluacionCompetencia.evaluador_personal_id",
+        back_populates="evaluador_personal",
+        lazy=True,
     )
 
     @property
@@ -336,4 +379,110 @@ class PersonalCapacitacionEvidencia(TenantMixin, BaseModel):
     empresa = db.relationship("Empresa")
     capacitacion = db.relationship("PersonalCapacitacion", back_populates="evidencias")
     participante = db.relationship("PersonalCapacitacionParticipante", back_populates="evidencias")
+    cargado_por = db.relationship("Usuario", foreign_keys=[cargado_por_id])
+
+
+class PersonalEvaluacionCompetencia(TenantMixin, BaseModel):
+    __tablename__ = "personal_evaluaciones_competencia"
+    __table_args__ = (
+        db.UniqueConstraint("empresa_id", "codigo", name="uq_personal_eval_comp_empresa_codigo"),
+        db.CheckConstraint(
+            "tipo_competencia IN ('TECNICA', 'EQUIPO', 'METODO', 'MUESTREO', 'RESULTADOS', 'SISTEMA_GESTION', 'OTRA')",
+            name="ck_personal_eval_comp_tipo_valido",
+        ),
+        db.CheckConstraint(
+            "metodo_evaluacion IN ('OBSERVACION_DIRECTA', 'DEMOSTRACION_PRACTICA', 'EXAMEN_TEORICO', 'EXAMEN_PRACTICO', 'REVISION_DE_RESULTADOS', 'MUESTRA_DESCONOCIDA', 'COMPARACION_INTERLABORATORIO', 'SUPERVISION', 'OTRO')",
+            name="ck_personal_eval_comp_metodo_valido",
+        ),
+        db.CheckConstraint(
+            "resultado IN ('COMPETENTE', 'COMPETENTE_CON_OBSERVACIONES', 'REQUIERE_ENTRENAMIENTO', 'NO_COMPETENTE')",
+            name="ck_personal_eval_comp_resultado_valido",
+        ),
+        db.CheckConstraint(
+            "evaluador_personal_id IS NOT NULL OR evaluador_externo_nombre IS NOT NULL",
+            name="ck_personal_eval_comp_evaluador_requerido",
+        ),
+        db.Index("ix_personal_eval_comp_empresa_personal", "empresa_id", "personal_id"),
+        db.Index("ix_personal_eval_comp_empresa_evaluador", "empresa_id", "evaluador_personal_id"),
+        db.Index("ix_personal_eval_comp_empresa_resultado", "empresa_id", "resultado"),
+        db.Index("ix_personal_eval_comp_empresa_tipo", "empresa_id", "tipo_competencia"),
+        db.Index("ix_personal_eval_comp_empresa_fecha", "empresa_id", "fecha_evaluacion"),
+        db.Index("ix_personal_eval_comp_empresa_activo", "empresa_id", "activo"),
+    )
+
+    personal_id = db.Column(db.BigInteger, db.ForeignKey("personal.id"), nullable=False)
+    evaluador_personal_id = db.Column(db.BigInteger, db.ForeignKey("personal.id"))
+    evaluador_usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    capacitacion_id = db.Column(db.BigInteger, db.ForeignKey("personal_capacitaciones.id"))
+    capacitacion_participante_id = db.Column(db.BigInteger, db.ForeignKey("personal_capacitacion_participantes.id"))
+    codigo = db.Column(db.String(50))
+    actividad = db.Column(db.String(180), nullable=False)
+    descripcion = db.Column(db.Text)
+    tipo_competencia = db.Column(db.String(30), nullable=False, default="TECNICA")
+    metodo_evaluacion = db.Column(db.String(40), nullable=False)
+    criterio_evaluacion = db.Column(db.Text, nullable=False)
+    criterios = db.Column(db.Text)
+    descripcion_metodo = db.Column(db.Text)
+    fecha_evaluacion = db.Column(db.Date, nullable=False)
+    resultado = db.Column(db.String(40), nullable=False)
+    conclusion = db.Column(db.Text)
+    observaciones = db.Column(db.Text)
+    evaluador_externo_nombre = db.Column(db.String(180))
+    evaluador_externo_entidad = db.Column(db.String(180))
+    activo = db.Column(db.Boolean, default=True, nullable=False)
+
+    empresa = db.relationship("Empresa")
+    personal = db.relationship("Personal", foreign_keys=[personal_id], back_populates="evaluaciones_competencia")
+    evaluador_personal = db.relationship(
+        "Personal",
+        foreign_keys=[evaluador_personal_id],
+        back_populates="evaluaciones_competencia_realizadas",
+    )
+    evaluador_usuario = db.relationship("Usuario", foreign_keys=[evaluador_usuario_id])
+    capacitacion = db.relationship("PersonalCapacitacion")
+    capacitacion_participante = db.relationship("PersonalCapacitacionParticipante")
+    evidencias = db.relationship(
+        "PersonalEvaluacionCompetenciaEvidencia",
+        back_populates="evaluacion",
+        lazy=True,
+        order_by="PersonalEvaluacionCompetenciaEvidencia.created_at.desc(), PersonalEvaluacionCompetenciaEvidencia.id.desc()",
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def evaluador_nombre(self):
+        if self.evaluador_personal:
+            return self.evaluador_personal.nombre_completo
+        if self.evaluador_externo_nombre:
+            return self.evaluador_externo_nombre
+        if self.evaluador_usuario:
+            return f"{self.evaluador_usuario.nombre} {self.evaluador_usuario.apellido}".strip()
+        return "-"
+
+
+class PersonalEvaluacionCompetenciaEvidencia(TenantMixin, BaseModel):
+    __tablename__ = "personal_evaluacion_competencia_evidencias"
+    __table_args__ = (
+        db.CheckConstraint(
+            "tipo_evidencia IN ('CHECKLIST', 'FORMATO_EVALUACION', 'FOTOGRAFIA', 'ACTA', 'INFORME', 'RESULTADO_PRACTICO', 'PDF_FIRMADO', 'HOJA_CALCULO', 'OTRO')",
+            name="ck_personal_eval_comp_evidencias_tipo_valido",
+        ),
+        db.Index("ix_personal_eval_comp_evid_empresa_eval", "empresa_id", "evaluacion_id"),
+        db.Index("ix_personal_eval_comp_evid_empresa_activo", "empresa_id", "activo"),
+    )
+
+    evaluacion_id = db.Column(db.BigInteger, db.ForeignKey("personal_evaluaciones_competencia.id"), nullable=False)
+    tipo_evidencia = db.Column(db.String(30), nullable=False)
+    archivo_nombre_original = db.Column(db.String(255), nullable=False)
+    archivo_nombre_guardado = db.Column(db.String(255), nullable=False)
+    archivo_storage_path = db.Column(db.String(500), nullable=False)
+    archivo_mime = db.Column(db.String(150), nullable=False)
+    archivo_size = db.Column(db.BigInteger, nullable=False)
+    archivo_sha256 = db.Column(db.String(64), nullable=False)
+    cargado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    activo = db.Column(db.Boolean, default=True, nullable=False)
+    observaciones = db.Column(db.Text)
+
+    empresa = db.relationship("Empresa")
+    evaluacion = db.relationship("PersonalEvaluacionCompetencia", back_populates="evidencias")
     cargado_por = db.relationship("Usuario", foreign_keys=[cargado_por_id])

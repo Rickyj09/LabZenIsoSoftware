@@ -1,0 +1,86 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Evaluaciones de competencia{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h3 class="mb-1">Evaluaciones de competencia</h3>
+            <p class="text-muted mb-0">Historial de competencia demostrada por el personal.</p>
+        </div>
+    </div>
+
+    <form class="row g-2 mb-3" method="get">
+        <div class="col-md-3">
+            <input class="form-control" type="search" name="q" value="{{ filters.q }}" placeholder="Buscar persona o actividad">
+        </div>
+        <div class="col-md-3">
+            <select class="form-select" name="persona_id">
+                <option value="">Todas las personas</option>
+                {% for person in personal_disponible %}
+                <option value="{{ person.id }}" {% if filters.persona_id == person.id|string %}selected{% endif %}>{{ person.codigo }} - {{ person.nombre_completo }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <select class="form-select" name="tipo">
+                <option value="">Todos los tipos</option>
+                {% for tipo in tipos_competencia %}
+                <option value="{{ tipo }}" {% if filters.tipo == tipo %}selected{% endif %}>{{ tipo }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <select class="form-select" name="resultado">
+                <option value="">Todos los resultados</option>
+                {% for resultado in resultados_evaluacion %}
+                <option value="{{ resultado }}" {% if filters.resultado == resultado %}selected{% endif %}>{{ resultado }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-1">
+            <input class="form-control" type="date" name="desde" value="{{ filters.desde }}">
+        </div>
+        <div class="col-md-1 d-grid">
+            <button class="btn btn-outline-secondary" type="submit">Filtrar</button>
+        </div>
+    </form>
+
+    <div class="table-responsive">
+        <table class="table table-bordered table-striped align-middle">
+            <thead>
+                <tr>
+                    <th>Persona</th>
+                    <th>Actividad</th>
+                    <th>Tipo</th>
+                    <th>Fecha</th>
+                    <th>Evaluador</th>
+                    <th>Resultado</th>
+                    <th class="text-end">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr class="{% if not item.activo %}table-secondary{% endif %}">
+                    <td><a href="{{ url_for('personal.detalle', item_id=item.personal_id) }}">{{ item.personal.nombre_completo }}</a></td>
+                    <td>{{ item.actividad }}</td>
+                    <td>{{ item.tipo_competencia }}</td>
+                    <td>{{ item.fecha_evaluacion }}</td>
+                    <td>{{ item.evaluador_nombre }}</td>
+                    <td><span class="badge text-bg-secondary">{{ item.resultado }}</span></td>
+                    <td class="text-end">
+                        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('personal.detalle_evaluacion_competencia', evaluacion_id=item.id) }}">Ver</a>
+                        {% if can('personal.gestionar') %}
+                        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('personal.editar_evaluacion_competencia', evaluacion_id=item.id) }}">Editar</a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="7" class="text-center">No hay evaluaciones registradas.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

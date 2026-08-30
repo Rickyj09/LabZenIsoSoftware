@@ -1,0 +1,122 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Detalle de evaluacion de competencia{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h3 class="mb-1">{{ evaluacion.actividad }}</h3>
+            <span class="badge text-bg-secondary">{{ evaluacion.resultado }}</span>
+            {% if not evaluacion.activo %}
+            <span class="badge text-bg-warning">INACTIVA</span>
+            {% endif %}
+        </div>
+        <div class="d-flex gap-2">
+            <a class="btn btn-outline-secondary" href="{{ url_for('personal.detalle', item_id=evaluacion.personal_id) }}">Volver</a>
+            {% if can('personal.gestionar') %}
+            <a class="btn btn-primary" href="{{ url_for('personal.editar_evaluacion_competencia', evaluacion_id=evaluacion.id) }}">Editar</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <h5>Datos generales</h5>
+    <div class="table-responsive">
+        <table class="table table-bordered">
+            <tr><th>Codigo</th><td>{{ evaluacion.codigo or '-' }}</td><th>Fecha</th><td>{{ evaluacion.fecha_evaluacion }}</td></tr>
+            <tr><th>Persona</th><td><a href="{{ url_for('personal.detalle', item_id=evaluacion.personal_id) }}">{{ evaluacion.personal.nombre_completo }}</a></td><th>Cargo</th><td>{{ evaluacion.personal.cargo.nombre if evaluacion.personal.cargo else '-' }}</td></tr>
+            <tr><th>Actividad</th><td>{{ evaluacion.actividad }}</td><th>Tipo</th><td>{{ evaluacion.tipo_competencia }}</td></tr>
+            <tr><th>Evaluador</th><td>{{ evaluacion.evaluador_nombre }}</td><th>Entidad</th><td>{{ evaluacion.evaluador_externo_entidad or '-' }}</td></tr>
+            <tr><th>Descripcion</th><td colspan="3">{{ evaluacion.descripcion or '-' }}</td></tr>
+        </table>
+    </div>
+
+    <h5 class="mt-4">Metodo</h5>
+    <div class="table-responsive">
+        <table class="table table-bordered">
+            <tr><th>Metodo de evaluacion</th><td>{{ evaluacion.metodo_evaluacion }}</td></tr>
+            <tr><th>Criterio</th><td>{{ evaluacion.criterio_evaluacion }}</td></tr>
+            <tr><th>Criterios verificados</th><td>{{ evaluacion.criterios or '-' }}</td></tr>
+            <tr><th>Descripcion metodo</th><td>{{ evaluacion.descripcion_metodo or '-' }}</td></tr>
+        </table>
+    </div>
+
+    <h5 class="mt-4">Resultado</h5>
+    <div class="table-responsive">
+        <table class="table table-bordered">
+            <tr><th>Resultado</th><td>{{ evaluacion.resultado }}</td></tr>
+            <tr><th>Conclusion</th><td>{{ evaluacion.conclusion or '-' }}</td></tr>
+            <tr><th>Observaciones</th><td>{{ evaluacion.observaciones or '-' }}</td></tr>
+        </table>
+    </div>
+
+    <h5 class="mt-4">Relaciones</h5>
+    <div class="table-responsive">
+        <table class="table table-bordered">
+            <tr><th>Capacitacion asociada</th><td>{{ evaluacion.capacitacion.nombre if evaluacion.capacitacion else '-' }}</td></tr>
+            <tr><th>Participacion asociada</th><td>{{ evaluacion.capacitacion_participante.estado_participacion if evaluacion.capacitacion_participante else '-' }}</td></tr>
+        </table>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mt-4 mb-2">
+        <h5 class="mb-0">Evidencias</h5>
+    </div>
+    {% if can('personal.gestionar') %}
+    <form class="row g-2 align-items-end mb-3" method="post" enctype="multipart/form-data" action="{{ url_for('personal.agregar_evidencia_evaluacion_competencia', evaluacion_id=evaluacion.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="col-md-3">
+            <label class="form-label">Tipo</label>
+            <select class="form-select" name="tipo_evidencia">
+                {% for tipo in tipos_evidencia_evaluacion %}
+                <option value="{{ tipo }}">{{ tipo }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-5">
+            <label class="form-label">Archivo</label>
+            <input class="form-control" type="file" name="evidencia" required>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Observaciones</label>
+            <input class="form-control" name="observaciones">
+        </div>
+        <div class="col-md-1 d-grid">
+            <button class="btn btn-outline-primary" type="submit">Cargar</button>
+        </div>
+    </form>
+    {% endif %}
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm align-middle">
+            <thead>
+                <tr>
+                    <th>Tipo</th>
+                    <th>Archivo</th>
+                    <th>Fecha</th>
+                    <th>Observaciones</th>
+                    <th class="text-end">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for evidencia in evaluacion.evidencias %}
+                <tr class="{% if not evidencia.activo %}table-secondary{% endif %}">
+                    <td>{{ evidencia.tipo_evidencia }}</td>
+                    <td><a href="{{ url_for('personal.descargar_evidencia_evaluacion_competencia', evidencia_id=evidencia.id) }}">{{ evidencia.archivo_nombre_original }}</a></td>
+                    <td>{{ evidencia.created_at.date() if evidencia.created_at else '-' }}</td>
+                    <td>{{ evidencia.observaciones or '-' }}</td>
+                    <td class="text-end">
+                        {% if can('personal.gestionar') %}
+                        <form class="d-inline" method="post" action="{{ url_for('personal.cambiar_estado_evidencia_evaluacion_competencia', evidencia_id=evidencia.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button class="btn btn-sm btn-outline-warning" type="submit">{{ 'Desactivar' if evidencia.activo else 'Activar' }}</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center">No hay evidencias registradas.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

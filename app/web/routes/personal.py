@@ -10,11 +10,17 @@ from app.models.organigrama import (
     ESTADOS_CAPACITACION_PERSONAL,
     ESTADOS_PARTICIPACION_CAPACITACION,
     ESTADOS_PERSONAL,
+    METODOS_EVALUACION_COMPETENCIA,
     MODALIDADES_CAPACITACION_PERSONAL,
     Personal,
+    PersonalCapacitacion,
+    PersonalCapacitacionParticipante,
+    RESULTADOS_EVALUACION_COMPETENCIA,
     TIPOS_CALIFICACION_PERSONAL,
     TIPOS_CAPACITACION_PERSONAL,
+    TIPOS_COMPETENCIA_PERSONAL,
     TIPOS_EVIDENCIA_CAPACITACION,
+    TIPOS_EVIDENCIA_EVALUACION_COMPETENCIA,
 )
 from app.security.permissions import require_permission
 from app.services import personal_service
@@ -52,6 +58,10 @@ def _personal_context(**extra):
         "estados_capacitacion": ESTADOS_CAPACITACION_PERSONAL,
         "estados_participacion": ESTADOS_PARTICIPACION_CAPACITACION,
         "tipos_evidencia_capacitacion": TIPOS_EVIDENCIA_CAPACITACION,
+        "tipos_competencia": TIPOS_COMPETENCIA_PERSONAL,
+        "metodos_evaluacion": METODOS_EVALUACION_COMPETENCIA,
+        "resultados_evaluacion": RESULTADOS_EVALUACION_COMPETENCIA,
+        "tipos_evidencia_evaluacion": TIPOS_EVIDENCIA_EVALUACION_COMPETENCIA,
         "cargos": Cargo.query.filter_by(empresa_id=current_user.empresa_id).order_by(Cargo.codigo.asc()).all(),
         "usuarios": personal_service.company_users(current_user),
         "estado_badge_class": _estado_badge_class,
@@ -159,6 +169,37 @@ def _redirect_personal_detail(personal_id):
 
 def _redirect_capacitacion_detail(capacitacion_id):
     return redirect(url_for("personal.detalle_capacitacion", capacitacion_id=capacitacion_id))
+
+
+def _redirect_evaluacion_detail(evaluacion_id):
+    return redirect(url_for("personal.detalle_evaluacion_competencia", evaluacion_id=evaluacion_id))
+
+
+def _personal_activo():
+    return (
+        Personal.query
+        .filter_by(empresa_id=current_user.empresa_id, estado="ACTIVO")
+        .order_by(Personal.apellidos.asc(), Personal.nombres.asc())
+        .all()
+    )
+
+
+def _capacitaciones_empresa():
+    return (
+        PersonalCapacitacion.query
+        .filter_by(empresa_id=current_user.empresa_id)
+        .order_by(PersonalCapacitacion.fecha_inicio.desc(), PersonalCapacitacion.nombre.asc())
+        .all()
+    )
+
+
+def _participaciones_empresa():
+    return (
+        PersonalCapacitacionParticipante.query
+        .filter_by(empresa_id=current_user.empresa_id, activo=True)
+        .order_by(PersonalCapacitacionParticipante.fecha_registro.desc())
+        .all()
+    )
 
 
 @bp.route("/capacitaciones")
@@ -354,6 +395,185 @@ def cambiar_estado_evidencia_capacitacion(evidencia_id):
     db.session.commit()
     flash("Estado de la evidencia actualizado correctamente.", "success")
     return _redirect_capacitacion_detail(evidencia.capacitacion_id)
+
+
+@bp.route("/evaluaciones")
+@login_required
+@require_permission(personal_service.PERM_VER)
+def evaluaciones_competencia():
+    filters = {key: request.args.get(key, "").strip() for key in ("q", "persona_id", "resultado", "tipo", "desde", "hasta")}
+    items = personal_service.evaluaciones_competencia_query(current_user, filters).all()
+    return render_template(
+        "personal/evaluaciones_index.html",
+        **_personal_context(items=items, filters=filters, personal_disponible=_personal_activo()),
+    )
+
+
+@bp.route("/<int:item_id>/evaluaciones/nueva", methods=["GET", "POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def nueva_evaluacion_competencia(item_id):
+    item = personal_service.get_personal(current_user, item_id)
+    if not item:
+        abort(404)
+    if request.method == "POST":
+        _validate_csrf()
+        try:
+            evaluacion = personal_service.create_evaluacion_competencia(current_user, item.id, request.form)
+            db.session.commit()
+            flash("Evaluacion de competencia registrada correctamente.", "success")
+            return _redirect_evaluacion_detail(evaluacion.id)
+        except PersonalError as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template(
+                "personal/evaluacion_form.html",
+                **_personal_context(
+                    item=item,
+                    evaluacion=None,
+                    form_data=request.form,
+                    personal_disponible=_personal_activo(),
+                    capacitaciones=_capacitaciones_empresa(),
+                    participaciones=_participaciones_empresa(),
+                ),
+            )
+    return render_template(
+        "personal/evaluacion_form.html",
+        **_personal_context(
+            item=item,
+            evaluacion=None,
+            form_data={},
+            personal_disponible=_personal_activo(),
+            capacitaciones=_capacitaciones_empresa(),
+            participaciones=_participaciones_empresa(),
+        ),
+    )
+
+
+@bp.route("/evaluaciones/<int:evaluacion_id>")
+@login_required
+@require_permission(personal_service.PERM_VER)
+def detalle_evaluacion_competencia(evaluacion_id):
+    evaluacion = personal_service.get_evaluacion_competencia(current_user, evaluacion_id)
+    if not evaluacion:
+        abort(404)
+    return render_template("personal/evaluacion_detalle.html", **_personal_context(evaluacion=evaluacion))
+
+
+@bp.route("/evaluaciones/<int:evaluacion_id>/editar", methods=["GET", "POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def editar_evaluacion_competencia(evaluacion_id):
+    evaluacion = personal_service.get_evaluacion_competencia(current_user, evaluacion_id)
+    if not evaluacion:
+        abort(404)
+    item = evaluacion.personal
+    if request.method == "POST":
+        _validate_csrf()
+        try:
+            personal_service.update_evaluacion_competencia(current_user, evaluacion, request.form)
+            db.session.commit()
+            flash("Evaluacion de competencia actualizada correctamente.", "success")
+            return _redirect_evaluacion_detail(evaluacion.id)
+        except PersonalError as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template(
+                "personal/evaluacion_form.html",
+                **_personal_context(
+                    item=item,
+                    evaluacion=evaluacion,
+                    form_data=request.form,
+                    personal_disponible=_personal_activo(),
+                    capacitaciones=_capacitaciones_empresa(),
+                    participaciones=_participaciones_empresa(),
+                ),
+            )
+    return render_template(
+        "personal/evaluacion_form.html",
+        **_personal_context(
+            item=item,
+            evaluacion=evaluacion,
+            form_data={},
+            personal_disponible=_personal_activo(),
+            capacitaciones=_capacitaciones_empresa(),
+            participaciones=_participaciones_empresa(),
+        ),
+    )
+
+
+@bp.route("/evaluaciones/<int:evaluacion_id>/estado", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def cambiar_estado_evaluacion_competencia(evaluacion_id):
+    _validate_csrf()
+    evaluacion = personal_service.get_evaluacion_competencia(current_user, evaluacion_id)
+    if not evaluacion:
+        abort(404)
+    personal_service.set_evaluacion_competencia_active(current_user, evaluacion, not evaluacion.activo)
+    db.session.commit()
+    flash("Estado de la evaluacion actualizado correctamente.", "success")
+    return _redirect_evaluacion_detail(evaluacion.id)
+
+
+@bp.route("/evaluaciones/<int:evaluacion_id>/evidencias", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def agregar_evidencia_evaluacion_competencia(evaluacion_id):
+    _validate_csrf()
+    evaluacion = personal_service.get_evaluacion_competencia(current_user, evaluacion_id)
+    if not evaluacion:
+        abort(404)
+    try:
+        personal_service.add_evaluacion_competencia_evidencia(
+            current_user,
+            evaluacion,
+            request.files.get("evidencia"),
+            request.form,
+        )
+        db.session.commit()
+        flash("Evidencia de evaluacion cargada correctamente.", "success")
+    except PersonalError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_evaluacion_detail(evaluacion.id)
+
+
+@bp.route("/evaluaciones/evidencias/<int:evidencia_id>/descargar")
+@login_required
+@require_permission(personal_service.PERM_VER)
+def descargar_evidencia_evaluacion_competencia(evidencia_id):
+    evidencia = personal_service.get_evaluacion_competencia_evidencia(current_user, evidencia_id)
+    if not evidencia or not evidencia.activo:
+        abort(404)
+    if evidencia.evaluacion.empresa_id != current_user.empresa_id:
+        abort(404)
+    try:
+        path = resolve_document_path(evidencia.archivo_storage_path)
+    except DocumentStorageError:
+        abort(404)
+    if not path.is_file():
+        abort(404)
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name=evidencia.archivo_nombre_original,
+        mimetype=evidencia.archivo_mime,
+    )
+
+
+@bp.route("/evaluaciones/evidencias/<int:evidencia_id>/estado", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def cambiar_estado_evidencia_evaluacion_competencia(evidencia_id):
+    _validate_csrf()
+    evidencia = personal_service.get_evaluacion_competencia_evidencia(current_user, evidencia_id)
+    if not evidencia:
+        abort(404)
+    personal_service.set_evaluacion_competencia_evidencia_active(current_user, evidencia, not evidencia.activo)
+    db.session.commit()
+    flash("Estado de la evidencia actualizado correctamente.", "success")
+    return _redirect_evaluacion_detail(evidencia.evaluacion_id)
 
 
 @bp.route("/<int:item_id>/calificaciones/nueva", methods=["GET", "POST"])

@@ -59,6 +59,16 @@ class StoredPersonalTrainingEvidenceFile:
 
 
 @dataclass(frozen=True)
+class StoredPersonalCompetencyEvidenceFile:
+    original_name: str
+    stored_name: str
+    storage_path: str
+    mime_type: str
+    size: int
+    sha256: str
+
+
+@dataclass(frozen=True)
 class AtomicDocumentReplacement:
     destination_path: Path
     backup_path: Path
@@ -446,6 +456,102 @@ def store_personal_training_evidence_file(
     )
     storage_path = (relative_directory / stored_name).as_posix()
     return StoredPersonalTrainingEvidenceFile(
+        original_name=original_name,
+        stored_name=stored_name,
+        storage_path=storage_path,
+        mime_type=mime_type,
+        size=size,
+        sha256=sha256,
+    )
+
+
+def build_personal_competency_evidence_filename(evaluacion, original_filename, sha256) -> str:
+    safe_original = secure_filename(original_filename or "")
+    if not safe_original or "." not in safe_original:
+        raise DocumentStorageError("El archivo no tiene un nombre o extensión válidos.")
+    extension = safe_original.rsplit(".", 1)[1].lower()
+    hash_short = re.sub(r"[^a-fA-F0-9]", "", str(sha256 or ""))[:8].lower()
+    if len(hash_short) != 8:
+        raise DocumentStorageError("No se pudo generar la huella del archivo de evaluación.")
+    personal = getattr(evaluacion, "personal", None)
+    personal_code = slugify_filename_part(getattr(personal, "codigo", None), max_length=60).upper()
+    personal_code = personal_code or f"PERSONAL_{getattr(evaluacion, 'personal_id', 'SIN_ID')}"
+    activity = slugify_filename_part(getattr(evaluacion, "actividad", None), max_length=80)
+    original_stem = safe_original.rsplit(".", 1)[0]
+    descriptive = activity or slugify_filename_part(original_stem, max_length=80) or "evaluacion"
+    fixed_length = len(f"{personal_code}_{hash_short}.{extension}")
+    available = max(1, MAX_STORED_FILENAME_LENGTH - fixed_length - 1)
+    descriptive = descriptive[:available].rstrip("_") or "evaluacion"
+    return f"{personal_code}_{descriptive}_{hash_short}.{extension}"
+
+
+def store_personal_competency_evidence_file(
+    file_storage,
+    *,
+    evaluacion,
+) -> StoredPersonalCompetencyEvidenceFile | None:
+    if not file_storage or not file_storage.filename:
+        return None
+
+    validate_document_file(file_storage)
+    original_name = normalize_document_filename(file_storage.filename)
+    safe_original_name = secure_filename(original_name)
+    extension = safe_original_name.rsplit(".", 1)[1].lower()
+    profile = get_onlyoffice_profile_by_extension(extension)
+    relative_directory = Path(
+        f"empresa_{int(evaluacion.empresa_id)}",
+        f"personal_{int(evaluacion.personal_id)}",
+        f"evaluacion_competencia_{int(evaluacion.id)}",
+        "evidencias",
+    )
+    destination_directory = (_storage_root() / relative_directory).resolve()
+    destination_directory.mkdir(parents=True, exist_ok=True)
+    if os.path.commonpath([str(_storage_root()), str(destination_directory)]) != str(_storage_root()):
+        raise DocumentStorageError("La ruta de almacenamiento de evidencia de evaluación no es válida.")
+
+    temporary = (destination_directory / f".upload-{uuid4().hex}.tmp").resolve()
+    digest = hashlib.sha256()
+    size = 0
+    max_size = int(current_app.config["DOCUMENT_MAX_FILE_SIZE"])
+
+    try:
+        file_storage.stream.seek(0)
+        with temporary.open("wb") as output:
+            while True:
+                chunk = file_storage.stream.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > max_size:
+                    raise DocumentStorageError(
+                        f"El archivo supera el límite permitido de {max_size // (1024 * 1024)} MB."
+                    )
+                digest.update(chunk)
+                output.write(chunk)
+        if profile and profile.extension == "xlsx":
+            try:
+                validate_ooxml_file_path(temporary, profile)
+            except ValueError as exc:
+                raise DocumentStorageError(str(exc)) from exc
+        sha256 = digest.hexdigest()
+        stored_name = build_personal_competency_evidence_filename(evaluacion, safe_original_name, sha256)
+        destination = (destination_directory / stored_name).resolve()
+        if os.path.commonpath([str(_storage_root()), str(destination)]) != str(_storage_root()):
+            raise DocumentStorageError("La ruta de evidencia de evaluación no es válida.")
+        if destination.exists():
+            raise DocumentStorageError("Ya existe una evidencia de evaluación con el mismo nombre y contenido.")
+        temporary.replace(destination)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+
+    mime_type = profile.mime_type if profile else (
+        file_storage.mimetype
+        or mimetypes.guess_type(safe_original_name)[0]
+        or "application/octet-stream"
+    )
+    storage_path = (relative_directory / stored_name).as_posix()
+    return StoredPersonalCompetencyEvidenceFile(
         original_name=original_name,
         stored_name=stored_name,
         storage_path=storage_path,

@@ -60,6 +60,8 @@ from app.models.organigrama import (
     PersonalCapacitacionParticipante,
     PersonalCalificacion,
     PersonalCalificacionEvidencia,
+    PersonalEvaluacionCompetencia,
+    PersonalEvaluacionCompetenciaEvidencia,
     PersonalExperiencia,
 )
 from app.models.mapa_procesos import Proceso

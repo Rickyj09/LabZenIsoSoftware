@@ -9,6 +9,7 @@ from app.models.organigrama import (
     ESTADOS_CAPACITACION_PERSONAL,
     ESTADOS_PARTICIPACION_CAPACITACION,
     ESTADOS_PERSONAL,
+    METODOS_EVALUACION_COMPETENCIA,
     MODALIDADES_CAPACITACION_PERSONAL,
     PerfilPuesto,
     Personal,
@@ -17,15 +18,21 @@ from app.models.organigrama import (
     PersonalCapacitacionParticipante,
     PersonalCalificacion,
     PersonalCalificacionEvidencia,
+    PersonalEvaluacionCompetencia,
+    PersonalEvaluacionCompetenciaEvidencia,
     PersonalExperiencia,
+    RESULTADOS_EVALUACION_COMPETENCIA,
     TIPOS_CALIFICACION_PERSONAL,
     TIPOS_CAPACITACION_PERSONAL,
+    TIPOS_COMPETENCIA_PERSONAL,
     TIPOS_EVIDENCIA_CAPACITACION,
+    TIPOS_EVIDENCIA_EVALUACION_COMPETENCIA,
 )
 from app.models.seguridad import Usuario
 from app.security.permissions import user_has_permission
 from app.services.storage_service import (
     DocumentStorageError,
+    store_personal_competency_evidence_file,
     store_personal_evidence_file,
     store_personal_training_evidence_file,
 )
@@ -111,6 +118,17 @@ def get_capacitacion_participante(user, participante_id):
 
 def get_capacitacion_evidencia(user, evidencia_id):
     return PersonalCapacitacionEvidencia.query.filter_by(id=evidencia_id, empresa_id=user.empresa_id).first()
+
+
+def get_evaluacion_competencia(user, evaluacion_id):
+    return PersonalEvaluacionCompetencia.query.filter_by(id=evaluacion_id, empresa_id=user.empresa_id).first()
+
+
+def get_evaluacion_competencia_evidencia(user, evidencia_id):
+    return PersonalEvaluacionCompetenciaEvidencia.query.filter_by(
+        id=evidencia_id,
+        empresa_id=user.empresa_id,
+    ).first()
 
 
 def active_cargos(user):
@@ -667,5 +685,196 @@ def set_capacitacion_evidencia_active(user, evidencia, active):
         _validate_participante_record(user, evidencia.participante)
         if evidencia.participante.capacitacion_id != evidencia.capacitacion_id:
             raise PersonalError("La evidencia no corresponde a esta capacitacion.")
+    evidencia.activo = bool(active)
+    return evidencia
+
+
+def _validate_evaluacion_record(user, evaluacion):
+    if not evaluacion or evaluacion.empresa_id != user.empresa_id:
+        raise PersonalError("La evaluacion de competencia no pertenece a esta empresa.")
+    if not evaluacion.personal or evaluacion.personal.empresa_id != user.empresa_id:
+        raise PersonalError("El personal evaluado no pertenece a esta empresa.")
+    if evaluacion.evaluador_personal and evaluacion.evaluador_personal.empresa_id != user.empresa_id:
+        raise PersonalError("El evaluador no pertenece a esta empresa.")
+    return evaluacion
+
+
+def validate_evaluacion_competencia_code(user, codigo, current_id=None):
+    if not codigo:
+        return
+    query = PersonalEvaluacionCompetencia.query.filter_by(empresa_id=user.empresa_id, codigo=codigo)
+    if current_id:
+        query = query.filter(PersonalEvaluacionCompetencia.id != current_id)
+    if query.first():
+        raise PersonalError("Ya existe una evaluacion de competencia con ese codigo en esta empresa.")
+
+
+def _validate_evaluacion_training_relation(user, item, data):
+    item.capacitacion_id = None
+    item.capacitacion_participante_id = None
+    capacitacion_id = data.get("capacitacion_id")
+    participante_id = data.get("capacitacion_participante_id")
+    if capacitacion_id:
+        capacitacion = get_capacitacion(user, capacitacion_id)
+        if not capacitacion:
+            raise PersonalError("La capacitacion asociada no pertenece a esta empresa.")
+        item.capacitacion_id = capacitacion.id
+    if participante_id:
+        participante = get_capacitacion_participante(user, participante_id)
+        _validate_participante_record(user, participante)
+        if participante.personal_id != item.personal_id:
+            raise PersonalError("La participacion asociada no corresponde al personal evaluado.")
+        if item.capacitacion_id and participante.capacitacion_id != item.capacitacion_id:
+            raise PersonalError("La participacion no corresponde a la capacitacion asociada.")
+        item.capacitacion_participante_id = participante.id
+        item.capacitacion_id = participante.capacitacion_id
+
+
+def _apply_evaluacion_competencia_data(user, item, data, personal_id=None, current_id=None):
+    selected_personal_id = personal_id if personal_id is not None else (data.get("personal_id") or item.personal_id)
+    personal = _validate_personal_record(user, selected_personal_id)
+    item.empresa_id = user.empresa_id
+    item.personal_id = personal.id
+    item.codigo = _clean(data.get("codigo"), upper=True)
+    item.actividad = _clean(data.get("actividad"))
+    item.descripcion = _clean(data.get("descripcion"))
+    item.tipo_competencia = _clean(data.get("tipo_competencia"), upper=True) or "TECNICA"
+    item.metodo_evaluacion = _clean(data.get("metodo_evaluacion"), upper=True)
+    item.criterio_evaluacion = _clean(data.get("criterio_evaluacion") or data.get("criterios"))
+    item.criterios = _clean(data.get("criterios"))
+    item.descripcion_metodo = _clean(data.get("descripcion_metodo"))
+    item.fecha_evaluacion = _date_from_form(data.get("fecha_evaluacion"))
+    item.resultado = _clean(data.get("resultado"), upper=True)
+    item.conclusion = _clean(data.get("conclusion"))
+    item.observaciones = _clean(data.get("observaciones"))
+    item.evaluador_externo_nombre = _clean(data.get("evaluador_externo_nombre"))
+    item.evaluador_externo_entidad = _clean(data.get("evaluador_externo_entidad"))
+    item.activo = _bool_from_form(data.get("activo", "1"))
+
+    if not item.actividad:
+        raise PersonalError("La actividad evaluada es obligatoria.")
+    if item.tipo_competencia not in TIPOS_COMPETENCIA_PERSONAL:
+        raise PersonalError("Tipo de competencia invalido.")
+    if item.metodo_evaluacion not in METODOS_EVALUACION_COMPETENCIA:
+        raise PersonalError("Metodo de evaluacion invalido.")
+    if not item.criterio_evaluacion:
+        raise PersonalError("El criterio de evaluacion es obligatorio.")
+    if not item.fecha_evaluacion:
+        raise PersonalError("La fecha de evaluacion es obligatoria.")
+    if item.resultado not in RESULTADOS_EVALUACION_COMPETENCIA:
+        raise PersonalError("Resultado de evaluacion invalido.")
+
+    item.evaluador_personal_id = None
+    evaluador_personal_id = data.get("evaluador_personal_id")
+    if evaluador_personal_id:
+        with db.session.no_autoflush:
+            evaluador = _validate_personal_record(user, evaluador_personal_id)
+        item.evaluador_personal_id = evaluador.id
+        item.evaluador_externo_nombre = None
+        item.evaluador_externo_entidad = None
+    if not item.evaluador_personal_id and not item.evaluador_externo_nombre:
+        raise PersonalError("Indica un evaluador interno o externo.")
+
+    item.evaluador_usuario_id = None
+    evaluador_usuario_id = data.get("evaluador_usuario_id")
+    if evaluador_usuario_id:
+        selected_user = Usuario.query.filter_by(id=evaluador_usuario_id, empresa_id=user.empresa_id).first()
+        if not selected_user:
+            raise PersonalError("El usuario evaluador no pertenece a esta empresa.")
+        item.evaluador_usuario_id = selected_user.id
+
+    validate_evaluacion_competencia_code(user, item.codigo, current_id)
+    _validate_evaluacion_training_relation(user, item, data)
+
+
+def create_evaluacion_competencia(user, personal_id, data):
+    ensure_permission(user, PERM_GESTIONAR)
+    item = PersonalEvaluacionCompetencia()
+    _apply_evaluacion_competencia_data(user, item, data, personal_id=personal_id)
+    db.session.add(item)
+    return item
+
+
+def update_evaluacion_competencia(user, item, data):
+    ensure_permission(user, PERM_GESTIONAR)
+    _validate_evaluacion_record(user, item)
+    _apply_evaluacion_competencia_data(user, item, data, current_id=item.id)
+    return item
+
+
+def set_evaluacion_competencia_active(user, item, active):
+    ensure_permission(user, PERM_GESTIONAR)
+    _validate_evaluacion_record(user, item)
+    item.activo = bool(active)
+    return item
+
+
+def evaluaciones_competencia_query(user, filters=None):
+    filters = filters or {}
+    query = PersonalEvaluacionCompetencia.query.filter_by(empresa_id=user.empresa_id)
+    if filters.get("persona_id"):
+        query = query.filter(PersonalEvaluacionCompetencia.personal_id == filters["persona_id"])
+    if filters.get("resultado"):
+        query = query.filter(PersonalEvaluacionCompetencia.resultado == filters["resultado"])
+    if filters.get("tipo"):
+        query = query.filter(PersonalEvaluacionCompetencia.tipo_competencia == filters["tipo"])
+    if filters.get("desde"):
+        query = query.filter(PersonalEvaluacionCompetencia.fecha_evaluacion >= _date_from_form(filters["desde"]))
+    if filters.get("hasta"):
+        query = query.filter(PersonalEvaluacionCompetencia.fecha_evaluacion <= _date_from_form(filters["hasta"]))
+    if filters.get("q"):
+        like = f"%{filters['q']}%"
+        query = query.join(Personal, Personal.id == PersonalEvaluacionCompetencia.personal_id).filter(
+            or_(
+                PersonalEvaluacionCompetencia.codigo.ilike(like),
+                PersonalEvaluacionCompetencia.actividad.ilike(like),
+                PersonalEvaluacionCompetencia.descripcion.ilike(like),
+                Personal.nombres.ilike(like),
+                Personal.apellidos.ilike(like),
+                Personal.codigo.ilike(like),
+            )
+        )
+    return query.order_by(
+        PersonalEvaluacionCompetencia.fecha_evaluacion.desc(),
+        PersonalEvaluacionCompetencia.id.desc(),
+    )
+
+
+def add_evaluacion_competencia_evidencia(user, evaluacion, file_storage, data=None):
+    ensure_permission(user, PERM_GESTIONAR)
+    data = data or {}
+    _validate_evaluacion_record(user, evaluacion)
+    tipo_evidencia = _clean(data.get("tipo_evidencia"), upper=True) or "OTRO"
+    if tipo_evidencia not in TIPOS_EVIDENCIA_EVALUACION_COMPETENCIA:
+        raise PersonalError("Tipo de evidencia de evaluacion invalido.")
+    if not file_storage or not file_storage.filename:
+        raise PersonalError("Selecciona un archivo de evidencia.")
+    try:
+        stored = store_personal_competency_evidence_file(file_storage, evaluacion=evaluacion)
+    except DocumentStorageError as exc:
+        raise PersonalError(str(exc)) from exc
+    evidencia = PersonalEvaluacionCompetenciaEvidencia(
+        empresa_id=user.empresa_id,
+        evaluacion_id=evaluacion.id,
+        tipo_evidencia=tipo_evidencia,
+        archivo_nombre_original=stored.original_name,
+        archivo_nombre_guardado=stored.stored_name,
+        archivo_storage_path=stored.storage_path,
+        archivo_mime=stored.mime_type,
+        archivo_size=stored.size,
+        archivo_sha256=stored.sha256,
+        cargado_por_id=user.id,
+        observaciones=_clean(data.get("observaciones")),
+        activo=True,
+    )
+    db.session.add(evidencia)
+    return evidencia
+
+
+def set_evaluacion_competencia_evidencia_active(user, evidencia, active):
+    ensure_permission(user, PERM_GESTIONAR)
+    if not evidencia or evidencia.empresa_id != user.empresa_id:
+        raise PersonalError("La evidencia no pertenece a esta empresa.")
+    _validate_evaluacion_record(user, evidencia.evaluacion)
     evidencia.activo = bool(active)
     return evidencia
