@@ -4,8 +4,10 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy import or_
 
 from app.extensions import db
+from app.models.equipos import Equipo
 from app.models.organigrama import (
     Cargo,
+    ESTADOS_AUTORIZACION_TECNICA,
     ESTADOS_CAPACITACION_PERSONAL,
     ESTADOS_PARTICIPACION_CAPACITACION,
     ESTADOS_PERSONAL,
@@ -13,6 +15,8 @@ from app.models.organigrama import (
     MODALIDADES_CAPACITACION_PERSONAL,
     PerfilPuesto,
     Personal,
+    PersonalAutorizacionTecnica,
+    PersonalAutorizacionTecnicaEvidencia,
     PersonalCapacitacion,
     PersonalCapacitacionEvidencia,
     PersonalCapacitacionParticipante,
@@ -22,16 +26,19 @@ from app.models.organigrama import (
     PersonalEvaluacionCompetenciaEvidencia,
     PersonalExperiencia,
     RESULTADOS_EVALUACION_COMPETENCIA,
+    TIPOS_AUTORIZACION_TECNICA,
     TIPOS_CALIFICACION_PERSONAL,
     TIPOS_CAPACITACION_PERSONAL,
     TIPOS_COMPETENCIA_PERSONAL,
     TIPOS_EVIDENCIA_CAPACITACION,
+    TIPOS_EVIDENCIA_AUTORIZACION_TECNICA,
     TIPOS_EVIDENCIA_EVALUACION_COMPETENCIA,
 )
 from app.models.seguridad import Usuario
 from app.security.permissions import user_has_permission
 from app.services.storage_service import (
     DocumentStorageError,
+    store_personal_authorization_evidence_file,
     store_personal_competency_evidence_file,
     store_personal_evidence_file,
     store_personal_training_evidence_file,
@@ -129,6 +136,18 @@ def get_evaluacion_competencia_evidencia(user, evidencia_id):
         id=evidencia_id,
         empresa_id=user.empresa_id,
     ).first()
+
+
+def get_autorizacion_tecnica(user, autorizacion_id):
+    return PersonalAutorizacionTecnica.query.filter_by(id=autorizacion_id, empresa_id=user.empresa_id).first()
+
+
+def get_autorizacion_tecnica_evidencia(user, evidencia_id):
+    return PersonalAutorizacionTecnicaEvidencia.query.filter_by(id=evidencia_id, empresa_id=user.empresa_id).first()
+
+
+def get_equipo(user, equipo_id):
+    return Equipo.query.filter_by(id=equipo_id, empresa_id=user.empresa_id).first()
 
 
 def active_cargos(user):
@@ -876,5 +895,266 @@ def set_evaluacion_competencia_evidencia_active(user, evidencia, active):
     if not evidencia or evidencia.empresa_id != user.empresa_id:
         raise PersonalError("La evidencia no pertenece a esta empresa.")
     _validate_evaluacion_record(user, evidencia.evaluacion)
+    evidencia.activo = bool(active)
+    return evidencia
+
+
+def estado_efectivo_autorizacion(autorizacion, today=None):
+    today = today or date.today()
+    if autorizacion.estado == "REVOCADA":
+        return "REVOCADA"
+    if autorizacion.estado == "SUSPENDIDA":
+        return "SUSPENDIDA"
+    if autorizacion.fecha_fin and autorizacion.fecha_fin < today:
+        return "VENCIDA"
+    return "VIGENTE"
+
+
+def _validate_autorizacion_record(user, autorizacion):
+    if not autorizacion or autorizacion.empresa_id != user.empresa_id:
+        raise PersonalError("La autorizacion tecnica no pertenece a esta empresa.")
+    if not autorizacion.personal or autorizacion.personal.empresa_id != user.empresa_id:
+        raise PersonalError("El personal autorizado no pertenece a esta empresa.")
+    if autorizacion.equipo and autorizacion.equipo.empresa_id != user.empresa_id:
+        raise PersonalError("El equipo autorizado no pertenece a esta empresa.")
+    if autorizacion.evaluacion_competencia:
+        _validate_evaluacion_record(user, autorizacion.evaluacion_competencia)
+    if autorizacion.autorizador_personal and autorizacion.autorizador_personal.empresa_id != user.empresa_id:
+        raise PersonalError("El autorizador no pertenece a esta empresa.")
+    if autorizacion.autorizador_usuario and autorizacion.autorizador_usuario.empresa_id != user.empresa_id:
+        raise PersonalError("El usuario autorizador no pertenece a esta empresa.")
+    return autorizacion
+
+
+def validate_autorizacion_tecnica_code(user, codigo, current_id=None):
+    if not codigo:
+        return
+    query = PersonalAutorizacionTecnica.query.filter_by(empresa_id=user.empresa_id, codigo=codigo)
+    if current_id:
+        query = query.filter(PersonalAutorizacionTecnica.id != current_id)
+    if query.first():
+        raise PersonalError("Ya existe una autorizacion tecnica con ese codigo en esta empresa.")
+
+
+def _validate_authorization_evaluation(user, item, evaluacion_id):
+    item.evaluacion_competencia_id = None
+    if not evaluacion_id:
+        return None
+    evaluacion = get_evaluacion_competencia(user, evaluacion_id)
+    if not evaluacion:
+        raise PersonalError("La evaluacion de competencia no pertenece a esta empresa.")
+    _validate_evaluacion_record(user, evaluacion)
+    if evaluacion.personal_id != item.personal_id:
+        raise PersonalError("La evaluacion de competencia no corresponde al personal autorizado.")
+    if evaluacion.resultado not in {"COMPETENTE", "COMPETENTE_CON_OBSERVACIONES"}:
+        raise PersonalError("La evaluacion de competencia no es compatible con una autorizacion.")
+    item.evaluacion_competencia_id = evaluacion.id
+    return evaluacion
+
+
+def _apply_authorizer_data(user, item, data):
+    item.autorizador_personal_id = None
+    item.autorizador_usuario_id = None
+    item.autorizador_externo_nombre = _clean(data.get("autorizador_externo_nombre"))
+    item.autorizador_externo_entidad = _clean(data.get("autorizador_externo_entidad"))
+
+    autorizador_personal_id = data.get("autorizador_personal_id")
+    if autorizador_personal_id:
+        with db.session.no_autoflush:
+            autorizador = _validate_personal_record(user, autorizador_personal_id)
+        item.autorizador_personal_id = autorizador.id
+        item.autorizador_externo_nombre = None
+        item.autorizador_externo_entidad = None
+
+    autorizador_usuario_id = data.get("autorizador_usuario_id")
+    if autorizador_usuario_id:
+        selected_user = Usuario.query.filter_by(id=autorizador_usuario_id, empresa_id=user.empresa_id).first()
+        if not selected_user:
+            raise PersonalError("El usuario autorizador no pertenece a esta empresa.")
+        item.autorizador_usuario_id = selected_user.id
+
+    if not item.autorizador_personal_id and not item.autorizador_usuario_id and not item.autorizador_externo_nombre:
+        raise PersonalError("Indica quien otorgo la autorizacion.")
+
+
+def _apply_autorizacion_tecnica_data(user, item, data, personal_id=None, current_id=None):
+    if item.estado == "REVOCADA":
+        raise PersonalError("Una autorizacion revocada no puede editarse.")
+    selected_personal_id = personal_id if personal_id is not None else (data.get("personal_id") or item.personal_id)
+    personal = _validate_personal_record(user, selected_personal_id)
+    item.empresa_id = user.empresa_id
+    item.personal_id = personal.id
+    item.codigo = _clean(data.get("codigo"), upper=True)
+    item.tipo_autorizacion = _clean(data.get("tipo_autorizacion"), upper=True)
+    item.actividad = _clean(data.get("actividad"))
+    item.alcance = _clean(data.get("alcance"))
+    item.descripcion = _clean(data.get("descripcion"))
+    item.metodo_referencia = _clean(data.get("metodo_referencia"), upper=True)
+    item.metodo_descripcion = _clean(data.get("metodo_descripcion"))
+    item.fecha_autorizacion = _date_from_form(data.get("fecha_autorizacion"))
+    item.fecha_inicio = _date_from_form(data.get("fecha_inicio"))
+    item.fecha_fin = _date_from_form(data.get("fecha_fin"))
+    item.estado = _clean(data.get("estado"), upper=True) or item.estado or "VIGENTE"
+    item.fundamento = _clean(data.get("fundamento") or data.get("justificacion"))
+    item.observaciones = _clean(data.get("observaciones"))
+
+    if item.tipo_autorizacion not in TIPOS_AUTORIZACION_TECNICA:
+        raise PersonalError("Tipo de autorizacion tecnica invalido.")
+    if item.estado not in ESTADOS_AUTORIZACION_TECNICA:
+        raise PersonalError("Estado de autorizacion invalido.")
+    if not item.actividad:
+        raise PersonalError("La actividad autorizada es obligatoria.")
+    if not item.alcance:
+        raise PersonalError("El alcance de la autorizacion es obligatorio.")
+    if not item.fecha_autorizacion:
+        raise PersonalError("La fecha de autorizacion es obligatoria.")
+    if not item.fecha_inicio:
+        raise PersonalError("La fecha de inicio es obligatoria.")
+    if item.fecha_fin and item.fecha_fin < item.fecha_inicio:
+        raise PersonalError("La fecha de fin no puede ser anterior a la fecha de inicio.")
+
+    item.equipo_id = None
+    equipo_id = data.get("equipo_id")
+    if item.tipo_autorizacion == "EQUIPO":
+        equipo = get_equipo(user, equipo_id)
+        if not equipo:
+            raise PersonalError("El equipo autorizado no pertenece a esta empresa.")
+        item.equipo_id = equipo.id
+    elif equipo_id:
+        equipo = get_equipo(user, equipo_id)
+        if not equipo:
+            raise PersonalError("El equipo autorizado no pertenece a esta empresa.")
+        item.equipo_id = equipo.id
+
+    if item.tipo_autorizacion == "METODO" and not item.metodo_referencia:
+        raise PersonalError("La referencia del metodo es obligatoria para autorizaciones de metodo.")
+    if item.tipo_autorizacion != "METODO" and not data.get("metodo_referencia"):
+        item.metodo_referencia = None
+        item.metodo_descripcion = None
+
+    evaluacion = _validate_authorization_evaluation(user, item, data.get("evaluacion_competencia_id"))
+    if not evaluacion and not item.fundamento:
+        raise PersonalError("El fundamento o justificacion es obligatorio cuando no se asocia una evaluacion.")
+
+    _apply_authorizer_data(user, item, data)
+    validate_autorizacion_tecnica_code(user, item.codigo, current_id)
+
+
+def create_autorizacion_tecnica(user, personal_id, data):
+    ensure_permission(user, PERM_GESTIONAR)
+    item = PersonalAutorizacionTecnica(estado="VIGENTE")
+    _apply_autorizacion_tecnica_data(user, item, data, personal_id=personal_id)
+    db.session.add(item)
+    return item
+
+
+def update_autorizacion_tecnica(user, item, data):
+    ensure_permission(user, PERM_GESTIONAR)
+    _validate_autorizacion_record(user, item)
+    _apply_autorizacion_tecnica_data(user, item, data, current_id=item.id)
+    return item
+
+
+def autorizaciones_tecnicas_query(user, filters=None):
+    filters = filters or {}
+    query = PersonalAutorizacionTecnica.query.filter_by(empresa_id=user.empresa_id)
+    if filters.get("persona_id"):
+        query = query.filter(PersonalAutorizacionTecnica.personal_id == filters["persona_id"])
+    if filters.get("tipo"):
+        query = query.filter(PersonalAutorizacionTecnica.tipo_autorizacion == filters["tipo"])
+    if filters.get("estado"):
+        estado = filters["estado"]
+        if estado == "VENCIDA":
+            query = query.filter(
+                PersonalAutorizacionTecnica.estado == "VIGENTE",
+                PersonalAutorizacionTecnica.fecha_fin.isnot(None),
+                PersonalAutorizacionTecnica.fecha_fin < date.today(),
+            )
+        else:
+            query = query.filter(PersonalAutorizacionTecnica.estado == estado)
+    if filters.get("equipo_id"):
+        query = query.filter(PersonalAutorizacionTecnica.equipo_id == filters["equipo_id"])
+    if filters.get("q"):
+        like = f"%{filters['q']}%"
+        query = query.join(Personal, Personal.id == PersonalAutorizacionTecnica.personal_id).filter(
+            or_(
+                PersonalAutorizacionTecnica.codigo.ilike(like),
+                PersonalAutorizacionTecnica.actividad.ilike(like),
+                PersonalAutorizacionTecnica.alcance.ilike(like),
+                PersonalAutorizacionTecnica.metodo_referencia.ilike(like),
+                Personal.nombres.ilike(like),
+                Personal.apellidos.ilike(like),
+                Personal.codigo.ilike(like),
+            )
+        )
+    return query.order_by(PersonalAutorizacionTecnica.fecha_inicio.desc(), PersonalAutorizacionTecnica.id.desc())
+
+
+def set_autorizacion_tecnica_estado(user, item, estado, motivo=None, fecha_estado=None):
+    ensure_permission(user, PERM_GESTIONAR)
+    _validate_autorizacion_record(user, item)
+    estado = _clean(estado, upper=True)
+    if estado not in ESTADOS_AUTORIZACION_TECNICA:
+        raise PersonalError("Estado de autorizacion invalido.")
+    if item.estado == "REVOCADA" and estado != "REVOCADA":
+        raise PersonalError("Una autorizacion revocada no puede reactivarse.")
+    if item.estado != "SUSPENDIDA" and estado == "VIGENTE":
+        raise PersonalError("Solo una autorizacion suspendida puede reactivarse.")
+    if estado in {"SUSPENDIDA", "REVOCADA"} and not _clean(motivo):
+        raise PersonalError("El motivo del cambio de estado es obligatorio.")
+    item.estado = estado
+    item.motivo_estado = _clean(motivo)
+    item.fecha_estado = _date_from_form(fecha_estado) or date.today()
+    return item
+
+
+def suspender_autorizacion_tecnica(user, item, motivo, fecha_estado=None):
+    return set_autorizacion_tecnica_estado(user, item, "SUSPENDIDA", motivo, fecha_estado)
+
+
+def reactivar_autorizacion_tecnica(user, item, motivo=None, fecha_estado=None):
+    return set_autorizacion_tecnica_estado(user, item, "VIGENTE", motivo, fecha_estado)
+
+
+def revocar_autorizacion_tecnica(user, item, motivo, fecha_estado=None):
+    return set_autorizacion_tecnica_estado(user, item, "REVOCADA", motivo, fecha_estado)
+
+
+def add_autorizacion_tecnica_evidencia(user, autorizacion, file_storage, data=None):
+    ensure_permission(user, PERM_GESTIONAR)
+    data = data or {}
+    _validate_autorizacion_record(user, autorizacion)
+    tipo_evidencia = _clean(data.get("tipo_evidencia"), upper=True) or "OTRO"
+    if tipo_evidencia not in TIPOS_EVIDENCIA_AUTORIZACION_TECNICA:
+        raise PersonalError("Tipo de evidencia de autorizacion invalido.")
+    if not file_storage or not file_storage.filename:
+        raise PersonalError("Selecciona un archivo de evidencia.")
+    try:
+        stored = store_personal_authorization_evidence_file(file_storage, autorizacion=autorizacion)
+    except DocumentStorageError as exc:
+        raise PersonalError(str(exc)) from exc
+    evidencia = PersonalAutorizacionTecnicaEvidencia(
+        empresa_id=user.empresa_id,
+        autorizacion_id=autorizacion.id,
+        tipo_evidencia=tipo_evidencia,
+        archivo_nombre_original=stored.original_name,
+        archivo_nombre_guardado=stored.stored_name,
+        archivo_storage_path=stored.storage_path,
+        archivo_mime=stored.mime_type,
+        archivo_size=stored.size,
+        archivo_sha256=stored.sha256,
+        cargado_por_id=user.id,
+        observaciones=_clean(data.get("observaciones")),
+        activo=True,
+    )
+    db.session.add(evidencia)
+    return evidencia
+
+
+def set_autorizacion_tecnica_evidencia_active(user, evidencia, active):
+    ensure_permission(user, PERM_GESTIONAR)
+    if not evidencia or evidencia.empresa_id != user.empresa_id:
+        raise PersonalError("La evidencia no pertenece a esta empresa.")
+    _validate_autorizacion_record(user, evidencia.autorizacion)
     evidencia.activo = bool(active)
     return evidencia

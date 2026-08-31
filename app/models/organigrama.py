@@ -1,5 +1,6 @@
 from app.extensions import db
 from app.models.base import BaseModel, TenantMixin
+from datetime import date
 
 
 ESTADOS_PERSONAL = ("ACTIVO", "INACTIVO")
@@ -36,6 +37,27 @@ TIPOS_EVIDENCIA_EVALUACION_COMPETENCIA = (
     "RESULTADO_PRACTICO",
     "PDF_FIRMADO",
     "HOJA_CALCULO",
+    "OTRO",
+)
+TIPOS_AUTORIZACION_TECNICA = (
+    "ACTIVIDAD_TECNICA",
+    "EQUIPO",
+    "METODO",
+    "MUESTREO",
+    "REVISION_RESULTADOS",
+    "AUTORIZACION_RESULTADOS",
+    "OPINION_INTERPRETACION",
+    "DESARROLLO_METODO",
+    "VALIDACION_METODO",
+    "OTRA",
+)
+ESTADOS_AUTORIZACION_TECNICA = ("VIGENTE", "SUSPENDIDA", "REVOCADA")
+TIPOS_EVIDENCIA_AUTORIZACION_TECNICA = (
+    "ACTA_AUTORIZACION",
+    "MATRIZ_FIRMADA",
+    "FORMATO_AUTORIZACION",
+    "CERTIFICADO",
+    "RESOLUCION_INTERNA",
     "OTRO",
 )
 
@@ -150,6 +172,20 @@ class Personal(TenantMixin, BaseModel):
         "PersonalEvaluacionCompetencia",
         foreign_keys="PersonalEvaluacionCompetencia.evaluador_personal_id",
         back_populates="evaluador_personal",
+        lazy=True,
+    )
+    autorizaciones_tecnicas = db.relationship(
+        "PersonalAutorizacionTecnica",
+        foreign_keys="PersonalAutorizacionTecnica.personal_id",
+        back_populates="personal",
+        lazy=True,
+        order_by="PersonalAutorizacionTecnica.fecha_inicio.desc(), PersonalAutorizacionTecnica.id.desc()",
+        cascade="all, delete-orphan",
+    )
+    autorizaciones_tecnicas_otorgadas = db.relationship(
+        "PersonalAutorizacionTecnica",
+        foreign_keys="PersonalAutorizacionTecnica.autorizador_personal_id",
+        back_populates="autorizador_personal",
         lazy=True,
     )
 
@@ -485,4 +521,136 @@ class PersonalEvaluacionCompetenciaEvidencia(TenantMixin, BaseModel):
 
     empresa = db.relationship("Empresa")
     evaluacion = db.relationship("PersonalEvaluacionCompetencia", back_populates="evidencias")
+    cargado_por = db.relationship("Usuario", foreign_keys=[cargado_por_id])
+
+
+class PersonalAutorizacionTecnica(TenantMixin, BaseModel):
+    __tablename__ = "personal_autorizaciones_tecnicas"
+    __table_args__ = (
+        db.UniqueConstraint("empresa_id", "codigo", name="uq_personal_aut_tec_empresa_codigo"),
+        db.CheckConstraint(
+            "tipo_autorizacion IN ('ACTIVIDAD_TECNICA', 'EQUIPO', 'METODO', 'MUESTREO', 'REVISION_RESULTADOS', 'AUTORIZACION_RESULTADOS', 'OPINION_INTERPRETACION', 'DESARROLLO_METODO', 'VALIDACION_METODO', 'OTRA')",
+            name="ck_personal_aut_tec_tipo_valido",
+        ),
+        db.CheckConstraint(
+            "estado IN ('VIGENTE', 'SUSPENDIDA', 'REVOCADA')",
+            name="ck_personal_aut_tec_estado_valido",
+        ),
+        db.CheckConstraint(
+            "fecha_fin IS NULL OR fecha_fin >= fecha_inicio",
+            name="ck_personal_aut_tec_fechas_ordenadas",
+        ),
+        db.CheckConstraint(
+            "tipo_autorizacion <> 'EQUIPO' OR equipo_id IS NOT NULL",
+            name="ck_personal_aut_tec_equipo_requerido",
+        ),
+        db.CheckConstraint(
+            "tipo_autorizacion <> 'METODO' OR metodo_referencia IS NOT NULL",
+            name="ck_personal_aut_tec_metodo_requerido",
+        ),
+        db.CheckConstraint(
+            "autorizador_personal_id IS NOT NULL OR autorizador_usuario_id IS NOT NULL OR autorizador_externo_nombre IS NOT NULL",
+            name="ck_personal_aut_tec_autorizador_requerido",
+        ),
+        db.Index("ix_personal_aut_tec_empresa_personal", "empresa_id", "personal_id"),
+        db.Index("ix_personal_aut_tec_empresa_equipo", "empresa_id", "equipo_id"),
+        db.Index("ix_personal_aut_tec_empresa_evaluacion", "empresa_id", "evaluacion_competencia_id"),
+        db.Index("ix_personal_aut_tec_empresa_tipo", "empresa_id", "tipo_autorizacion"),
+        db.Index("ix_personal_aut_tec_empresa_estado", "empresa_id", "estado"),
+        db.Index("ix_personal_aut_tec_empresa_vigencia", "empresa_id", "fecha_inicio", "fecha_fin"),
+    )
+
+    personal_id = db.Column(db.BigInteger, db.ForeignKey("personal.id"), nullable=False)
+    codigo = db.Column(db.String(50))
+    tipo_autorizacion = db.Column(db.String(40), nullable=False)
+    actividad = db.Column(db.String(180), nullable=False)
+    alcance = db.Column(db.Text, nullable=False)
+    descripcion = db.Column(db.Text)
+    equipo_id = db.Column(db.BigInteger, db.ForeignKey("equipos.id"))
+    metodo_referencia = db.Column(db.String(120))
+    metodo_descripcion = db.Column(db.Text)
+    evaluacion_competencia_id = db.Column(db.BigInteger, db.ForeignKey("personal_evaluaciones_competencia.id"))
+    autorizador_personal_id = db.Column(db.BigInteger, db.ForeignKey("personal.id"))
+    autorizador_usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    autorizador_externo_nombre = db.Column(db.String(180))
+    autorizador_externo_entidad = db.Column(db.String(180))
+    fecha_autorizacion = db.Column(db.Date, nullable=False)
+    fecha_inicio = db.Column(db.Date, nullable=False)
+    fecha_fin = db.Column(db.Date)
+    estado = db.Column(db.String(20), nullable=False, default="VIGENTE")
+    fundamento = db.Column(db.Text, nullable=False)
+    observaciones = db.Column(db.Text)
+    motivo_estado = db.Column(db.Text)
+    fecha_estado = db.Column(db.Date)
+
+    empresa = db.relationship("Empresa")
+    personal = db.relationship("Personal", foreign_keys=[personal_id], back_populates="autorizaciones_tecnicas")
+    equipo = db.relationship("Equipo")
+    evaluacion_competencia = db.relationship("PersonalEvaluacionCompetencia")
+    autorizador_personal = db.relationship(
+        "Personal",
+        foreign_keys=[autorizador_personal_id],
+        back_populates="autorizaciones_tecnicas_otorgadas",
+    )
+    autorizador_usuario = db.relationship("Usuario", foreign_keys=[autorizador_usuario_id])
+    evidencias = db.relationship(
+        "PersonalAutorizacionTecnicaEvidencia",
+        back_populates="autorizacion",
+        lazy=True,
+        order_by="PersonalAutorizacionTecnicaEvidencia.created_at.desc(), PersonalAutorizacionTecnicaEvidencia.id.desc()",
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def autorizador_nombre(self):
+        if self.autorizador_personal:
+            return self.autorizador_personal.nombre_completo
+        if self.autorizador_usuario:
+            return f"{self.autorizador_usuario.nombre} {self.autorizador_usuario.apellido}".strip()
+        if self.autorizador_externo_nombre:
+            return self.autorizador_externo_nombre
+        return "-"
+
+    @property
+    def estado_efectivo(self):
+        if self.estado in {"REVOCADA", "SUSPENDIDA"}:
+            return self.estado
+        if self.fecha_fin and self.fecha_fin < date.today():
+            return "VENCIDA"
+        return "VIGENTE"
+
+    @property
+    def referencia_tecnica(self):
+        if self.equipo:
+            return f"{self.equipo.codigo} - {self.equipo.nombre}"
+        if self.metodo_referencia:
+            return self.metodo_referencia
+        return "-"
+
+
+class PersonalAutorizacionTecnicaEvidencia(TenantMixin, BaseModel):
+    __tablename__ = "personal_autorizacion_tecnica_evidencias"
+    __table_args__ = (
+        db.CheckConstraint(
+            "tipo_evidencia IN ('ACTA_AUTORIZACION', 'MATRIZ_FIRMADA', 'FORMATO_AUTORIZACION', 'CERTIFICADO', 'RESOLUCION_INTERNA', 'OTRO')",
+            name="ck_personal_aut_tec_evidencias_tipo_valido",
+        ),
+        db.Index("ix_personal_aut_tec_evid_empresa_aut", "empresa_id", "autorizacion_id"),
+        db.Index("ix_personal_aut_tec_evid_empresa_activo", "empresa_id", "activo"),
+    )
+
+    autorizacion_id = db.Column(db.BigInteger, db.ForeignKey("personal_autorizaciones_tecnicas.id"), nullable=False)
+    tipo_evidencia = db.Column(db.String(40), nullable=False)
+    archivo_nombre_original = db.Column(db.String(255), nullable=False)
+    archivo_nombre_guardado = db.Column(db.String(255), nullable=False)
+    archivo_storage_path = db.Column(db.String(500), nullable=False)
+    archivo_mime = db.Column(db.String(150), nullable=False)
+    archivo_size = db.Column(db.BigInteger, nullable=False)
+    archivo_sha256 = db.Column(db.String(64), nullable=False)
+    cargado_por_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    activo = db.Column(db.Boolean, default=True, nullable=False)
+    observaciones = db.Column(db.Text)
+
+    empresa = db.relationship("Empresa")
+    autorizacion = db.relationship("PersonalAutorizacionTecnica", back_populates="evidencias")
     cargado_por = db.relationship("Usuario", foreign_keys=[cargado_por_id])

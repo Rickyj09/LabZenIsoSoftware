@@ -5,21 +5,27 @@ from flask_login import current_user, login_required
 from sqlalchemy import or_
 
 from app.extensions import db
+from app.models.equipos import Equipo
 from app.models.organigrama import (
     Cargo,
+    ESTADOS_AUTORIZACION_TECNICA,
     ESTADOS_CAPACITACION_PERSONAL,
     ESTADOS_PARTICIPACION_CAPACITACION,
     ESTADOS_PERSONAL,
     METODOS_EVALUACION_COMPETENCIA,
     MODALIDADES_CAPACITACION_PERSONAL,
     Personal,
+    PersonalAutorizacionTecnica,
     PersonalCapacitacion,
     PersonalCapacitacionParticipante,
+    PersonalEvaluacionCompetencia,
     RESULTADOS_EVALUACION_COMPETENCIA,
+    TIPOS_AUTORIZACION_TECNICA,
     TIPOS_CALIFICACION_PERSONAL,
     TIPOS_CAPACITACION_PERSONAL,
     TIPOS_COMPETENCIA_PERSONAL,
     TIPOS_EVIDENCIA_CAPACITACION,
+    TIPOS_EVIDENCIA_AUTORIZACION_TECNICA,
     TIPOS_EVIDENCIA_EVALUACION_COMPETENCIA,
 )
 from app.security.permissions import require_permission
@@ -62,9 +68,14 @@ def _personal_context(**extra):
         "metodos_evaluacion": METODOS_EVALUACION_COMPETENCIA,
         "resultados_evaluacion": RESULTADOS_EVALUACION_COMPETENCIA,
         "tipos_evidencia_evaluacion": TIPOS_EVIDENCIA_EVALUACION_COMPETENCIA,
+        "tipos_autorizacion": TIPOS_AUTORIZACION_TECNICA,
+        "estados_autorizacion": ESTADOS_AUTORIZACION_TECNICA,
+        "estados_autorizacion_efectivos": ("VIGENTE", "SUSPENDIDA", "REVOCADA", "VENCIDA"),
+        "tipos_evidencia_autorizacion": TIPOS_EVIDENCIA_AUTORIZACION_TECNICA,
         "cargos": Cargo.query.filter_by(empresa_id=current_user.empresa_id).order_by(Cargo.codigo.asc()).all(),
         "usuarios": personal_service.company_users(current_user),
         "estado_badge_class": _estado_badge_class,
+        "autorizacion_badge_class": _autorizacion_badge_class,
     }
     context.update(extra)
     return context
@@ -74,6 +85,15 @@ def _estado_badge_class(estado):
     return {
         "ACTIVO": "text-bg-success",
         "INACTIVO": "text-bg-secondary",
+    }.get(estado, "text-bg-light")
+
+
+def _autorizacion_badge_class(estado):
+    return {
+        "VIGENTE": "text-bg-success",
+        "SUSPENDIDA": "text-bg-warning",
+        "REVOCADA": "text-bg-danger",
+        "VENCIDA": "text-bg-secondary",
     }.get(estado, "text-bg-light")
 
 
@@ -200,6 +220,28 @@ def _participaciones_empresa():
         .order_by(PersonalCapacitacionParticipante.fecha_registro.desc())
         .all()
     )
+
+
+def _equipos_empresa():
+    return (
+        Equipo.query
+        .filter_by(empresa_id=current_user.empresa_id)
+        .order_by(Equipo.codigo.asc(), Equipo.nombre.asc())
+        .all()
+    )
+
+
+def _evaluaciones_compatibles(personal_id=None):
+    query = PersonalEvaluacionCompetencia.query.filter(
+        PersonalEvaluacionCompetencia.empresa_id == current_user.empresa_id,
+        PersonalEvaluacionCompetencia.resultado.in_(("COMPETENTE", "COMPETENTE_CON_OBSERVACIONES")),
+    )
+    if personal_id:
+        query = query.filter(PersonalEvaluacionCompetencia.personal_id == personal_id)
+    return query.order_by(
+        PersonalEvaluacionCompetencia.fecha_evaluacion.desc(),
+        PersonalEvaluacionCompetencia.id.desc(),
+    ).all()
 
 
 @bp.route("/capacitaciones")
@@ -574,6 +616,241 @@ def cambiar_estado_evidencia_evaluacion_competencia(evidencia_id):
     db.session.commit()
     flash("Estado de la evidencia actualizado correctamente.", "success")
     return _redirect_evaluacion_detail(evidencia.evaluacion_id)
+
+
+def _redirect_autorizacion_detail(autorizacion_id):
+    return redirect(url_for("personal.detalle_autorizacion_tecnica", autorizacion_id=autorizacion_id))
+
+
+def _authorization_form_context(item, autorizacion=None, form_data=None):
+    return _personal_context(
+        item=item,
+        autorizacion=autorizacion,
+        form_data=form_data or {},
+        personal_disponible=_personal_activo(),
+        equipos=_equipos_empresa(),
+        evaluaciones=_evaluaciones_compatibles(item.id if item else None),
+    )
+
+
+@bp.route("/autorizaciones")
+@login_required
+@require_permission(personal_service.PERM_VER)
+def autorizaciones_tecnicas():
+    filters = {key: request.args.get(key, "").strip() for key in ("q", "persona_id", "tipo", "estado", "equipo_id")}
+    items = personal_service.autorizaciones_tecnicas_query(current_user, filters).all()
+    return render_template(
+        "personal/autorizaciones_index.html",
+        **_personal_context(
+            items=items,
+            filters=filters,
+            personal_disponible=_personal_activo(),
+            equipos=_equipos_empresa(),
+        ),
+    )
+
+
+@bp.route("/<int:item_id>/autorizaciones/nueva", methods=["GET", "POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def nueva_autorizacion_tecnica(item_id):
+    item = personal_service.get_personal(current_user, item_id)
+    if not item:
+        abort(404)
+    if request.method == "POST":
+        _validate_csrf()
+        try:
+            autorizacion = personal_service.create_autorizacion_tecnica(current_user, item.id, request.form)
+            db.session.commit()
+            flash("Autorizacion tecnica registrada correctamente.", "success")
+            return _redirect_autorizacion_detail(autorizacion.id)
+        except PersonalError as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template("personal/autorizacion_form.html", **_authorization_form_context(item, form_data=request.form))
+
+    form_data = {}
+    evaluacion_id = request.args.get("evaluacion_competencia_id", "").strip()
+    if evaluacion_id:
+        evaluacion = personal_service.get_evaluacion_competencia(current_user, evaluacion_id)
+        if not evaluacion or evaluacion.personal_id != item.id:
+            abort(404)
+        form_data = {
+            "evaluacion_competencia_id": str(evaluacion.id),
+            "actividad": evaluacion.actividad,
+            "fundamento": f"Evaluacion de competencia {evaluacion.codigo or evaluacion.id}: {evaluacion.resultado}",
+        }
+    return render_template("personal/autorizacion_form.html", **_authorization_form_context(item, form_data=form_data))
+
+
+@bp.route("/autorizaciones/<int:autorizacion_id>")
+@login_required
+@require_permission(personal_service.PERM_VER)
+def detalle_autorizacion_tecnica(autorizacion_id):
+    autorizacion = personal_service.get_autorizacion_tecnica(current_user, autorizacion_id)
+    if not autorizacion:
+        abort(404)
+    return render_template("personal/autorizacion_detalle.html", **_personal_context(autorizacion=autorizacion))
+
+
+@bp.route("/autorizaciones/<int:autorizacion_id>/editar", methods=["GET", "POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def editar_autorizacion_tecnica(autorizacion_id):
+    autorizacion = personal_service.get_autorizacion_tecnica(current_user, autorizacion_id)
+    if not autorizacion:
+        abort(404)
+    if autorizacion.estado == "REVOCADA":
+        flash("Una autorizacion revocada solo puede consultarse.", "warning")
+        return _redirect_autorizacion_detail(autorizacion.id)
+    item = autorizacion.personal
+    if request.method == "POST":
+        _validate_csrf()
+        try:
+            personal_service.update_autorizacion_tecnica(current_user, autorizacion, request.form)
+            db.session.commit()
+            flash("Autorizacion tecnica actualizada correctamente.", "success")
+            return _redirect_autorizacion_detail(autorizacion.id)
+        except PersonalError as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template(
+                "personal/autorizacion_form.html",
+                **_authorization_form_context(item, autorizacion=autorizacion, form_data=request.form),
+            )
+    return render_template(
+        "personal/autorizacion_form.html",
+        **_authorization_form_context(item, autorizacion=autorizacion, form_data={}),
+    )
+
+
+@bp.route("/autorizaciones/<int:autorizacion_id>/suspender", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def suspender_autorizacion_tecnica(autorizacion_id):
+    _validate_csrf()
+    autorizacion = personal_service.get_autorizacion_tecnica(current_user, autorizacion_id)
+    if not autorizacion:
+        abort(404)
+    try:
+        personal_service.suspender_autorizacion_tecnica(
+            current_user,
+            autorizacion,
+            request.form.get("motivo_estado"),
+            request.form.get("fecha_estado"),
+        )
+        db.session.commit()
+        flash("Autorizacion suspendida correctamente.", "success")
+    except PersonalError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_autorizacion_detail(autorizacion.id)
+
+
+@bp.route("/autorizaciones/<int:autorizacion_id>/reactivar", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def reactivar_autorizacion_tecnica(autorizacion_id):
+    _validate_csrf()
+    autorizacion = personal_service.get_autorizacion_tecnica(current_user, autorizacion_id)
+    if not autorizacion:
+        abort(404)
+    try:
+        personal_service.reactivar_autorizacion_tecnica(
+            current_user,
+            autorizacion,
+            request.form.get("motivo_estado"),
+            request.form.get("fecha_estado"),
+        )
+        db.session.commit()
+        flash("Autorizacion reactivada correctamente.", "success")
+    except PersonalError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_autorizacion_detail(autorizacion.id)
+
+
+@bp.route("/autorizaciones/<int:autorizacion_id>/revocar", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def revocar_autorizacion_tecnica(autorizacion_id):
+    _validate_csrf()
+    autorizacion = personal_service.get_autorizacion_tecnica(current_user, autorizacion_id)
+    if not autorizacion:
+        abort(404)
+    try:
+        personal_service.revocar_autorizacion_tecnica(
+            current_user,
+            autorizacion,
+            request.form.get("motivo_estado"),
+            request.form.get("fecha_estado"),
+        )
+        db.session.commit()
+        flash("Autorizacion revocada correctamente.", "success")
+    except PersonalError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_autorizacion_detail(autorizacion.id)
+
+
+@bp.route("/autorizaciones/<int:autorizacion_id>/evidencias", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def agregar_evidencia_autorizacion_tecnica(autorizacion_id):
+    _validate_csrf()
+    autorizacion = personal_service.get_autorizacion_tecnica(current_user, autorizacion_id)
+    if not autorizacion:
+        abort(404)
+    try:
+        personal_service.add_autorizacion_tecnica_evidencia(
+            current_user,
+            autorizacion,
+            request.files.get("evidencia"),
+            request.form,
+        )
+        db.session.commit()
+        flash("Evidencia de autorizacion cargada correctamente.", "success")
+    except PersonalError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_autorizacion_detail(autorizacion.id)
+
+
+@bp.route("/autorizaciones/evidencias/<int:evidencia_id>/descargar")
+@login_required
+@require_permission(personal_service.PERM_VER)
+def descargar_evidencia_autorizacion_tecnica(evidencia_id):
+    evidencia = personal_service.get_autorizacion_tecnica_evidencia(current_user, evidencia_id)
+    if not evidencia or not evidencia.activo:
+        abort(404)
+    if evidencia.autorizacion.empresa_id != current_user.empresa_id:
+        abort(404)
+    try:
+        path = resolve_document_path(evidencia.archivo_storage_path)
+    except DocumentStorageError:
+        abort(404)
+    if not path.is_file():
+        abort(404)
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name=evidencia.archivo_nombre_original,
+        mimetype=evidencia.archivo_mime,
+    )
+
+
+@bp.route("/autorizaciones/evidencias/<int:evidencia_id>/estado", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def cambiar_estado_evidencia_autorizacion_tecnica(evidencia_id):
+    _validate_csrf()
+    evidencia = personal_service.get_autorizacion_tecnica_evidencia(current_user, evidencia_id)
+    if not evidencia:
+        abort(404)
+    personal_service.set_autorizacion_tecnica_evidencia_active(current_user, evidencia, not evidencia.activo)
+    db.session.commit()
+    flash("Estado de la evidencia actualizado correctamente.", "success")
+    return _redirect_autorizacion_detail(evidencia.autorizacion_id)
 
 
 @bp.route("/<int:item_id>/calificaciones/nueva", methods=["GET", "POST"])

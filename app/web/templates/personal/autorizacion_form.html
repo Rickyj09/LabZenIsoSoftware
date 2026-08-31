@@ -1,0 +1,144 @@
+{% extends "base_admin.html" %}
+
+{% set fd = form_data if form_data else {} %}
+{% set editing = autorizacion is not none %}
+
+{% block title %}{{ 'Editar autorizacion tecnica' if editing else 'Nueva autorizacion tecnica' }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3 class="mb-0">{{ 'Editar autorizacion tecnica' if editing else 'Nueva autorizacion tecnica' }}</h3>
+        <a class="btn btn-outline-secondary" href="{{ url_for('personal.detalle', item_id=item.id) }}">Volver</a>
+    </div>
+
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label">Codigo</label>
+                <input class="form-control" name="codigo" value="{{ fd.get('codigo', autorizacion.codigo if autorizacion else '') or '' }}">
+            </div>
+            <div class="col-md-5">
+                <label class="form-label">Personal autorizado</label>
+                <select class="form-select" name="personal_id" required>
+                    {% set selected_personal = fd.get('personal_id', autorizacion.personal_id if autorizacion else item.id)|string %}
+                    {% for person in personal_disponible %}
+                    <option value="{{ person.id }}" {% if selected_personal == person.id|string %}selected{% endif %}>{{ person.codigo }} - {{ person.nombre_completo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Tipo autorizacion</label>
+                <select class="form-select" name="tipo_autorizacion" required>
+                    {% set selected_tipo = fd.get('tipo_autorizacion', autorizacion.tipo_autorizacion if autorizacion else 'ACTIVIDAD_TECNICA') %}
+                    {% for tipo in tipos_autorizacion %}
+                    <option value="{{ tipo }}" {% if selected_tipo == tipo %}selected{% endif %}>{{ tipo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Actividad autorizada</label>
+                <input class="form-control" name="actividad" required value="{{ fd.get('actividad', autorizacion.actividad if autorizacion else '') or '' }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Equipo</label>
+                <select class="form-select" name="equipo_id">
+                    {% set selected_equipo = fd.get('equipo_id', autorizacion.equipo_id if autorizacion else '')|string %}
+                    <option value="">No aplica</option>
+                    {% for equipo in equipos %}
+                    <option value="{{ equipo.id }}" {% if selected_equipo == equipo.id|string %}selected{% endif %}>{{ equipo.codigo }} - {{ equipo.nombre }} - {{ equipo.estado_operativo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Alcance</label>
+                <textarea class="form-control" name="alcance" rows="3" required>{{ fd.get('alcance', autorizacion.alcance if autorizacion else '') or '' }}</textarea>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Descripcion</label>
+                <textarea class="form-control" name="descripcion" rows="2">{{ fd.get('descripcion', autorizacion.descripcion if autorizacion else '') or '' }}</textarea>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Referencia metodo</label>
+                <input class="form-control" name="metodo_referencia" value="{{ fd.get('metodo_referencia', autorizacion.metodo_referencia if autorizacion else '') or '' }}">
+            </div>
+            <div class="col-md-8">
+                <label class="form-label">Descripcion metodo</label>
+                <input class="form-control" name="metodo_descripcion" value="{{ fd.get('metodo_descripcion', autorizacion.metodo_descripcion if autorizacion else '') or '' }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Evaluacion fundamento</label>
+                <select class="form-select" name="evaluacion_competencia_id">
+                    {% set selected_eval = fd.get('evaluacion_competencia_id', autorizacion.evaluacion_competencia_id if autorizacion else '')|string %}
+                    <option value="">Sin evaluacion asociada</option>
+                    {% for evaluacion in evaluaciones %}
+                    <option value="{{ evaluacion.id }}" {% if selected_eval == evaluacion.id|string %}selected{% endif %}>{{ evaluacion.fecha_evaluacion }} - {{ evaluacion.actividad }} - {{ evaluacion.resultado }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Estado</label>
+                <select class="form-select" name="estado" required>
+                    {% set selected_estado = fd.get('estado', autorizacion.estado if autorizacion else 'VIGENTE') %}
+                    {% for estado in estados_autorizacion %}
+                    <option value="{{ estado }}" {% if selected_estado == estado %}selected{% endif %}>{{ estado }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Autorizador personal</label>
+                <select class="form-select" name="autorizador_personal_id">
+                    {% set selected_aut_personal = fd.get('autorizador_personal_id', autorizacion.autorizador_personal_id if autorizacion else '')|string %}
+                    <option value="">No aplica</option>
+                    {% for person in personal_disponible %}
+                    <option value="{{ person.id }}" {% if selected_aut_personal == person.id|string %}selected{% endif %}>{{ person.codigo }} - {{ person.nombre_completo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Autorizador usuario</label>
+                <select class="form-select" name="autorizador_usuario_id">
+                    {% set selected_usuario = fd.get('autorizador_usuario_id', autorizacion.autorizador_usuario_id if autorizacion else '')|string %}
+                    <option value="">No aplica</option>
+                    {% for usuario in usuarios %}
+                    <option value="{{ usuario.id }}" {% if selected_usuario == usuario.id|string %}selected{% endif %}>{{ usuario.nombre }} {{ usuario.apellido }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Autorizador externo</label>
+                <input class="form-control" name="autorizador_externo_nombre" value="{{ fd.get('autorizador_externo_nombre', autorizacion.autorizador_externo_nombre if autorizacion else '') or '' }}">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Entidad externa</label>
+                <input class="form-control" name="autorizador_externo_entidad" value="{{ fd.get('autorizador_externo_entidad', autorizacion.autorizador_externo_entidad if autorizacion else '') or '' }}">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Fecha autorizacion</label>
+                <input class="form-control" type="date" name="fecha_autorizacion" required value="{{ fd.get('fecha_autorizacion', autorizacion.fecha_autorizacion if autorizacion else '') or '' }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Inicio</label>
+                <input class="form-control" type="date" name="fecha_inicio" required value="{{ fd.get('fecha_inicio', autorizacion.fecha_inicio if autorizacion else '') or '' }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Fin</label>
+                <input class="form-control" type="date" name="fecha_fin" value="{{ fd.get('fecha_fin', autorizacion.fecha_fin if autorizacion else '') or '' }}">
+            </div>
+            <div class="col-12">
+                <label class="form-label">Fundamento / justificacion</label>
+                <textarea class="form-control" name="fundamento" rows="3" required>{{ fd.get('fundamento', autorizacion.fundamento if autorizacion else '') or '' }}</textarea>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Observaciones</label>
+                <textarea class="form-control" name="observaciones" rows="3">{{ fd.get('observaciones', autorizacion.observaciones if autorizacion else '') or '' }}</textarea>
+            </div>
+        </div>
+        <div class="mt-3 d-flex gap-2">
+            <button class="btn btn-primary" type="submit">Guardar</button>
+            <a class="btn btn-outline-secondary" href="{{ url_for('personal.detalle', item_id=item.id) }}">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

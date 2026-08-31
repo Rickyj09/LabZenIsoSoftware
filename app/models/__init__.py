@@ -55,6 +55,8 @@ from app.models.organigrama import (
     Cargo,
     PerfilPuesto,
     Personal,
+    PersonalAutorizacionTecnica,
+    PersonalAutorizacionTecnicaEvidencia,
     PersonalCapacitacion,
     PersonalCapacitacionEvidencia,
     PersonalCapacitacionParticipante,

@@ -15,6 +15,9 @@
         <div class="d-flex gap-2">
             <a class="btn btn-outline-secondary" href="{{ url_for('personal.detalle', item_id=evaluacion.personal_id) }}">Volver</a>
             {% if can('personal.gestionar') %}
+            {% if evaluacion.resultado in ['COMPETENTE', 'COMPETENTE_CON_OBSERVACIONES'] %}
+            <a class="btn btn-outline-primary" href="{{ url_for('personal.nueva_autorizacion_tecnica', item_id=evaluacion.personal_id, evaluacion_competencia_id=evaluacion.id) }}">Crear autorizacion</a>
+            {% endif %}
             <a class="btn btn-primary" href="{{ url_for('personal.editar_evaluacion_competencia', evaluacion_id=evaluacion.id) }}">Editar</a>
             {% endif %}
         </div>
