@@ -61,15 +61,17 @@ class DocumentVigorViewsTest(unittest.TestCase):
         pending_permission = Permiso(id=1002, codigo="documentos.ver_pendientes", nombre="Ver pendientes", modulo="documentos")
         equipment_permission = Permiso(id=1003, codigo="equipamiento.dashboard.ver", nombre="Ver equipamiento", modulo="equipamiento")
         edit_permission = Permiso(id=1004, codigo="documentos.editar", nombre="Editar documentos", modulo="documentos")
+        personal_permission = Permiso(id=1005, codigo="personal.ver", nombre="Ver personal", modulo="personal")
         viewer = Rol(id=2001, nombre="CALIDAD", es_sistema=True)
         no_access = Rol(id=2002, nombre="SIN_ACCESO", es_sistema=True)
-        db.session.add_all([permission, pending_permission, equipment_permission, edit_permission, viewer, no_access])
+        db.session.add_all([permission, pending_permission, equipment_permission, edit_permission, personal_permission, viewer, no_access])
         db.session.flush()
         db.session.add_all([
             RolPermiso(id=3001, rol_id=viewer.id, permiso_id=permission.id),
             RolPermiso(id=3002, rol_id=viewer.id, permiso_id=pending_permission.id),
             RolPermiso(id=3003, rol_id=viewer.id, permiso_id=equipment_permission.id),
             RolPermiso(id=3004, rol_id=viewer.id, permiso_id=edit_permission.id),
+            RolPermiso(id=3005, rol_id=viewer.id, permiso_id=personal_permission.id),
             UsuarioRol(id=4001, usuario_id=201, rol_id=viewer.id),
             UsuarioRol(id=4002, usuario_id=203, rol_id=viewer.id),
             UsuarioRol(id=4003, usuario_id=202, rol_id=no_access.id),
