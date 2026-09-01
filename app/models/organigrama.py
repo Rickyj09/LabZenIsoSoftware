@@ -60,6 +60,16 @@ TIPOS_EVIDENCIA_AUTORIZACION_TECNICA = (
     "RESOLUCION_INTERNA",
     "OTRO",
 )
+TIPOS_SEGUIMIENTO_PERSONAL = (
+    "REEVALUACION_COMPETENCIA",
+    "CAPACITACION_REQUERIDA",
+    "REVISION_AUTORIZACION",
+    "SEGUIMIENTO_DESEMPENO",
+    "OBSERVACION",
+    "OTRO",
+)
+ESTADOS_SEGUIMIENTO_PERSONAL = ("PENDIENTE", "EN_PROCESO", "COMPLETADO", "CANCELADO")
+PRIORIDADES_SEGUIMIENTO_PERSONAL = ("BAJA", "MEDIA", "ALTA")
 
 
 class Cargo(TenantMixin, BaseModel):
@@ -186,6 +196,20 @@ class Personal(TenantMixin, BaseModel):
         "PersonalAutorizacionTecnica",
         foreign_keys="PersonalAutorizacionTecnica.autorizador_personal_id",
         back_populates="autorizador_personal",
+        lazy=True,
+    )
+    seguimientos = db.relationship(
+        "PersonalSeguimiento",
+        foreign_keys="PersonalSeguimiento.personal_id",
+        back_populates="personal",
+        lazy=True,
+        order_by="PersonalSeguimiento.fecha_deteccion.desc(), PersonalSeguimiento.id.desc()",
+        cascade="all, delete-orphan",
+    )
+    seguimientos_responsable = db.relationship(
+        "PersonalSeguimiento",
+        foreign_keys="PersonalSeguimiento.responsable_personal_id",
+        back_populates="responsable_personal",
         lazy=True,
     )
 
@@ -654,3 +678,77 @@ class PersonalAutorizacionTecnicaEvidencia(TenantMixin, BaseModel):
     empresa = db.relationship("Empresa")
     autorizacion = db.relationship("PersonalAutorizacionTecnica", back_populates="evidencias")
     cargado_por = db.relationship("Usuario", foreign_keys=[cargado_por_id])
+
+
+class PersonalSeguimiento(TenantMixin, BaseModel):
+    __tablename__ = "personal_seguimientos"
+    __table_args__ = (
+        db.CheckConstraint(
+            "tipo IN ('REEVALUACION_COMPETENCIA', 'CAPACITACION_REQUERIDA', 'REVISION_AUTORIZACION', 'SEGUIMIENTO_DESEMPENO', 'OBSERVACION', 'OTRO')",
+            name="ck_personal_seguimientos_tipo_valido",
+        ),
+        db.CheckConstraint(
+            "estado IN ('PENDIENTE', 'EN_PROCESO', 'COMPLETADO', 'CANCELADO')",
+            name="ck_personal_seguimientos_estado_valido",
+        ),
+        db.CheckConstraint(
+            "prioridad IN ('BAJA', 'MEDIA', 'ALTA')",
+            name="ck_personal_seguimientos_prioridad_valida",
+        ),
+        db.CheckConstraint(
+            "fecha_objetivo IS NULL OR fecha_objetivo >= fecha_deteccion",
+            name="ck_personal_seguimientos_fecha_objetivo_coherente",
+        ),
+        db.CheckConstraint(
+            "fecha_cierre IS NULL OR fecha_cierre >= fecha_deteccion",
+            name="ck_personal_seguimientos_fecha_cierre_coherente",
+        ),
+        db.CheckConstraint(
+            "estado <> 'COMPLETADO' OR (fecha_cierre IS NOT NULL AND resultado_cierre IS NOT NULL)",
+            name="ck_personal_seguimientos_cierre_completo",
+        ),
+        db.Index("ix_personal_seguimientos_empresa_personal", "empresa_id", "personal_id"),
+        db.Index("ix_personal_seguimientos_empresa_estado", "empresa_id", "estado"),
+        db.Index("ix_personal_seguimientos_empresa_tipo", "empresa_id", "tipo"),
+        db.Index("ix_personal_seguimientos_empresa_prioridad", "empresa_id", "prioridad"),
+        db.Index("ix_personal_seguimientos_empresa_objetivo", "empresa_id", "fecha_objetivo"),
+        db.Index("ix_personal_seguimientos_empresa_responsable_personal", "empresa_id", "responsable_personal_id"),
+    )
+
+    personal_id = db.Column(db.BigInteger, db.ForeignKey("personal.id"), nullable=False)
+    tipo = db.Column(db.String(40), nullable=False)
+    titulo = db.Column(db.String(180), nullable=False)
+    descripcion = db.Column(db.Text)
+    fecha_deteccion = db.Column(db.Date, nullable=False)
+    fecha_objetivo = db.Column(db.Date)
+    fecha_cierre = db.Column(db.Date)
+    estado = db.Column(db.String(20), nullable=False, default="PENDIENTE")
+    prioridad = db.Column(db.String(20), nullable=False, default="MEDIA")
+    responsable_personal_id = db.Column(db.BigInteger, db.ForeignKey("personal.id"))
+    responsable_usuario_id = db.Column(db.BigInteger, db.ForeignKey("usuarios.id"))
+    evaluacion_competencia_id = db.Column(db.BigInteger, db.ForeignKey("personal_evaluaciones_competencia.id"))
+    autorizacion_tecnica_id = db.Column(db.BigInteger, db.ForeignKey("personal_autorizaciones_tecnicas.id"))
+    capacitacion_id = db.Column(db.BigInteger, db.ForeignKey("personal_capacitaciones.id"))
+    accion_requerida = db.Column(db.Text, nullable=False)
+    resultado_cierre = db.Column(db.Text)
+    observaciones = db.Column(db.Text)
+
+    empresa = db.relationship("Empresa")
+    personal = db.relationship("Personal", foreign_keys=[personal_id], back_populates="seguimientos")
+    responsable_personal = db.relationship(
+        "Personal",
+        foreign_keys=[responsable_personal_id],
+        back_populates="seguimientos_responsable",
+    )
+    responsable_usuario = db.relationship("Usuario", foreign_keys=[responsable_usuario_id])
+    evaluacion_competencia = db.relationship("PersonalEvaluacionCompetencia")
+    autorizacion_tecnica = db.relationship("PersonalAutorizacionTecnica")
+    capacitacion = db.relationship("PersonalCapacitacion")
+
+    @property
+    def responsable_nombre(self):
+        if self.responsable_personal:
+            return self.responsable_personal.nombre_completo
+        if self.responsable_usuario:
+            return f"{self.responsable_usuario.nombre} {self.responsable_usuario.apellido}".strip()
+        return "-"

@@ -1,0 +1,147 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Seguimiento de personal{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h3 class="mb-1">Seguimiento de personal</h3>
+            <p class="text-muted mb-0">Vigencias, reevaluaciones y acciones abiertas</p>
+        </div>
+        {% if can('personal.gestionar') %}
+        <a class="btn btn-primary" href="{{ url_for('personal.nuevo_seguimiento') }}">Nuevo seguimiento</a>
+        {% endif %}
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md"><div class="border rounded p-3"><div class="text-muted small">Pendientes</div><div class="h4 mb-0">{{ dashboard.metricas.seguimientos_pendientes }}</div></div></div>
+        <div class="col-md"><div class="border rounded p-3"><div class="text-muted small">En proceso</div><div class="h4 mb-0">{{ dashboard.metricas.seguimientos_en_proceso }}</div></div></div>
+        <div class="col-md"><div class="border rounded p-3"><div class="text-muted small">Vencidas</div><div class="h4 mb-0">{{ dashboard.metricas.autorizaciones_vencidas }}</div></div></div>
+        <div class="col-md"><div class="border rounded p-3"><div class="text-muted small">Proximas {{ dashboard.warning_days }} dias</div><div class="h4 mb-0">{{ dashboard.metricas.autorizaciones_proximas }}</div></div></div>
+        <div class="col-md"><div class="border rounded p-3"><div class="text-muted small">Evaluaciones con accion</div><div class="h4 mb-0">{{ dashboard.metricas.evaluaciones_requieren_accion }}</div></div></div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-6">
+            <h5>Autorizaciones vencidas</h5>
+            <table class="table table-sm table-bordered align-middle">
+                <thead><tr><th>Persona</th><th>Actividad</th><th>Fin</th><th class="text-end">Acciones</th></tr></thead>
+                <tbody>
+                    {% for item in dashboard.autorizaciones_vencidas %}
+                    <tr>
+                        <td>{{ item.personal.nombre_completo }}</td>
+                        <td>{{ item.actividad }}</td>
+                        <td>{{ item.fecha_fin }}</td>
+                        <td class="text-end">
+                            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('personal.detalle_autorizacion_tecnica', autorizacion_id=item.id) }}">Ver</a>
+                            {% if can('personal.gestionar') %}
+                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('personal.nuevo_seguimiento', source='autorizacion', source_id=item.id) }}">Crear seguimiento</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" class="text-center">No hay autorizaciones vencidas.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="col-lg-6">
+            <h5>Autorizaciones proximas a vencer</h5>
+            <table class="table table-sm table-bordered align-middle">
+                <thead><tr><th>Persona</th><th>Actividad</th><th>Fin</th><th class="text-end">Acciones</th></tr></thead>
+                <tbody>
+                    {% for item in dashboard.autorizaciones_proximas %}
+                    <tr>
+                        <td>{{ item.personal.nombre_completo }}</td>
+                        <td>{{ item.actividad }}</td>
+                        <td>{{ item.fecha_fin }}</td>
+                        <td class="text-end">
+                            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('personal.detalle_autorizacion_tecnica', autorizacion_id=item.id) }}">Ver</a>
+                            {% if can('personal.gestionar') %}
+                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('personal.nuevo_seguimiento', source='autorizacion', source_id=item.id) }}">Crear seguimiento</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" class="text-center">No hay autorizaciones proximas a vencer.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="col-lg-6">
+            <h5>Evaluaciones que requieren accion</h5>
+            <table class="table table-sm table-bordered align-middle">
+                <thead><tr><th>Persona</th><th>Actividad</th><th>Resultado</th><th class="text-end">Acciones</th></tr></thead>
+                <tbody>
+                    {% for item in dashboard.evaluaciones_requieren_accion %}
+                    <tr>
+                        <td>{{ item.personal.nombre_completo }}</td>
+                        <td>{{ item.actividad }}</td>
+                        <td><span class="badge text-bg-warning">{{ item.resultado }}</span></td>
+                        <td class="text-end">
+                            <a class="btn btn-sm btn-outline-primary" href="{{ url_for('personal.detalle_evaluacion_competencia', evaluacion_id=item.id) }}">Ver</a>
+                            {% if can('personal.gestionar') %}
+                            <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('personal.nuevo_seguimiento', source='evaluacion', source_id=item.id) }}">Crear seguimiento</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" class="text-center">No hay evaluaciones que requieran accion.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="col-lg-6">
+            <h5>Seguimientos abiertos</h5>
+            <table class="table table-sm table-bordered align-middle">
+                <thead><tr><th>Persona</th><th>Asunto</th><th>Objetivo</th><th>Estado</th></tr></thead>
+                <tbody>
+                    {% for item in dashboard.seguimientos_abiertos %}
+                    <tr>
+                        <td>{{ item.personal.nombre_completo }}</td>
+                        <td><a href="{{ url_for('personal.detalle_seguimiento', seguimiento_id=item.id) }}">{{ item.titulo }}</a></td>
+                        <td>{{ item.fecha_objetivo or '-' }}</td>
+                        <td><span class="badge {{ seguimiento_badge_class(item.estado) }}">{{ item.estado }}</span></td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4" class="text-center">No hay seguimientos abiertos.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <h5 class="mt-4">Listado de seguimientos</h5>
+    <form class="row g-2 mb-3" method="get">
+        <div class="col-md-3"><label class="form-label">Buscar</label><input class="form-control" name="q" value="{{ filters.q }}"></div>
+        <div class="col-md-2"><label class="form-label">Persona</label><select class="form-select" name="persona_id"><option value="">Todas</option>{% for persona in personal_disponible %}<option value="{{ persona.id }}" {% if filters.persona_id == persona.id|string %}selected{% endif %}>{{ persona.nombre_completo }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label">Tipo</label><select class="form-select" name="tipo"><option value="">Todos</option>{% for tipo in tipos_seguimiento %}<option value="{{ tipo }}" {% if filters.tipo == tipo %}selected{% endif %}>{{ tipo }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label">Estado</label><select class="form-select" name="estado"><option value="">Todos</option>{% for estado in estados_seguimiento %}<option value="{{ estado }}" {% if filters.estado == estado %}selected{% endif %}>{{ estado }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><label class="form-label">Prioridad</label><select class="form-select" name="prioridad"><option value="">Todas</option>{% for prioridad in prioridades_seguimiento %}<option value="{{ prioridad }}" {% if filters.prioridad == prioridad %}selected{% endif %}>{{ prioridad }}</option>{% endfor %}</select></div>
+        <div class="col-md-1 d-flex align-items-end"><button class="btn btn-outline-primary w-100" type="submit">Filtrar</button></div>
+    </form>
+    <div class="table-responsive">
+        <table class="table table-bordered table-sm align-middle">
+            <thead><tr><th>Persona</th><th>Tipo</th><th>Asunto</th><th>Prioridad</th><th>Responsable</th><th>Deteccion</th><th>Objetivo</th><th>Estado</th><th class="text-end">Acciones</th></tr></thead>
+            <tbody>
+                {% for item in items %}
+                <tr>
+                    <td>{{ item.personal.nombre_completo }}</td>
+                    <td>{{ item.tipo }}</td>
+                    <td>{{ item.titulo }}</td>
+                    <td><span class="badge {{ prioridad_badge_class(item.prioridad) }}">{{ item.prioridad }}</span></td>
+                    <td>{{ item.responsable_nombre }}</td>
+                    <td>{{ item.fecha_deteccion }}</td>
+                    <td>{{ item.fecha_objetivo or '-' }}</td>
+                    <td><span class="badge {{ seguimiento_badge_class(item.estado) }}">{{ item.estado }}</span></td>
+                    <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="{{ url_for('personal.detalle_seguimiento', seguimiento_id=item.id) }}">Ver</a></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="9" class="text-center">No hay seguimientos registrados.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

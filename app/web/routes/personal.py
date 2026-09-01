@@ -12,6 +12,7 @@ from app.models.organigrama import (
     ESTADOS_CAPACITACION_PERSONAL,
     ESTADOS_PARTICIPACION_CAPACITACION,
     ESTADOS_PERSONAL,
+    ESTADOS_SEGUIMIENTO_PERSONAL,
     METODOS_EVALUACION_COMPETENCIA,
     MODALIDADES_CAPACITACION_PERSONAL,
     Personal,
@@ -19,6 +20,7 @@ from app.models.organigrama import (
     PersonalCapacitacion,
     PersonalCapacitacionParticipante,
     PersonalEvaluacionCompetencia,
+    PRIORIDADES_SEGUIMIENTO_PERSONAL,
     RESULTADOS_EVALUACION_COMPETENCIA,
     TIPOS_AUTORIZACION_TECNICA,
     TIPOS_CALIFICACION_PERSONAL,
@@ -27,6 +29,7 @@ from app.models.organigrama import (
     TIPOS_EVIDENCIA_CAPACITACION,
     TIPOS_EVIDENCIA_AUTORIZACION_TECNICA,
     TIPOS_EVIDENCIA_EVALUACION_COMPETENCIA,
+    TIPOS_SEGUIMIENTO_PERSONAL,
 )
 from app.security.permissions import require_permission
 from app.services import personal_service
@@ -72,10 +75,15 @@ def _personal_context(**extra):
         "estados_autorizacion": ESTADOS_AUTORIZACION_TECNICA,
         "estados_autorizacion_efectivos": ("VIGENTE", "SUSPENDIDA", "REVOCADA", "VENCIDA"),
         "tipos_evidencia_autorizacion": TIPOS_EVIDENCIA_AUTORIZACION_TECNICA,
+        "tipos_seguimiento": TIPOS_SEGUIMIENTO_PERSONAL,
+        "estados_seguimiento": ESTADOS_SEGUIMIENTO_PERSONAL,
+        "prioridades_seguimiento": PRIORIDADES_SEGUIMIENTO_PERSONAL,
         "cargos": Cargo.query.filter_by(empresa_id=current_user.empresa_id).order_by(Cargo.codigo.asc()).all(),
         "usuarios": personal_service.company_users(current_user),
         "estado_badge_class": _estado_badge_class,
         "autorizacion_badge_class": _autorizacion_badge_class,
+        "seguimiento_badge_class": _seguimiento_badge_class,
+        "prioridad_badge_class": _prioridad_badge_class,
     }
     context.update(extra)
     return context
@@ -95,6 +103,23 @@ def _autorizacion_badge_class(estado):
         "REVOCADA": "text-bg-danger",
         "VENCIDA": "text-bg-secondary",
     }.get(estado, "text-bg-light")
+
+
+def _seguimiento_badge_class(estado):
+    return {
+        "PENDIENTE": "text-bg-warning",
+        "EN_PROCESO": "text-bg-primary",
+        "COMPLETADO": "text-bg-success",
+        "CANCELADO": "text-bg-secondary",
+    }.get(estado, "text-bg-light")
+
+
+def _prioridad_badge_class(prioridad):
+    return {
+        "BAJA": "text-bg-secondary",
+        "MEDIA": "text-bg-info",
+        "ALTA": "text-bg-danger",
+    }.get(prioridad, "text-bg-light")
 
 
 @bp.route("/")
@@ -144,7 +169,13 @@ def detalle(item_id):
     item = personal_service.get_personal(current_user, item_id)
     if not item:
         abort(404)
-    return render_template("personal/detalle.html", **_personal_context(item=item))
+    return render_template(
+        "personal/detalle.html",
+        **_personal_context(
+            item=item,
+            seguimiento_resumen=personal_service.personal_followup_summary(current_user, item),
+        ),
+    )
 
 
 @bp.route("/<int:item_id>/editar", methods=["GET", "POST"])
@@ -622,6 +653,10 @@ def _redirect_autorizacion_detail(autorizacion_id):
     return redirect(url_for("personal.detalle_autorizacion_tecnica", autorizacion_id=autorizacion_id))
 
 
+def _redirect_seguimiento_detail(seguimiento_id):
+    return redirect(url_for("personal.detalle_seguimiento", seguimiento_id=seguimiento_id))
+
+
 def _authorization_form_context(item, autorizacion=None, form_data=None):
     return _personal_context(
         item=item,
@@ -630,6 +665,33 @@ def _authorization_form_context(item, autorizacion=None, form_data=None):
         personal_disponible=_personal_activo(),
         equipos=_equipos_empresa(),
         evaluaciones=_evaluaciones_compatibles(item.id if item else None),
+    )
+
+
+def _seguimiento_form_context(seguimiento=None, form_data=None):
+    personal_id = (form_data or {}).get("personal_id") if form_data else (seguimiento.personal_id if seguimiento else None)
+    evaluaciones = []
+    autorizaciones = []
+    if personal_id:
+        evaluaciones = (
+            PersonalEvaluacionCompetencia.query
+            .filter_by(empresa_id=current_user.empresa_id, personal_id=personal_id)
+            .order_by(PersonalEvaluacionCompetencia.fecha_evaluacion.desc(), PersonalEvaluacionCompetencia.id.desc())
+            .all()
+        )
+        autorizaciones = (
+            PersonalAutorizacionTecnica.query
+            .filter_by(empresa_id=current_user.empresa_id, personal_id=personal_id)
+            .order_by(PersonalAutorizacionTecnica.fecha_inicio.desc(), PersonalAutorizacionTecnica.id.desc())
+            .all()
+        )
+    return _personal_context(
+        seguimiento=seguimiento,
+        form_data=form_data or {},
+        personal_disponible=_personal_activo(),
+        capacitaciones=_capacitaciones_empresa(),
+        evaluaciones=evaluaciones,
+        autorizaciones=autorizaciones,
     )
 
 
@@ -851,6 +913,143 @@ def cambiar_estado_evidencia_autorizacion_tecnica(evidencia_id):
     db.session.commit()
     flash("Estado de la evidencia actualizado correctamente.", "success")
     return _redirect_autorizacion_detail(evidencia.autorizacion_id)
+
+
+@bp.route("/seguimiento")
+@login_required
+@require_permission(personal_service.PERM_VER)
+def seguimiento():
+    filters = {
+        key: request.args.get(key, "").strip()
+        for key in ("q", "persona_id", "tipo", "estado", "prioridad", "responsable_personal_id")
+    }
+    dashboard = personal_service.seguimiento_dashboard(current_user)
+    items = personal_service.seguimientos_query(current_user, filters).all()
+    return render_template(
+        "personal/seguimiento_index.html",
+        **_personal_context(
+            dashboard=dashboard,
+            items=items,
+            filters=filters,
+            personal_disponible=_personal_activo(),
+        ),
+    )
+
+
+@bp.route("/seguimiento/nuevo", methods=["GET", "POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def nuevo_seguimiento():
+    if request.method == "POST":
+        _validate_csrf()
+        try:
+            item = personal_service.create_seguimiento(current_user, request.form)
+            db.session.commit()
+            flash("Seguimiento registrado correctamente.", "success")
+            return _redirect_seguimiento_detail(item.id)
+        except PersonalError as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template("personal/seguimiento_form.html", **_seguimiento_form_context(form_data=request.form))
+    try:
+        form_data = personal_service.seguimiento_form_defaults(
+            current_user,
+            source=request.args.get("source", "").strip() or None,
+            source_id=request.args.get("source_id", "").strip() or None,
+            personal_id=request.args.get("personal_id", "").strip() or None,
+        )
+    except PersonalError as exc:
+        flash(str(exc), "warning")
+        form_data = personal_service.seguimiento_form_defaults(current_user)
+    return render_template("personal/seguimiento_form.html", **_seguimiento_form_context(form_data=form_data))
+
+
+@bp.route("/seguimiento/<int:seguimiento_id>")
+@login_required
+@require_permission(personal_service.PERM_VER)
+def detalle_seguimiento(seguimiento_id):
+    item = personal_service.get_seguimiento(current_user, seguimiento_id)
+    if not item:
+        abort(404)
+    return render_template("personal/seguimiento_detalle.html", **_personal_context(seguimiento=item))
+
+
+@bp.route("/seguimiento/<int:seguimiento_id>/editar", methods=["GET", "POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def editar_seguimiento(seguimiento_id):
+    item = personal_service.get_seguimiento(current_user, seguimiento_id)
+    if not item:
+        abort(404)
+    if item.estado in {"COMPLETADO", "CANCELADO"}:
+        flash("Un seguimiento cerrado solo puede consultarse.", "warning")
+        return _redirect_seguimiento_detail(item.id)
+    if request.method == "POST":
+        _validate_csrf()
+        try:
+            personal_service.update_seguimiento(current_user, item, request.form)
+            db.session.commit()
+            flash("Seguimiento actualizado correctamente.", "success")
+            return _redirect_seguimiento_detail(item.id)
+        except PersonalError as exc:
+            db.session.rollback()
+            flash(str(exc), "warning")
+            return render_template("personal/seguimiento_form.html", **_seguimiento_form_context(item, request.form))
+    return render_template("personal/seguimiento_form.html", **_seguimiento_form_context(item, {}))
+
+
+@bp.route("/seguimiento/<int:seguimiento_id>/iniciar", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def iniciar_seguimiento(seguimiento_id):
+    _validate_csrf()
+    item = personal_service.get_seguimiento(current_user, seguimiento_id)
+    if not item:
+        abort(404)
+    try:
+        personal_service.iniciar_seguimiento(current_user, item)
+        db.session.commit()
+        flash("Seguimiento iniciado correctamente.", "success")
+    except PersonalError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_seguimiento_detail(item.id)
+
+
+@bp.route("/seguimiento/<int:seguimiento_id>/completar", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def completar_seguimiento(seguimiento_id):
+    _validate_csrf()
+    item = personal_service.get_seguimiento(current_user, seguimiento_id)
+    if not item:
+        abort(404)
+    try:
+        personal_service.completar_seguimiento(current_user, item, request.form)
+        db.session.commit()
+        flash("Seguimiento completado correctamente.", "success")
+    except PersonalError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_seguimiento_detail(item.id)
+
+
+@bp.route("/seguimiento/<int:seguimiento_id>/cancelar", methods=["POST"])
+@login_required
+@require_permission(personal_service.PERM_GESTIONAR)
+def cancelar_seguimiento(seguimiento_id):
+    _validate_csrf()
+    item = personal_service.get_seguimiento(current_user, seguimiento_id)
+    if not item:
+        abort(404)
+    try:
+        personal_service.cancelar_seguimiento(current_user, item, request.form)
+        db.session.commit()
+        flash("Seguimiento cancelado correctamente.", "success")
+    except PersonalError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    return _redirect_seguimiento_detail(item.id)
 
 
 @bp.route("/<int:item_id>/calificaciones/nueva", methods=["GET", "POST"])

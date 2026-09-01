@@ -65,6 +65,7 @@ from app.models.organigrama import (
     PersonalEvaluacionCompetencia,
     PersonalEvaluacionCompetenciaEvidencia,
     PersonalExperiencia,
+    PersonalSeguimiento,
 )
 from app.models.mapa_procesos import Proceso
 from app.models.ofertas import Oferta

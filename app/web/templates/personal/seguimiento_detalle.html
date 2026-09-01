@@ -1,0 +1,90 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Detalle de seguimiento{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h3 class="mb-1">{{ seguimiento.titulo }}</h3>
+            <span class="badge {{ seguimiento_badge_class(seguimiento.estado) }}">{{ seguimiento.estado }}</span>
+            <span class="badge {{ prioridad_badge_class(seguimiento.prioridad) }}">{{ seguimiento.prioridad }}</span>
+        </div>
+        <div class="d-flex gap-2">
+            <a class="btn btn-outline-secondary" href="{{ url_for('personal.seguimiento') }}">Volver</a>
+            {% if can('personal.gestionar') and seguimiento.estado not in ['COMPLETADO', 'CANCELADO'] %}
+            <a class="btn btn-primary" href="{{ url_for('personal.editar_seguimiento', seguimiento_id=seguimiento.id) }}">Editar</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <h5>Persona</h5>
+            <table class="table table-bordered">
+                <tr><th>Nombre</th><td><a href="{{ url_for('personal.detalle', item_id=seguimiento.personal_id) }}">{{ seguimiento.personal.nombre_completo }}</a></td></tr>
+                <tr><th>Cargo</th><td>{{ seguimiento.personal.cargo.codigo }} - {{ seguimiento.personal.cargo.nombre }}</td></tr>
+            </table>
+        </div>
+        <div class="col-lg-6">
+            <h5>Seguimiento</h5>
+            <table class="table table-bordered">
+                <tr><th>Tipo</th><td>{{ seguimiento.tipo }}</td></tr>
+                <tr><th>Asunto</th><td>{{ seguimiento.titulo }}</td></tr>
+                <tr><th>Descripcion</th><td>{{ seguimiento.descripcion or '-' }}</td></tr>
+                <tr><th>Prioridad</th><td>{{ seguimiento.prioridad }}</td></tr>
+                <tr><th>Estado</th><td>{{ seguimiento.estado }}</td></tr>
+            </table>
+        </div>
+        <div class="col-lg-6">
+            <h5>Plan</h5>
+            <table class="table table-bordered">
+                <tr><th>Accion requerida</th><td>{{ seguimiento.accion_requerida }}</td></tr>
+                <tr><th>Responsable</th><td>{{ seguimiento.responsable_nombre }}</td></tr>
+                <tr><th>Fecha deteccion</th><td>{{ seguimiento.fecha_deteccion }}</td></tr>
+                <tr><th>Fecha objetivo</th><td>{{ seguimiento.fecha_objetivo or '-' }}</td></tr>
+            </table>
+        </div>
+        <div class="col-lg-6">
+            <h5>Relaciones</h5>
+            <table class="table table-bordered">
+                <tr><th>Evaluacion</th><td>{% if seguimiento.evaluacion_competencia %}<a href="{{ url_for('personal.detalle_evaluacion_competencia', evaluacion_id=seguimiento.evaluacion_competencia_id) }}">{{ seguimiento.evaluacion_competencia.codigo or seguimiento.evaluacion_competencia_id }}</a>{% else %}-{% endif %}</td></tr>
+                <tr><th>Autorizacion</th><td>{% if seguimiento.autorizacion_tecnica %}<a href="{{ url_for('personal.detalle_autorizacion_tecnica', autorizacion_id=seguimiento.autorizacion_tecnica_id) }}">{{ seguimiento.autorizacion_tecnica.codigo or seguimiento.autorizacion_tecnica_id }}</a>{% else %}-{% endif %}</td></tr>
+                <tr><th>Capacitacion</th><td>{% if seguimiento.capacitacion %}<a href="{{ url_for('personal.detalle_capacitacion', capacitacion_id=seguimiento.capacitacion_id) }}">{{ seguimiento.capacitacion.codigo or seguimiento.capacitacion_id }}</a>{% else %}-{% endif %}</td></tr>
+            </table>
+        </div>
+        <div class="col-12">
+            <h5>Cierre</h5>
+            <table class="table table-bordered">
+                <tr><th>Fecha cierre</th><td>{{ seguimiento.fecha_cierre or '-' }}</td></tr>
+                <tr><th>Resultado</th><td>{{ seguimiento.resultado_cierre or '-' }}</td></tr>
+                <tr><th>Observaciones</th><td>{{ seguimiento.observaciones or '-' }}</td></tr>
+            </table>
+        </div>
+    </div>
+
+    {% if can('personal.gestionar') and seguimiento.estado not in ['COMPLETADO', 'CANCELADO'] %}
+    <div class="row g-3 mt-2">
+        {% if seguimiento.estado == 'PENDIENTE' %}
+        <form class="col-md-4" method="post" action="{{ url_for('personal.iniciar_seguimiento', seguimiento_id=seguimiento.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="btn btn-outline-primary w-100" type="submit">Iniciar</button>
+        </form>
+        {% endif %}
+        {% if seguimiento.estado == 'EN_PROCESO' %}
+        <form class="col-md-4" method="post" action="{{ url_for('personal.completar_seguimiento', seguimiento_id=seguimiento.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="date" class="form-control mb-2" name="fecha_cierre" value="{{ seguimiento.fecha_objetivo or '' }}">
+            <textarea class="form-control mb-2" name="resultado_cierre" rows="2" required></textarea>
+            <button class="btn btn-outline-success w-100" type="submit">Completar</button>
+        </form>
+        {% endif %}
+        <form class="col-md-4" method="post" action="{{ url_for('personal.cancelar_seguimiento', seguimiento_id=seguimiento.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <textarea class="form-control mb-2" name="resultado_cierre" rows="2"></textarea>
+            <button class="btn btn-outline-secondary w-100" type="submit">Cancelar</button>
+        </form>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

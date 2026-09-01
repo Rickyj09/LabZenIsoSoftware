@@ -1,4 +1,5 @@
 from datetime import date
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import or_
@@ -11,6 +12,7 @@ from app.models.organigrama import (
     ESTADOS_CAPACITACION_PERSONAL,
     ESTADOS_PARTICIPACION_CAPACITACION,
     ESTADOS_PERSONAL,
+    ESTADOS_SEGUIMIENTO_PERSONAL,
     METODOS_EVALUACION_COMPETENCIA,
     MODALIDADES_CAPACITACION_PERSONAL,
     PerfilPuesto,
@@ -25,6 +27,8 @@ from app.models.organigrama import (
     PersonalEvaluacionCompetencia,
     PersonalEvaluacionCompetenciaEvidencia,
     PersonalExperiencia,
+    PersonalSeguimiento,
+    PRIORIDADES_SEGUIMIENTO_PERSONAL,
     RESULTADOS_EVALUACION_COMPETENCIA,
     TIPOS_AUTORIZACION_TECNICA,
     TIPOS_CALIFICACION_PERSONAL,
@@ -33,6 +37,7 @@ from app.models.organigrama import (
     TIPOS_EVIDENCIA_CAPACITACION,
     TIPOS_EVIDENCIA_AUTORIZACION_TECNICA,
     TIPOS_EVIDENCIA_EVALUACION_COMPETENCIA,
+    TIPOS_SEGUIMIENTO_PERSONAL,
 )
 from app.models.seguridad import Usuario
 from app.security.permissions import user_has_permission
@@ -47,6 +52,15 @@ from app.services.storage_service import (
 
 PERM_VER = "personal.ver"
 PERM_GESTIONAR = "personal.gestionar"
+PERSONAL_AUTHORIZATION_EXPIRY_WARNING_DAYS = 30
+EVALUATION_RESULTS_REQUIRING_ACTION = ("REQUIERE_ENTRENAMIENTO", "NO_COMPETENTE")
+OPEN_SEGUIMIENTO_STATES = ("PENDIENTE", "EN_PROCESO")
+VALID_SEGUIMIENTO_TRANSITIONS = {
+    "PENDIENTE": {"EN_PROCESO", "CANCELADO"},
+    "EN_PROCESO": {"COMPLETADO", "CANCELADO"},
+    "COMPLETADO": set(),
+    "CANCELADO": set(),
+}
 
 
 class PersonalError(ValueError):
@@ -144,6 +158,10 @@ def get_autorizacion_tecnica(user, autorizacion_id):
 
 def get_autorizacion_tecnica_evidencia(user, evidencia_id):
     return PersonalAutorizacionTecnicaEvidencia.query.filter_by(id=evidencia_id, empresa_id=user.empresa_id).first()
+
+
+def get_seguimiento(user, seguimiento_id):
+    return PersonalSeguimiento.query.filter_by(id=seguimiento_id, empresa_id=user.empresa_id).first()
 
 
 def get_equipo(user, equipo_id):
@@ -1158,3 +1176,346 @@ def set_autorizacion_tecnica_evidencia_active(user, evidencia, active):
     _validate_autorizacion_record(user, evidencia.autorizacion)
     evidencia.activo = bool(active)
     return evidencia
+
+
+def authorization_expiry_warning_days():
+    return PERSONAL_AUTHORIZATION_EXPIRY_WARNING_DAYS
+
+
+def autorizaciones_vencidas_query(user, today=None):
+    today = today or date.today()
+    return (
+        PersonalAutorizacionTecnica.query
+        .filter(
+            PersonalAutorizacionTecnica.empresa_id == user.empresa_id,
+            PersonalAutorizacionTecnica.estado == "VIGENTE",
+            PersonalAutorizacionTecnica.fecha_fin.isnot(None),
+            PersonalAutorizacionTecnica.fecha_fin < today,
+        )
+        .order_by(PersonalAutorizacionTecnica.fecha_fin.asc(), PersonalAutorizacionTecnica.id.asc())
+    )
+
+
+def autorizaciones_proximas_vencer_query(user, today=None, days=None):
+    today = today or date.today()
+    days = authorization_expiry_warning_days() if days is None else int(days)
+    limit = today + timedelta(days=days)
+    return (
+        PersonalAutorizacionTecnica.query
+        .filter(
+            PersonalAutorizacionTecnica.empresa_id == user.empresa_id,
+            PersonalAutorizacionTecnica.estado == "VIGENTE",
+            PersonalAutorizacionTecnica.fecha_fin.isnot(None),
+            PersonalAutorizacionTecnica.fecha_fin >= today,
+            PersonalAutorizacionTecnica.fecha_fin <= limit,
+        )
+        .order_by(PersonalAutorizacionTecnica.fecha_fin.asc(), PersonalAutorizacionTecnica.id.asc())
+    )
+
+
+def evaluaciones_requieren_accion_query(user):
+    return (
+        PersonalEvaluacionCompetencia.query
+        .filter(
+            PersonalEvaluacionCompetencia.empresa_id == user.empresa_id,
+            PersonalEvaluacionCompetencia.activo.is_(True),
+            PersonalEvaluacionCompetencia.resultado.in_(EVALUATION_RESULTS_REQUIRING_ACTION),
+        )
+        .order_by(PersonalEvaluacionCompetencia.fecha_evaluacion.desc(), PersonalEvaluacionCompetencia.id.desc())
+    )
+
+
+def seguimientos_query(user, filters=None):
+    filters = filters or {}
+    query = PersonalSeguimiento.query.filter_by(empresa_id=user.empresa_id)
+    if filters.get("persona_id"):
+        query = query.filter(PersonalSeguimiento.personal_id == filters["persona_id"])
+    if filters.get("tipo"):
+        query = query.filter(PersonalSeguimiento.tipo == filters["tipo"])
+    if filters.get("estado"):
+        query = query.filter(PersonalSeguimiento.estado == filters["estado"])
+    if filters.get("prioridad"):
+        query = query.filter(PersonalSeguimiento.prioridad == filters["prioridad"])
+    if filters.get("responsable_personal_id"):
+        query = query.filter(PersonalSeguimiento.responsable_personal_id == filters["responsable_personal_id"])
+    if filters.get("q"):
+        like = f"%{filters['q']}%"
+        query = query.join(Personal, Personal.id == PersonalSeguimiento.personal_id).filter(
+            or_(
+                PersonalSeguimiento.titulo.ilike(like),
+                PersonalSeguimiento.descripcion.ilike(like),
+                PersonalSeguimiento.accion_requerida.ilike(like),
+                Personal.nombres.ilike(like),
+                Personal.apellidos.ilike(like),
+                Personal.codigo.ilike(like),
+            )
+        )
+    return query.order_by(
+        PersonalSeguimiento.fecha_objetivo.asc().nullslast(),
+        PersonalSeguimiento.fecha_deteccion.desc(),
+        PersonalSeguimiento.id.desc(),
+    )
+
+
+def seguimientos_abiertos_query(user):
+    return seguimientos_query(user, {"estado": ""}).filter(PersonalSeguimiento.estado.in_(OPEN_SEGUIMIENTO_STATES))
+
+
+def _validate_seguimiento_record(user, seguimiento):
+    if not seguimiento or seguimiento.empresa_id != user.empresa_id:
+        raise PersonalError("El seguimiento no pertenece a esta empresa.")
+    if not seguimiento.personal or seguimiento.personal.empresa_id != user.empresa_id:
+        raise PersonalError("El personal del seguimiento no pertenece a esta empresa.")
+    if seguimiento.responsable_personal and seguimiento.responsable_personal.empresa_id != user.empresa_id:
+        raise PersonalError("El responsable no pertenece a esta empresa.")
+    if seguimiento.responsable_usuario and seguimiento.responsable_usuario.empresa_id != user.empresa_id:
+        raise PersonalError("El usuario responsable no pertenece a esta empresa.")
+    if seguimiento.evaluacion_competencia:
+        _validate_evaluacion_record(user, seguimiento.evaluacion_competencia)
+        if seguimiento.evaluacion_competencia.personal_id != seguimiento.personal_id:
+            raise PersonalError("La evaluacion asociada no corresponde al personal del seguimiento.")
+    if seguimiento.autorizacion_tecnica:
+        _validate_autorizacion_record(user, seguimiento.autorizacion_tecnica)
+        if seguimiento.autorizacion_tecnica.personal_id != seguimiento.personal_id:
+            raise PersonalError("La autorizacion asociada no corresponde al personal del seguimiento.")
+    if seguimiento.capacitacion and seguimiento.capacitacion.empresa_id != user.empresa_id:
+        raise PersonalError("La capacitacion asociada no pertenece a esta empresa.")
+    return seguimiento
+
+
+def _apply_seguimiento_relations(user, item, data):
+    item.responsable_personal_id = None
+    item.responsable_usuario_id = None
+    item.evaluacion_competencia_id = None
+    item.autorizacion_tecnica_id = None
+    item.capacitacion_id = None
+
+    if data.get("responsable_personal_id"):
+        with db.session.no_autoflush:
+            responsable = _validate_personal_record(user, data.get("responsable_personal_id"))
+        item.responsable_personal_id = responsable.id
+    if data.get("responsable_usuario_id"):
+        selected_user = Usuario.query.filter_by(id=data.get("responsable_usuario_id"), empresa_id=user.empresa_id).first()
+        if not selected_user:
+            raise PersonalError("El usuario responsable no pertenece a esta empresa.")
+        item.responsable_usuario_id = selected_user.id
+    if data.get("evaluacion_competencia_id"):
+        evaluacion = get_evaluacion_competencia(user, data.get("evaluacion_competencia_id"))
+        if not evaluacion:
+            raise PersonalError("La evaluacion asociada no pertenece a esta empresa.")
+        _validate_evaluacion_record(user, evaluacion)
+        if evaluacion.personal_id != item.personal_id:
+            raise PersonalError("La evaluacion asociada no corresponde al personal del seguimiento.")
+        item.evaluacion_competencia_id = evaluacion.id
+    if data.get("autorizacion_tecnica_id"):
+        autorizacion = get_autorizacion_tecnica(user, data.get("autorizacion_tecnica_id"))
+        if not autorizacion:
+            raise PersonalError("La autorizacion asociada no pertenece a esta empresa.")
+        _validate_autorizacion_record(user, autorizacion)
+        if autorizacion.personal_id != item.personal_id:
+            raise PersonalError("La autorizacion asociada no corresponde al personal del seguimiento.")
+        item.autorizacion_tecnica_id = autorizacion.id
+    if data.get("capacitacion_id"):
+        capacitacion = get_capacitacion(user, data.get("capacitacion_id"))
+        if not capacitacion:
+            raise PersonalError("La capacitacion asociada no pertenece a esta empresa.")
+        item.capacitacion_id = capacitacion.id
+
+
+def _apply_seguimiento_data(user, item, data, personal_id=None):
+    selected_personal_id = personal_id if personal_id is not None else (data.get("personal_id") or item.personal_id)
+    personal = _validate_personal_record(user, selected_personal_id)
+    item.empresa_id = user.empresa_id
+    item.personal_id = personal.id
+    item.tipo = _clean(data.get("tipo"), upper=True)
+    item.titulo = _clean(data.get("titulo") or data.get("asunto"))
+    item.descripcion = _clean(data.get("descripcion"))
+    item.fecha_deteccion = _date_from_form(data.get("fecha_deteccion")) or date.today()
+    item.fecha_objetivo = _date_from_form(data.get("fecha_objetivo"))
+    submitted_estado = _clean(data.get("estado"), upper=True)
+    item.estado = item.estado or "PENDIENTE"
+    item.prioridad = _clean(data.get("prioridad"), upper=True) or "MEDIA"
+    item.accion_requerida = _clean(data.get("accion_requerida"))
+    item.resultado_cierre = _clean(data.get("resultado_cierre"))
+    item.observaciones = _clean(data.get("observaciones"))
+    item.fecha_cierre = _date_from_form(data.get("fecha_cierre"))
+
+    if item.tipo not in TIPOS_SEGUIMIENTO_PERSONAL:
+        raise PersonalError("Tipo de seguimiento invalido.")
+    if submitted_estado and submitted_estado not in ESTADOS_SEGUIMIENTO_PERSONAL:
+        raise PersonalError("Estado de seguimiento invalido.")
+    if item.estado not in ESTADOS_SEGUIMIENTO_PERSONAL:
+        raise PersonalError("Estado de seguimiento invalido.")
+    if item.prioridad not in PRIORIDADES_SEGUIMIENTO_PERSONAL:
+        raise PersonalError("Prioridad de seguimiento invalida.")
+    if not item.titulo:
+        raise PersonalError("El asunto del seguimiento es obligatorio.")
+    if not item.accion_requerida:
+        raise PersonalError("La accion requerida es obligatoria.")
+    if item.fecha_objetivo and item.fecha_objetivo < item.fecha_deteccion:
+        raise PersonalError("La fecha objetivo no puede ser anterior a la fecha de deteccion.")
+    if item.fecha_cierre and item.fecha_cierre < item.fecha_deteccion:
+        raise PersonalError("La fecha de cierre no puede ser anterior a la fecha de deteccion.")
+    if item.estado == "COMPLETADO" and (not item.fecha_cierre or not item.resultado_cierre):
+        raise PersonalError("Completar un seguimiento requiere fecha de cierre y resultado.")
+
+    _apply_seguimiento_relations(user, item, data)
+
+
+def create_seguimiento(user, data, personal_id=None):
+    ensure_permission(user, PERM_GESTIONAR)
+    item = PersonalSeguimiento(estado="PENDIENTE")
+    _apply_seguimiento_data(user, item, data, personal_id=personal_id)
+    db.session.add(item)
+    return item
+
+
+def update_seguimiento(user, item, data):
+    ensure_permission(user, PERM_GESTIONAR)
+    _validate_seguimiento_record(user, item)
+    if item.estado in {"COMPLETADO", "CANCELADO"}:
+        raise PersonalError("Un seguimiento cerrado no puede editarse.")
+    _apply_seguimiento_data(user, item, data)
+    return item
+
+
+def set_seguimiento_estado(user, item, estado, data=None):
+    ensure_permission(user, PERM_GESTIONAR)
+    data = data or {}
+    _validate_seguimiento_record(user, item)
+    estado = _clean(estado, upper=True)
+    if estado not in ESTADOS_SEGUIMIENTO_PERSONAL:
+        raise PersonalError("Estado de seguimiento invalido.")
+    if estado == item.estado:
+        return item
+    if estado not in VALID_SEGUIMIENTO_TRANSITIONS[item.estado]:
+        raise PersonalError("Transicion de seguimiento invalida.")
+    if estado == "COMPLETADO":
+        fecha_cierre = _date_from_form(data.get("fecha_cierre")) or date.today()
+        resultado_cierre = _clean(data.get("resultado_cierre"))
+        if not resultado_cierre:
+            raise PersonalError("Completar un seguimiento requiere resultado de cierre.")
+        if fecha_cierre < item.fecha_deteccion:
+            raise PersonalError("La fecha de cierre no puede ser anterior a la fecha de deteccion.")
+        item.fecha_cierre = fecha_cierre
+        item.resultado_cierre = resultado_cierre
+    elif estado == "CANCELADO":
+        item.fecha_cierre = _date_from_form(data.get("fecha_cierre")) or date.today()
+        item.resultado_cierre = _clean(data.get("resultado_cierre")) or "Cancelado"
+    item.estado = estado
+    item.observaciones = _clean(data.get("observaciones")) or item.observaciones
+    return item
+
+
+def iniciar_seguimiento(user, item):
+    return set_seguimiento_estado(user, item, "EN_PROCESO")
+
+
+def completar_seguimiento(user, item, data=None):
+    return set_seguimiento_estado(user, item, "COMPLETADO", data)
+
+
+def cancelar_seguimiento(user, item, data=None):
+    return set_seguimiento_estado(user, item, "CANCELADO", data)
+
+
+def seguimiento_dashboard(user, today=None, days=None):
+    today = today or date.today()
+    days = authorization_expiry_warning_days() if days is None else int(days)
+    vencidas = autorizaciones_vencidas_query(user, today=today).all()
+    proximas = autorizaciones_proximas_vencer_query(user, today=today, days=days).all()
+    evaluaciones_accion = evaluaciones_requieren_accion_query(user).all()
+    abiertos = seguimientos_abiertos_query(user).all()
+    return {
+        "autorizaciones_vencidas": vencidas,
+        "autorizaciones_proximas": proximas,
+        "evaluaciones_requieren_accion": evaluaciones_accion,
+        "seguimientos_abiertos": abiertos,
+        "metricas": {
+            "seguimientos_pendientes": sum(1 for item in abiertos if item.estado == "PENDIENTE"),
+            "seguimientos_en_proceso": sum(1 for item in abiertos if item.estado == "EN_PROCESO"),
+            "autorizaciones_vencidas": len(vencidas),
+            "autorizaciones_proximas": len(proximas),
+            "evaluaciones_requieren_accion": len(evaluaciones_accion),
+        },
+        "warning_days": days,
+    }
+
+
+def personal_followup_summary(user, personal, today=None, days=None):
+    _validate_personal_record(user, personal.id)
+    today = today or date.today()
+    days = authorization_expiry_warning_days() if days is None else int(days)
+    limit = today + timedelta(days=days)
+    autorizaciones = [
+        autorizacion
+        for autorizacion in personal.autorizaciones_tecnicas
+        if autorizacion.empresa_id == user.empresa_id
+    ]
+    abiertas = [
+        seguimiento
+        for seguimiento in personal.seguimientos
+        if seguimiento.empresa_id == user.empresa_id and seguimiento.estado in OPEN_SEGUIMIENTO_STATES
+    ]
+    vencidas = [
+        item
+        for item in autorizaciones
+        if estado_efectivo_autorizacion(item, today=today) == "VENCIDA"
+    ]
+    proximas = [
+        item
+        for item in autorizaciones
+        if item.estado == "VIGENTE" and item.fecha_fin and today <= item.fecha_fin <= limit
+    ]
+    vigentes = [
+        item
+        for item in autorizaciones
+        if estado_efectivo_autorizacion(item, today=today) == "VIGENTE"
+    ]
+    return {
+        "autorizaciones_vigentes": len(vigentes),
+        "autorizaciones_vencidas": len(vencidas),
+        "autorizaciones_proximas": len(proximas),
+        "seguimientos_abiertos": len(abiertas),
+    }
+
+
+def seguimiento_form_defaults(user, source=None, source_id=None, personal_id=None):
+    defaults = {
+        "fecha_deteccion": date.today().isoformat(),
+        "prioridad": "MEDIA",
+        "estado": "PENDIENTE",
+    }
+    if personal_id:
+        personal = _validate_personal_record(user, personal_id)
+        defaults["personal_id"] = str(personal.id)
+    if source == "evaluacion" and source_id:
+        evaluacion = get_evaluacion_competencia(user, source_id)
+        if not evaluacion:
+            raise PersonalError("La evaluacion asociada no pertenece a esta empresa.")
+        _validate_evaluacion_record(user, evaluacion)
+        tipo = "CAPACITACION_REQUERIDA" if evaluacion.resultado == "REQUIERE_ENTRENAMIENTO" else "REEVALUACION_COMPETENCIA"
+        defaults.update({
+            "personal_id": str(evaluacion.personal_id),
+            "evaluacion_competencia_id": str(evaluacion.id),
+            "tipo": tipo,
+            "titulo": f"Seguimiento por evaluacion {evaluacion.codigo or evaluacion.id}",
+            "descripcion": evaluacion.conclusion or evaluacion.observaciones or "",
+            "accion_requerida": "Definir accion de competencia y seguimiento correspondiente.",
+            "prioridad": "ALTA",
+        })
+    if source == "autorizacion" and source_id:
+        autorizacion = get_autorizacion_tecnica(user, source_id)
+        if not autorizacion:
+            raise PersonalError("La autorizacion asociada no pertenece a esta empresa.")
+        _validate_autorizacion_record(user, autorizacion)
+        defaults.update({
+            "personal_id": str(autorizacion.personal_id),
+            "autorizacion_tecnica_id": str(autorizacion.id),
+            "tipo": "REVISION_AUTORIZACION",
+            "titulo": f"Revisar autorizacion {autorizacion.codigo or autorizacion.id}",
+            "descripcion": autorizacion.actividad,
+            "accion_requerida": "Revisar vigencia, alcance y acciones requeridas sobre la autorizacion.",
+            "prioridad": "ALTA" if estado_efectivo_autorizacion(autorizacion) in {"VENCIDA", "SUSPENDIDA"} else "MEDIA",
+        })
+    return defaults

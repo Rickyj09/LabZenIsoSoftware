@@ -18,6 +18,9 @@
             {% if evaluacion.resultado in ['COMPETENTE', 'COMPETENTE_CON_OBSERVACIONES'] %}
             <a class="btn btn-outline-primary" href="{{ url_for('personal.nueva_autorizacion_tecnica', item_id=evaluacion.personal_id, evaluacion_competencia_id=evaluacion.id) }}">Crear autorizacion</a>
             {% endif %}
+            {% if evaluacion.resultado in ['REQUIERE_ENTRENAMIENTO', 'NO_COMPETENTE'] %}
+            <a class="btn btn-outline-primary" href="{{ url_for('personal.nuevo_seguimiento', source='evaluacion', source_id=evaluacion.id) }}">Crear seguimiento</a>
+            {% endif %}
             <a class="btn btn-primary" href="{{ url_for('personal.editar_evaluacion_competencia', evaluacion_id=evaluacion.id) }}">Editar</a>
             {% endif %}
         </div>

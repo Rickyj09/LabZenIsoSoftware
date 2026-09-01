@@ -1,0 +1,140 @@
+{% extends "base_admin.html" %}
+
+{% block title %}Seguimiento de personal{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3 class="mb-0">{{ 'Editar seguimiento' if seguimiento else 'Nuevo seguimiento' }}</h3>
+        <a class="btn btn-outline-secondary" href="{{ url_for('personal.seguimiento') }}">Volver</a>
+    </div>
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label">Persona</label>
+                {% set selected_persona = form_data.get('personal_id', seguimiento.personal_id if seguimiento else '')|string %}
+                <select class="form-select" name="personal_id" required>
+                    <option value="">Selecciona persona</option>
+                    {% for persona in personal_disponible %}
+                    <option value="{{ persona.id }}" {% if selected_persona == persona.id|string %}selected{% endif %}>{{ persona.codigo }} - {{ persona.nombre_completo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Tipo</label>
+                {% set selected_tipo = form_data.get('tipo', seguimiento.tipo if seguimiento else 'OBSERVACION') %}
+                <select class="form-select" name="tipo" required>
+                    {% for tipo in tipos_seguimiento %}
+                    <option value="{{ tipo }}" {% if selected_tipo == tipo %}selected{% endif %}>{{ tipo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Prioridad</label>
+                {% set selected_prioridad = form_data.get('prioridad', seguimiento.prioridad if seguimiento else 'MEDIA') %}
+                <select class="form-select" name="prioridad" required>
+                    {% for prioridad in prioridades_seguimiento %}
+                    <option value="{{ prioridad }}" {% if selected_prioridad == prioridad %}selected{% endif %}>{{ prioridad }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-8">
+                <label class="form-label">Asunto</label>
+                <input class="form-control" name="titulo" value="{{ form_data.get('titulo', seguimiento.titulo if seguimiento else '') or '' }}" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Estado</label>
+                {% set selected_estado = form_data.get('estado', seguimiento.estado if seguimiento else 'PENDIENTE') %}
+                <select class="form-select" name="estado" required>
+                    {% for estado in estados_seguimiento %}
+                    <option value="{{ estado }}" {% if selected_estado == estado %}selected{% endif %}>{{ estado }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Descripcion</label>
+                <textarea class="form-control" name="descripcion" rows="3">{{ form_data.get('descripcion', seguimiento.descripcion if seguimiento else '') or '' }}</textarea>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Fecha deteccion</label>
+                <input type="date" class="form-control" name="fecha_deteccion" value="{{ form_data.get('fecha_deteccion', seguimiento.fecha_deteccion if seguimiento else '') or '' }}" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Fecha objetivo</label>
+                <input type="date" class="form-control" name="fecha_objetivo" value="{{ form_data.get('fecha_objetivo', seguimiento.fecha_objetivo if seguimiento else '') or '' }}">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Responsable interno</label>
+                {% set selected_responsable = form_data.get('responsable_personal_id', seguimiento.responsable_personal_id if seguimiento else '')|string %}
+                <select class="form-select" name="responsable_personal_id">
+                    <option value="">Sin asignar</option>
+                    {% for persona in personal_disponible %}
+                    <option value="{{ persona.id }}" {% if selected_responsable == persona.id|string %}selected{% endif %}>{{ persona.nombre_completo }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Usuario responsable</label>
+                {% set selected_usuario = form_data.get('responsable_usuario_id', seguimiento.responsable_usuario_id if seguimiento else '')|string %}
+                <select class="form-select" name="responsable_usuario_id">
+                    <option value="">Sin asignar</option>
+                    {% for usuario in usuarios %}
+                    <option value="{{ usuario.id }}" {% if selected_usuario == usuario.id|string %}selected{% endif %}>{{ usuario.nombre }} {{ usuario.apellido }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Evaluacion relacionada</label>
+                {% set selected_evaluacion = form_data.get('evaluacion_competencia_id', seguimiento.evaluacion_competencia_id if seguimiento else '')|string %}
+                <select class="form-select" name="evaluacion_competencia_id">
+                    <option value="">Sin relacion</option>
+                    {% for evaluacion in evaluaciones %}
+                    <option value="{{ evaluacion.id }}" {% if selected_evaluacion == evaluacion.id|string %}selected{% endif %}>{{ evaluacion.codigo or evaluacion.id }} - {{ evaluacion.resultado }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Autorizacion relacionada</label>
+                {% set selected_autorizacion = form_data.get('autorizacion_tecnica_id', seguimiento.autorizacion_tecnica_id if seguimiento else '')|string %}
+                <select class="form-select" name="autorizacion_tecnica_id">
+                    <option value="">Sin relacion</option>
+                    {% for autorizacion in autorizaciones %}
+                    <option value="{{ autorizacion.id }}" {% if selected_autorizacion == autorizacion.id|string %}selected{% endif %}>{{ autorizacion.codigo or autorizacion.id }} - {{ autorizacion.actividad }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Capacitacion relacionada</label>
+                {% set selected_capacitacion = form_data.get('capacitacion_id', seguimiento.capacitacion_id if seguimiento else '')|string %}
+                <select class="form-select" name="capacitacion_id">
+                    <option value="">Sin relacion</option>
+                    {% for capacitacion in capacitaciones %}
+                    <option value="{{ capacitacion.id }}" {% if selected_capacitacion == capacitacion.id|string %}selected{% endif %}>{{ capacitacion.codigo or capacitacion.id }} - {{ capacitacion.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12">
+                <label class="form-label">Accion requerida</label>
+                <textarea class="form-control" name="accion_requerida" rows="3" required>{{ form_data.get('accion_requerida', seguimiento.accion_requerida if seguimiento else '') or '' }}</textarea>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Fecha cierre</label>
+                <input type="date" class="form-control" name="fecha_cierre" value="{{ form_data.get('fecha_cierre', seguimiento.fecha_cierre if seguimiento else '') or '' }}">
+            </div>
+            <div class="col-md-8">
+                <label class="form-label">Resultado cierre</label>
+                <input class="form-control" name="resultado_cierre" value="{{ form_data.get('resultado_cierre', seguimiento.resultado_cierre if seguimiento else '') or '' }}">
+            </div>
+            <div class="col-12">
+                <label class="form-label">Observaciones</label>
+                <textarea class="form-control" name="observaciones" rows="3">{{ form_data.get('observaciones', seguimiento.observaciones if seguimiento else '') or '' }}</textarea>
+            </div>
+        </div>
+        <div class="mt-3 d-flex gap-2">
+            <button class="btn btn-primary" type="submit">Guardar</button>
+            <a class="btn btn-outline-secondary" href="{{ url_for('personal.seguimiento') }}">Cancelar</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
